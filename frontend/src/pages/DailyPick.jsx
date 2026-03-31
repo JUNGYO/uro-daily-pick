@@ -336,7 +336,7 @@ export default function DailyPick() {
   }, [location.pathname]);
 
   if (loading) return (
-    <div className="flex items-center justify-center h-full">
+    <div className="flex items-center justify-center" style={{ height: "calc(100vh - 56px)" }}>
       <div className="text-center">
         <Loader2 size={32} className="text-accent animate-spin mx-auto mb-3" />
         <p className="text-[0.889rem] text-text3">Loading today's picks...</p>
@@ -368,7 +368,7 @@ export default function DailyPick() {
         </div>
       )}
 
-      <div className="flex h-full">
+      <div className="flex" style={{ height: "calc(100vh - 56px)" }}>
         {/* ── List panel ── */}
         <div className={`w-full md:w-[320px] lg:w-[340px] xl:w-[360px] shrink-0 md:border-r border-border flex flex-col bg-bg ${mobileOpen ? "hidden md:flex" : ""}`}>
           <div className="px-4 py-2.5 flex items-center justify-between border-b border-border">
