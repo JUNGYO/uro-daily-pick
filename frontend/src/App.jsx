@@ -68,33 +68,33 @@ function Layout({ children }) {
 
   return (
     <div className="min-h-screen bg-bg text-text1 flex flex-col">
-      <header className="h-14 flex items-center justify-between px-8 bg-card border-b border-border shrink-0 sticky top-0 z-50">
-        <div className="flex items-center gap-2.5">
-          <svg width="24" height="24" viewBox="0 0 80 80" fill="none">
+      <header className="h-14 flex items-center justify-between px-4 md:px-8 bg-card border-b border-border shrink-0 sticky top-0 z-50">
+        <div className="flex items-center gap-2">
+          <svg width="22" height="22" viewBox="0 0 80 80" fill="none" className="shrink-0">
             <polygon points="40,4 72,22 72,58 40,76 8,58 8,22" fill="none" stroke="#1D1D1F" strokeWidth="2"/>
-            <line x1="40" y1="40" x2="40" y2="4.5"   stroke="#007AFF" strokeWidth="1.5"/>
-            <line x1="40" y1="40" x2="8.5"  y2="58.5" stroke="#007AFF" strokeWidth="1.5"/>
+            <line x1="40" y1="40" x2="40" y2="4.5" stroke="#007AFF" strokeWidth="1.5"/>
+            <line x1="40" y1="40" x2="8.5" y2="58.5" stroke="#007AFF" strokeWidth="1.5"/>
             <line x1="40" y1="40" x2="71.5" y2="58.5" stroke="#007AFF" strokeWidth="1.5"/>
             <circle cx="40" cy="40" r="5" fill="#1D1D1F"/>
-            <circle cx="40" cy="4"  r="4" fill="none" stroke="#007AFF" strokeWidth="2"/>
-            <circle cx="8"  cy="58" r="4" fill="none" stroke="#007AFF" strokeWidth="2"/>
+            <circle cx="40" cy="4" r="4" fill="none" stroke="#007AFF" strokeWidth="2"/>
+            <circle cx="8" cy="58" r="4" fill="none" stroke="#007AFF" strokeWidth="2"/>
             <circle cx="72" cy="58" r="4" fill="none" stroke="#007AFF" strokeWidth="2"/>
           </svg>
-          <span className="text-[1.222rem] font-bold tracking-tight">Uro Daily Pick</span>
+          <span className="text-[1rem] md:text-[1.222rem] font-bold tracking-tight hidden sm:inline">Uro Daily Pick</span>
         </div>
-        <nav className="flex items-center gap-1">
+        <nav className="flex items-center gap-0.5 md:gap-1">
           {links.map(({ to, icon: Icon, label }) => (
             <NavLink key={to} to={to} end={to === "/"}
               className={({ isActive }) =>
-                `flex items-center gap-1.5 h-9 px-4 rounded-lg text-[0.889rem] font-medium transition-colors
+                `flex items-center gap-1.5 h-9 px-2.5 md:px-4 rounded-lg text-[0.778rem] md:text-[0.889rem] font-medium transition-colors
                  ${isActive ? "bg-[rgba(0,122,255,0.08)] text-accent" : "text-text3 hover:bg-hover"}`
               }>
-              <Icon size={18} />{label}
+              <Icon size={18} /><span className="hidden sm:inline">{label}</span>
             </NavLink>
           ))}
         </nav>
-        <div className="flex items-center gap-4">
-          <span className="text-[0.889rem] text-text3">{profile?.name || user?.email}</span>
+        <div className="flex items-center gap-2 md:gap-4">
+          <span className="text-[0.778rem] text-text3 hidden md:inline">{profile?.name || user?.email}</span>
           <button onClick={logout} className="w-9 h-9 rounded-lg flex items-center justify-center text-text3 hover:bg-hover transition-colors">
             <LogOut size={18} />
           </button>

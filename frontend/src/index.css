@@ -26,3 +26,11 @@ body {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* Like bounce animation */
+.scale-125 {
+  transform: scale(1.25) !important;
+}
+
+/* Smooth transitions */
+* { transition-timing-function: cubic-bezier(0.2, 0, 0, 1); }
