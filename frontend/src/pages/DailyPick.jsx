@@ -30,13 +30,13 @@ function ListItem({ rec, index, selected, onClick }) {
 
   return (
     <button onClick={onClick} className="w-full text-left transition-all duration-150"
-      style={{ padding: "14px 16px", borderRadius: 12, borderLeft: `3px solid ${borderColor}`, background: bgColor,
+      style={{ padding: "8px 12px", borderRadius: 8, borderLeft: `3px solid ${borderColor}`, background: bgColor,
         opacity: fb === "dislike" ? 0.4 : 1, boxShadow: selected ? "0 1px 3px rgba(0,0,0,0.04)" : "none" }}>
-      <div className="flex gap-3">
-        <span className="text-[0.778rem] font-bold text-text3 w-5 shrink-0 text-right pt-0.5">{index + 1}</span>
+      <div className="flex gap-2">
+        <span className="text-[0.722rem] font-bold text-text3 w-4 shrink-0 text-right pt-0.5">{index + 1}</span>
         <div className="flex-1 min-w-0">
-          <p className="text-[1rem] font-semibold text-text1 leading-snug line-clamp-2 mb-1">{rec.paper?.title}</p>
-          <div className="flex items-center gap-1 text-[0.778rem] text-text3">
+          <p className="text-[0.833rem] font-semibold text-text1 leading-snug line-clamp-2">{rec.paper?.title}</p>
+          <div className="flex items-center gap-1 text-[0.722rem] text-text3 mt-0.5">
             <span className="font-medium truncate">{rec.paper?.journal}</span>
             <span>·</span>
             <span className="shrink-0">{rec.paper?.pub_date}</span>
@@ -66,11 +66,11 @@ function Detail({ rec, onFeedback }) {
   if (!paper) return <div className="flex-1 flex items-center justify-center"><p className="text-text3">Select a paper</p></div>;
 
   return (
-    <div ref={detailRef} className="flex-1 overflow-y-auto p-6 xl:p-10">
+    <div ref={detailRef} className="flex-1 overflow-y-auto p-4 xl:p-6">
       <div className="bg-card rounded-xl border border-border overflow-hidden" style={{ boxShadow: "0 2px 8px rgba(0,0,0,0.04)" }}>
-        <div className="p-6 md:p-8 xl:p-10">
+        <div className="p-5 md:p-6 xl:p-8">
           {/* Meta */}
-          <div className="flex items-center gap-2.5 flex-wrap mb-5">
+          <div className="flex items-center gap-2.5 flex-wrap mb-3">
             <span className="text-[0.889rem] font-semibold text-accent">{paper.journal}</span>
             <span className="w-1 h-1 rounded-full bg-border" />
             <span className="text-[0.889rem] text-text3">{paper.pub_date}</span>
@@ -89,27 +89,27 @@ function Detail({ rec, onFeedback }) {
           </div>
 
           {/* Title */}
-          <h1 className="text-[1.333rem] font-bold leading-[1.4] text-text1 mb-3 cursor-pointer hover:text-accent transition-colors"
+          <h1 className="text-[1.222rem] font-bold leading-[1.35] text-text1 mb-2 cursor-pointer hover:text-accent transition-colors"
             onClick={() => window.open(`https://pubmed.ncbi.nlm.nih.gov/${paper.pmid}/`, "_blank")}>
             {hl(paper.title, matched)}
           </h1>
 
           {/* Authors */}
-          <p className="text-[1rem] text-text2 mb-5 leading-relaxed">
+          <p className="text-[0.889rem] text-text2 mb-3 leading-relaxed">
             {(paper.authors || []).slice(0, 5).join(", ")}
             {paper.authors?.length > 5 && <span className="text-text3"> et al.</span>}
           </p>
 
           {/* Why chips */}
           {reasons.length > 0 && (
-            <div className="mb-6">
-              <p className="text-[0.778rem] font-semibold text-text3 uppercase tracking-wider mb-2.5">Why this paper</p>
+            <div className="mb-3">
+              <p className="text-[0.722rem] font-semibold text-text3 uppercase tracking-wider mb-1.5">Why this paper</p>
               <div className="flex flex-wrap gap-2">
                 {reasons.map((r, i) => {
                   const s = CHIP_MAP[r.type] || CHIP_MAP.keyword;
                   const Icon = s.icon;
                   return (
-                    <span key={i} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg text-[0.778rem] font-medium"
+                    <span key={i} className="inline-flex items-center gap-1 h-6 px-2 rounded text-[0.667rem] font-medium"
                       style={{ color: s.color, background: s.bg, border: `1px solid ${s.bdr}` }}>
                       <Icon size={14} />{r.label}
                     </span>
@@ -121,12 +121,12 @@ function Detail({ rec, onFeedback }) {
 
           {/* Abstract */}
           {paper.abstract && (
-            <p className="text-[1rem] leading-[1.7] text-text2 mb-6">{hl(paper.abstract, matched)}</p>
+            <p className="text-[0.889rem] leading-[1.65] text-text2 mb-4">{hl(paper.abstract, matched)}</p>
           )}
         </div>
 
         {/* Actions */}
-        <div className="border-t border-border px-6 md:px-8 xl:px-10 py-5 flex items-center justify-between">
+        <div className="border-t border-border px-5 md:px-6 xl:px-8 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
             {[
               { action: "dislike", icon: X, activeColor: "#FF3B30", activeBg: "rgba(255,59,48,0.06)", activeBdr: "rgba(255,59,48,0.15)" },
@@ -136,7 +136,7 @@ function Detail({ rec, onFeedback }) {
               const active = fb === action;
               return (
                 <button key={action} onClick={() => onFeedback(action)}
-                  className="w-12 h-12 rounded-lg flex items-center justify-center transition-all duration-150"
+                  className="w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-150"
                   style={{ background: active ? activeBg : "#FFF", color: active ? activeColor : "#86868B",
                     border: `1px solid ${active ? activeBdr : "#E5E5EA"}`, transform: active ? "scale(1.06)" : "scale(1)" }}>
                   <Icon size={22} fill={active && action !== "dislike" ? activeColor : "none"} />
@@ -287,28 +287,28 @@ export default function DailyPick() {
   return (
     <div className="flex h-full">
       {/* List */}
-      <div className="w-full md:w-[340px] lg:w-[380px] xl:w-[420px] shrink-0 border-r border-border flex flex-col bg-bg">
-        <div className="px-5 py-3.5 flex items-center justify-between">
-          <span className="text-[0.889rem] text-text3">{new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</span>
-          <span className="text-[0.889rem] text-text3 font-mono">{fbCount}/{recs.length}</span>
+      <div className="w-full md:w-[300px] lg:w-[340px] xl:w-[360px] shrink-0 border-r border-border flex flex-col bg-bg">
+        <div className="px-4 py-2 flex items-center justify-between">
+          <span className="text-[0.778rem] text-text3">{new Date().toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>
+          <span className="text-[0.778rem] text-text3 font-mono">{fbCount}/{recs.length}</span>
         </div>
-        <div className="px-5 mb-2">
-          <div className="flex gap-1">
+        <div className="px-4 mb-1">
+          <div className="flex gap-0.5">
             {recs.map((r, i) => (
               <div key={i} className="flex-1 h-[2px] rounded-full transition-colors duration-300"
                 style={{ background: i === cur ? "#007AFF" : r.feedback_action === "like" ? "#34C759" : r.feedback_action === "save" ? "#FF9500" : "#E5E5EA" }} />
             ))}
           </div>
         </div>
-        <div className="flex-1 overflow-y-auto px-2 pb-2">
+        <div className="flex-1 overflow-y-auto px-1.5 pb-1">
           {recs.map((r, i) => (
             <ListItem key={r.id} rec={r} index={i} selected={i === cur} onClick={() => selectPaper(i)} />
           ))}
         </div>
-        <div className="px-5 py-3 border-t border-border flex items-center gap-2 flex-wrap">
-          {[["↑↓", ""], ["J/K", ""], ["L", "like"], ["D", "skip"], ["S", "save"]].map(([key, label]) => (
-            <span key={key} className="inline-flex items-center gap-1 text-[0.778rem] text-text3">
-              <kbd className="px-1.5 py-0.5 bg-hover border border-border rounded text-[0.778rem] text-text2 font-medium">{key}</kbd>
+        <div className="px-3 py-2 border-t border-border flex items-center gap-1.5 flex-wrap">
+          {[["↑↓", ""], ["L", "like"], ["D", "skip"], ["S", "save"]].map(([key, label]) => (
+            <span key={key} className="inline-flex items-center gap-0.5 text-[0.667rem] text-text3">
+              <kbd className="px-1 py-0.5 bg-hover border border-border rounded text-[0.667rem] text-text2 font-medium">{key}</kbd>
               {label}
             </span>
           ))}
