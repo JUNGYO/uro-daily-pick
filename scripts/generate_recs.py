@@ -86,7 +86,8 @@ def text_match_score(paper, user_keywords):
     """BM25-like content matching: keyword overlap in title + abstract."""
     if not user_keywords:
         return 0.0, []
-    text = f"{paper.get('title','')} {paper.get('abstract','')}".lower()
+    title_lower = paper.get("title", "").lower()
+    abstract_lower = paper.get("abstract", "").lower()
     paper_kws = set(k.lower() for k in (paper.get("keywords") or []))
     paper_mesh = set(m.lower() for m in (paper.get("mesh_terms") or []))
     all_paper_terms = paper_kws | paper_mesh
@@ -98,8 +99,16 @@ def text_match_score(paper, user_keywords):
         if kw_lower in all_paper_terms:
             score += 3.0  # exact keyword/mesh match
             matched.append(kw)
-        elif kw_lower in text:
-            score += 1.5  # found in title/abstract
+        elif kw_lower in title_lower:
+            score += 2.5  # in title — strong signal
+            matched.append(kw)
+        elif kw_lower in abstract_lower:
+            # Count occurrences — single mention is weak
+            count = abstract_lower.count(kw_lower)
+            if count >= 3:
+                score += 1.5  # mentioned multiple times — relevant
+            else:
+                score += 0.3  # mentioned once or twice — weak, probably tangential
             matched.append(kw)
 
     # Normalize to 0-1 range (cap at 10)
