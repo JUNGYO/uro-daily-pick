@@ -144,9 +144,17 @@ export default function Settings() {
             onRemove={val => removeTag("keywords", val)}
             placeholder="e.g. prostate cancer, robotic surgery"
           />
-          {/* Auto-learned signals — read only */}
+          {/* MeSH — auto-learned, read only */}
           <LearnedSection label="MeSH Terms" items={form.mesh_terms} emptyMsg="Learned from your likes and reading history" />
-          <LearnedSection label="Preferred Journals" items={form.preferred_journals} emptyMsg="Learned from your likes and reading history" />
+
+          {/* Journals — user editable */}
+          <TagField
+            label="Preferred Journals"
+            tags={form.preferred_journals}
+            onAdd={val => addTag("preferred_journals", val)}
+            onRemove={val => removeTag("preferred_journals", val)}
+            placeholder="e.g. European Urology, Journal of Urology"
+          />
 
           <div className="flex items-center gap-4 pt-4 border-t border-border">
             <label className="flex items-center gap-2 cursor-pointer text-[0.889rem] text-text1">
