@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../App";
-import { Heart, X, Bookmark, ExternalLink, Sparkles, RefreshCw, Loader2, Tag, User2, BookOpen, FlaskConical, Clock, Star, TrendingUp, Zap } from "lucide-react";
+import { Heart, X, ExternalLink, Sparkles, RefreshCw, Loader2, Tag, User2, BookOpen, FlaskConical, Clock, Star, TrendingUp, Zap } from "lucide-react";
 
 const CHIP_MAP = {
   keyword:         { icon: Tag,          color: "#007AFF", bg: "rgba(0,122,255,0.06)",  bdr: "rgba(0,122,255,0.12)" },
@@ -25,8 +25,8 @@ function hl(text, terms) {
 
 function ListItem({ rec, index, selected, onClick }) {
   const fb = rec.feedback_action;
-  const borderColor = selected ? "#007AFF" : fb === "like" ? "#34C759" : fb === "save" ? "#FF9500" : "transparent";
-  const bgColor = selected ? "#FFFFFF" : fb === "like" ? "rgba(52,199,89,0.04)" : fb === "save" ? "rgba(255,149,0,0.04)" : "transparent";
+  const borderColor = selected ? "#007AFF" : fb === "like" ? "#34C759" : "transparent";
+  const bgColor = selected ? "#FFFFFF" : fb === "like" ? "rgba(52,199,89,0.04)" : "transparent";
 
   return (
     <button onClick={onClick} className="w-full text-left transition-all duration-150"
@@ -41,7 +41,6 @@ function ListItem({ rec, index, selected, onClick }) {
             <span>·</span>
             <span className="shrink-0">{rec.paper?.pub_date}</span>
             {fb === "like" && <Heart size={12} className="text-success ml-1 fill-success" />}
-            {fb === "save" && <Bookmark size={12} className="text-warning ml-1 fill-warning" />}
           </div>
         </div>
         <div className="shrink-0 flex flex-col items-center justify-center ml-2">
@@ -125,24 +124,21 @@ function Detail({ rec, onFeedback }) {
           )}
         </div>
 
-        {/* Actions */}
+        {/* Actions — Skip or Like (like = save to collection) */}
         <div className="border-t border-border px-5 md:px-6 xl:px-8 py-3 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            {[
-              { action: "dislike", icon: X, activeColor: "#FF3B30", activeBg: "rgba(255,59,48,0.06)", activeBdr: "rgba(255,59,48,0.15)" },
-              { action: "save", icon: Bookmark, activeColor: "#FF9500", activeBg: "rgba(255,149,0,0.06)", activeBdr: "rgba(255,149,0,0.15)" },
-              { action: "like", icon: Heart, activeColor: "#34C759", activeBg: "rgba(52,199,89,0.06)", activeBdr: "rgba(52,199,89,0.15)" },
-            ].map(({ action, icon: Icon, activeColor, activeBg, activeBdr }) => {
-              const active = fb === action;
-              return (
-                <button key={action} onClick={() => onFeedback(action)}
-                  className="w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-150"
-                  style={{ background: active ? activeBg : "#FFF", color: active ? activeColor : "#86868B",
-                    border: `1px solid ${active ? activeBdr : "#E5E5EA"}`, transform: active ? "scale(1.06)" : "scale(1)" }}>
-                  <Icon size={22} fill={active && action !== "dislike" ? activeColor : "none"} />
-                </button>
-              );
-            })}
+            <button onClick={() => onFeedback("dislike")}
+              className="w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-150"
+              style={{ background: fb === "dislike" ? "rgba(255,59,48,0.06)" : "#FFF", color: fb === "dislike" ? "#FF3B30" : "#86868B",
+                border: `1px solid ${fb === "dislike" ? "rgba(255,59,48,0.15)" : "#E5E5EA"}`, transform: fb === "dislike" ? "scale(1.06)" : "scale(1)" }}>
+              <X size={22} />
+            </button>
+            <button onClick={() => onFeedback("like")}
+              className="w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-150"
+              style={{ background: fb === "like" ? "rgba(52,199,89,0.06)" : "#FFF", color: fb === "like" ? "#34C759" : "#86868B",
+                border: `1px solid ${fb === "like" ? "rgba(52,199,89,0.15)" : "#E5E5EA"}`, transform: fb === "like" ? "scale(1.06)" : "scale(1)" }}>
+              <Heart size={22} fill={fb === "like" ? "#34C759" : "none"} />
+            </button>
           </div>
           <a href={`https://pubmed.ncbi.nlm.nih.gov/${paper.pmid}/`} target="_blank" rel="noopener"
             className="h-10 px-5 rounded-lg border border-border text-text2 text-[0.889rem] font-medium flex items-center gap-2 hover:bg-hover transition-colors no-underline">
@@ -224,6 +220,23 @@ export default function DailyPick() {
     if (!rec || !user) return;
     await supabase.rpc("upsert_feedback", { p_user_id: user.id, p_paper_id: rec.paper_id, p_action: action });
     setRecs(p => p.map((r, i) => i === cur ? { ...r, feedback_action: action } : r));
+
+    // Like → auto-add to "Liked Papers" collection
+    if (action === "like") {
+      // Get or create the default collection
+      let { data: cols } = await supabase.from("collections").select("id").eq("user_id", user.id).eq("name", "Liked Papers").limit(1);
+      let colId;
+      if (cols?.length) {
+        colId = cols[0].id;
+      } else {
+        const { data: newCol } = await supabase.from("collections").insert({ user_id: user.id, name: "Liked Papers", color: "#34C759" }).select("id").single();
+        colId = newCol?.id;
+      }
+      if (colId) {
+        await supabase.from("collection_papers").upsert({ collection_id: colId, paper_id: rec.paper_id }, { onConflict: "collection_id,paper_id" });
+      }
+    }
+
     if ((action === "like" || action === "dislike") && cur < recs.length - 1) {
       setTimeout(() => selectPaper(cur + 1), 200);
     }
@@ -256,7 +269,6 @@ export default function DailyPick() {
         case "arrowup":   case "k": if (c > 0) { e.preventDefault(); selectPaper(c - 1); } break;
         case "l": doFeedback("like"); break;
         case "d": doFeedback("dislike"); break;
-        case "s": doFeedback("save"); break;
       }
     };
     window.addEventListener("keydown", h);
@@ -296,7 +308,7 @@ export default function DailyPick() {
           <div className="flex gap-0.5">
             {recs.map((r, i) => (
               <div key={i} className="flex-1 h-[2px] rounded-full transition-colors duration-300"
-                style={{ background: i === cur ? "#007AFF" : r.feedback_action === "like" ? "#34C759" : r.feedback_action === "save" ? "#FF9500" : "#E5E5EA" }} />
+                style={{ background: i === cur ? "#007AFF" : r.feedback_action === "like" ? "#34C759" : "#E5E5EA" }} />
             ))}
           </div>
         </div>
@@ -306,7 +318,7 @@ export default function DailyPick() {
           ))}
         </div>
         <div className="px-3 py-2 border-t border-border flex items-center gap-1.5 flex-wrap">
-          {[["↑↓", ""], ["L", "like"], ["D", "skip"], ["S", "save"]].map(([key, label]) => (
+          {[["↑↓", ""], ["L", "like"], ["D", "skip"]].map(([key, label]) => (
             <span key={key} className="inline-flex items-center gap-0.5 text-[0.667rem] text-text3">
               <kbd className="px-1 py-0.5 bg-hover border border-border rounded text-[0.667rem] text-text2 font-medium">{key}</kbd>
               {label}
