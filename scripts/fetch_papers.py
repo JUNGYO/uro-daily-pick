@@ -74,6 +74,58 @@ def fetch_details(pmids):
     return [parse_article(a) for a in root.findall(".//PubmedArticle")]
 
 
+def classify_study_type(title, abstract, pub_types):
+    """
+    Classify paper into study types:
+    - rct: Randomized Controlled Trial
+    - prospective: Prospective cohort/observational
+    - retrospective: Retrospective study
+    - meta_analysis: Meta-analysis / Systematic review
+    - basic_research: In vitro, animal, molecular
+    - case_report: Case report / Case series
+    - guideline: Clinical guideline
+    - review: Narrative review
+    - ai_ml: AI/Machine learning study
+    - other: Unclassified
+    """
+    text = f"{title} {abstract}"
+
+    # Check PubMed publication types first (most reliable)
+    pt_str = " ".join(pub_types)
+    if "randomized controlled trial" in pt_str:
+        return "rct"
+    if "meta-analysis" in pt_str:
+        return "meta_analysis"
+    if "case reports" in pt_str:
+        return "case_report"
+    if "practice guideline" in pt_str or "guideline" in pt_str:
+        return "guideline"
+    if "review" in pt_str and "systematic" not in pt_str:
+        pass  # Don't return yet, check text below
+
+    # Text-based classification
+    if any(s in text for s in ["systematic review", "meta-analysis", "meta analysis", "prisma"]):
+        return "meta_analysis"
+    if any(s in text for s in ["randomized", "randomised", "rct", "phase ii", "phase iii", "phase 2", "phase 3", "double-blind", "placebo-controlled"]):
+        return "rct"
+    if any(s in text for s in ["guideline", "consensus statement", "recommendation statement"]):
+        return "guideline"
+    if any(s in text for s in ["machine learning", "deep learning", "artificial intelligence", "neural network", "convolutional", "transformer model", "large language model", "chatgpt"]):
+        return "ai_ml"
+    if any(s in text for s in ["prospective cohort", "prospective study", "prospective observational", "prospectively enrolled", "prospectively collected"]):
+        return "prospective"
+    if any(s in text for s in ["retrospective", "medical records review", "chart review", "database analysis", "registry data", "claims data"]):
+        return "retrospective"
+    if any(s in text for s in ["in vitro", "in vivo", "cell line", "mouse model", "xenograft", "knockout", "western blot", "pcr", "immunohistochemistry", "gene expression", "signaling pathway", "molecular mechanism"]):
+        return "basic_research"
+    if any(s in text for s in ["case report", "case series", "a rare case"]):
+        return "case_report"
+    if "review" in pt_str or any(s in title for s in ["a review", "narrative review", "current review", "update on"]):
+        return "review"
+
+    return "other"
+
+
 def parse_article(article):
     pmid = (article.findtext(".//PMID") or "").strip()
     title_el = article.find(".//ArticleTitle")
@@ -111,6 +163,11 @@ def parse_article(article):
             doi = aid.text or ""
             break
 
+    # PubMed publication types
+    pub_types = [pt.text for pt in article.findall(".//PublicationType") if pt.text]
+    pub_types_lower = [p.lower() for p in pub_types]
+
+    # Legacy paper_type
     paper_type = "article"
     title_lower = title.lower()
     if any(s in title_lower for s in ["review", "guideline", "meta-analysis", "systematic review"]):
@@ -118,11 +175,14 @@ def parse_article(article):
     elif any(s in title_lower for s in ["reply to", "letter to the editor", "re:", "comment on", "erratum", "corrigendum", "retraction"]):
         paper_type = "letter"
 
+    # Study type classification
+    study_type = classify_study_type(title_lower, abstract.lower(), pub_types_lower)
+
     return {
         "pmid": pmid, "title": title, "abstract": abstract,
         "authors": authors, "journal": journal, "pub_date": pub_date,
         "mesh_terms": mesh_terms, "keywords": keywords, "doi": doi,
-        "paper_type": paper_type,
+        "paper_type": paper_type, "pub_types": pub_types, "study_type": study_type,
     }
 
 
