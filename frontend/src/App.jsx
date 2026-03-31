@@ -5,6 +5,7 @@ import DailyPick from "./pages/DailyPick";
 import Collections from "./pages/Collections";
 import Settings from "./pages/Settings";
 import Login from "./pages/Login";
+import Onboarding from "./pages/Onboarding";
 import { Newspaper, FolderOpen, Settings as SettingsIcon, LogOut } from "lucide-react";
 
 const AuthContext = createContext(null);
@@ -43,8 +44,9 @@ function AuthProvider({ children }) {
 }
 
 function ProtectedRoute({ children }) {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   if (!user) return <Navigate to="/login" />;
+  if (profile && !profile.onboarding_done) return <Navigate to="/onboarding" />;
   return children;
 }
 
@@ -108,6 +110,7 @@ export default function App() {
       <AuthProvider>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/onboarding" element={<Onboarding />} />
           <Route path="/*" element={
             <ProtectedRoute><Layout>
               <Routes>

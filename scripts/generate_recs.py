@@ -57,7 +57,7 @@ def get_all_profiles():
 def get_recent_papers(days=30):
     cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
     return sb("GET", "papers", {
-        "select": "id,pmid,title,abstract,authors,journal,pub_date,mesh_terms,keywords,paper_type",
+        "select": "id,pmid,title,abstract,authors,journal,pub_date,mesh_terms,keywords,paper_type,study_type",
         "fetched_at": f"gte.{cutoff}",
         "order": "pub_date.desc",
         "limit": "500",
@@ -251,12 +251,20 @@ def score_paper(paper, profile, liked_papers, disliked_kws, dwell_papers, all_li
             reasons.append({"type": "journal", "label": paper["journal"]})
             break
 
+    # Preferred study type boost
+    pref_types = profile.get("preferred_study_types") or []
+    paper_study_type = paper.get("study_type", "other")
+    study_type_boost = 1.0
+    if pref_types and paper_study_type in pref_types:
+        study_type_boost = 1.25
+        reasons.append({"type": "keyword", "label": paper_study_type.replace("_", " ").title()})
+
     final = (
         W_CONTENT * content +
         W_BEHAVIORAL * behav +
         W_COLLABORATIVE * collab +
         W_TEMPORAL * temporal
-    ) * boost
+    ) * boost * study_type_boost
 
     return round(final * 15, 2), {
         "reasons": reasons[:5],
