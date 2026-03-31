@@ -1,0 +1,49 @@
+name: Manual Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      task:
+        description: 'What to run'
+        required: true
+        type: choice
+        options:
+          - fetch-only
+          - recommend-only
+          - fetch-and-recommend
+          - email-only
+          - all
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - run: pip install requests
+
+      - name: Fetch papers
+        if: contains(fromJSON('["fetch-only","fetch-and-recommend","all"]'), github.event.inputs.task)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python scripts/fetch_papers.py
+
+      - name: Generate recommendations
+        if: contains(fromJSON('["recommend-only","fetch-and-recommend","all"]'), github.event.inputs.task)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python scripts/generate_recs.py
+
+      - name: Send emails
+        if: contains(fromJSON('["email-only","all"]'), github.event.inputs.task)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+        run: python scripts/send_digest.py
