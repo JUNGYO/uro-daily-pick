@@ -115,6 +115,8 @@ def parse_article(article):
     title_lower = title.lower()
     if any(s in title_lower for s in ["review", "guideline", "meta-analysis", "systematic review"]):
         paper_type = "review"
+    elif any(s in title_lower for s in ["reply to", "letter to the editor", "re:", "comment on", "erratum", "corrigendum", "retraction"]):
+        paper_type = "letter"
 
     return {
         "pmid": pmid, "title": title, "abstract": abstract,

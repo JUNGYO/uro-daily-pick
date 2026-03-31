@@ -301,10 +301,17 @@ def main():
         dwell_ids = set(r["paper_id"] for r in reads if r.get("dwell_seconds", 0) >= 30)
         dwell_papers = [p for p in papers if p["id"] in dwell_ids]
 
-        # Score unseen papers
+        # Score unseen papers (skip letters/comments/erratum)
+        skip_types = {"letter", "comment", "erratum"}
         scored = []
         for paper in papers:
             if paper["id"] in seen_ids:
+                continue
+            if paper.get("paper_type", "").lower() in skip_types:
+                continue
+            # Also skip by title pattern (for papers already in DB without correct type)
+            t = paper.get("title", "").lower()
+            if any(s in t for s in ["reply to", "letter to the editor", "re:", "comment on", "erratum", "corrigendum", "retraction"]):
                 continue
             score, reasons = score_paper(paper, profile, liked_papers, disliked_kws, dwell_papers, all_likes)
             if score > 0:
