@@ -45,7 +45,16 @@ export default function Login() {
     <div className="min-h-screen bg-bg flex items-center justify-center p-8">
       <div className="w-full max-w-[400px]">
         <div className="text-center mb-12">
-          <Sparkles size={32} className="text-accent mx-auto mb-3" />
+          <svg width="48" height="48" viewBox="0 0 80 80" fill="none" className="mx-auto mb-4">
+            <polygon points="40,4 72,22 72,58 40,76 8,58 8,22" fill="none" stroke="#1D1D1F" strokeWidth="1.5"/>
+            <line x1="40" y1="40" x2="40" y2="4.5"   stroke="#007AFF" strokeWidth="1.2"/>
+            <line x1="40" y1="40" x2="8.5"  y2="58.5" stroke="#007AFF" strokeWidth="1.2"/>
+            <line x1="40" y1="40" x2="71.5" y2="58.5" stroke="#007AFF" strokeWidth="1.2"/>
+            <circle cx="40" cy="40" r="5" fill="#1D1D1F"/>
+            <circle cx="40" cy="4"  r="4" fill="none" stroke="#007AFF" strokeWidth="1.8"/>
+            <circle cx="8"  cy="58" r="4" fill="none" stroke="#007AFF" strokeWidth="1.8"/>
+            <circle cx="72" cy="58" r="4" fill="none" stroke="#007AFF" strokeWidth="1.8"/>
+          </svg>
           <h1 className="text-[1.556rem] font-bold text-text1 tracking-tight">Uro Daily Pick</h1>
           <p className="text-[0.889rem] text-text3 mt-1">Personalized urology paper recommendations</p>
         </div>

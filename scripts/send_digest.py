@@ -98,6 +98,16 @@ def build_html(name, recs):
     <body style="margin:0;padding:0;background:#F5F5F7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
       <div style="max-width:600px;margin:0 auto;padding:40px 20px;">
         <div style="text-align:center;margin-bottom:32px;">
+          <svg width="36" height="36" viewBox="0 0 80 80" fill="none" style="margin:0 auto 8px;">
+            <polygon points="40,4 72,22 72,58 40,76 8,58 8,22" fill="none" stroke="#1D1D1F" stroke-width="1.5"/>
+            <line x1="40" y1="40" x2="40" y2="4.5" stroke="#007AFF" stroke-width="1.2"/>
+            <line x1="40" y1="40" x2="8.5" y2="58.5" stroke="#007AFF" stroke-width="1.2"/>
+            <line x1="40" y1="40" x2="71.5" y2="58.5" stroke="#007AFF" stroke-width="1.2"/>
+            <circle cx="40" cy="40" r="5" fill="#1D1D1F"/>
+            <circle cx="40" cy="4" r="4" fill="none" stroke="#007AFF" stroke-width="1.8"/>
+            <circle cx="8" cy="58" r="4" fill="none" stroke="#007AFF" stroke-width="1.8"/>
+            <circle cx="72" cy="58" r="4" fill="none" stroke="#007AFF" stroke-width="1.8"/>
+          </svg>
           <div style="font-size:24px;font-weight:700;color:#1D1D1F;">Uro Daily Pick</div>
           <div style="font-size:14px;color:#86868B;margin-top:4px;">{today_str}</div>
         </div>
