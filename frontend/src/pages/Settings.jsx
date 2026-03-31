@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
+import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../App";
-import { Save, Plus, X, Bell, Check } from "lucide-react";
+import { Save, Plus, X, Bell, Check, Shield, Trash2, Mail } from "lucide-react";
 
 const inputCls = "h-11 bg-card border border-border rounded-lg px-3 text-[1rem] text-text1 outline-none focus:border-accent transition-colors";
 const sectionCls = "bg-card rounded-xl border border-border p-6 mb-6";
@@ -204,6 +205,122 @@ export default function Settings() {
             {!alerts.length && <p className="text-[0.889rem] text-text3 text-center py-4">No alerts set</p>}
           </div>
         </div>
+
+        {/* Account */}
+        <AccountSection user={user} />
+      </div>
+    </div>
+  );
+}
+
+function AccountSection({ user }) {
+  const [newEmail, setNewEmail] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [msg, setMsg] = useState("");
+  const [err, setErr] = useState("");
+  const [showDelete, setShowDelete] = useState(false);
+  const navigate = useNavigate();
+
+  const inputCls = "h-11 bg-card border border-border rounded-lg px-3 text-[1rem] text-text1 outline-none focus:border-accent transition-colors";
+
+  const changeEmail = async () => {
+    if (!newEmail.trim()) return;
+    setErr(""); setMsg("");
+    const { error } = await supabase.auth.updateUser({ email: newEmail.trim() });
+    if (error) { setErr(error.message); return; }
+    setMsg("Confirmation email sent to your new address. Check both inboxes.");
+    setNewEmail("");
+  };
+
+  const changePassword = async () => {
+    setErr(""); setMsg("");
+    if (newPassword.length < 6) { setErr("Password must be at least 6 characters."); return; }
+    if (newPassword !== confirmPassword) { setErr("Passwords don't match."); return; }
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) { setErr(error.message); return; }
+    setMsg("Password updated.");
+    setNewPassword(""); setConfirmPassword("");
+  };
+
+  const deleteAccount = async () => {
+    // Note: Supabase doesn't allow users to delete themselves via client SDK.
+    // We mark the profile and the admin can clean up, or use an Edge Function.
+    await supabase.from("profiles").update({ name: "[DELETED]", keywords: [], preferred_journals: [], email_digest: false }).eq("id", user.id);
+    await supabase.auth.signOut();
+    navigate("/login");
+  };
+
+  return (
+    <div className="bg-card rounded-xl border border-border p-6 mb-6">
+      <h2 className="text-[1rem] font-semibold text-text1 mb-4 flex items-center gap-2">
+        <Shield size={18} className="text-accent" />Account
+      </h2>
+
+      <p className="text-[0.889rem] text-text3 mb-4">
+        Signed in as <span className="text-text1 font-medium">{user?.email}</span>
+      </p>
+
+      {msg && <p className="text-[0.889rem] text-success mb-3">{msg}</p>}
+      {err && <p className="text-[0.889rem] text-danger mb-3">{err}</p>}
+
+      {/* Change email */}
+      <div className="mb-5">
+        <label className="text-[0.889rem] font-semibold text-text1 block mb-2 flex items-center gap-1.5">
+          <Mail size={14} />Change email
+        </label>
+        <div className="flex gap-2">
+          <input value={newEmail} onChange={e => setNewEmail(e.target.value)}
+            placeholder="New email address" type="email"
+            className={`flex-1 ${inputCls}`} />
+          <button onClick={changeEmail}
+            className="h-11 px-4 bg-accent text-white rounded-lg text-[0.889rem] font-medium hover:bg-[#0066D6] transition-colors">
+            Update
+          </button>
+        </div>
+      </div>
+
+      {/* Change password */}
+      <div className="mb-5">
+        <label className="text-[0.889rem] font-semibold text-text1 block mb-2 flex items-center gap-1.5">
+          <Shield size={14} />Change password
+        </label>
+        <div className="flex flex-col gap-2">
+          <input value={newPassword} onChange={e => setNewPassword(e.target.value)}
+            placeholder="New password (min 6 chars)" type="password"
+            className={`w-full ${inputCls}`} />
+          <input value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
+            placeholder="Confirm new password" type="password"
+            className={`w-full ${inputCls}`} />
+          <button onClick={changePassword}
+            className="self-start h-11 px-4 bg-accent text-white rounded-lg text-[0.889rem] font-medium hover:bg-[#0066D6] transition-colors">
+            Update password
+          </button>
+        </div>
+      </div>
+
+      {/* Delete account */}
+      <div className="pt-4 border-t border-border">
+        {!showDelete ? (
+          <button onClick={() => setShowDelete(true)}
+            className="flex items-center gap-1.5 text-[0.889rem] text-danger hover:underline">
+            <Trash2 size={14} />Delete account
+          </button>
+        ) : (
+          <div className="bg-[rgba(255,59,48,0.04)] border border-[rgba(255,59,48,0.15)] rounded-lg p-4">
+            <p className="text-[0.889rem] text-text1 mb-3">Are you sure? This cannot be undone.</p>
+            <div className="flex gap-2">
+              <button onClick={deleteAccount}
+                className="h-10 px-5 bg-danger text-white rounded-lg text-[0.889rem] font-medium">
+                Yes, delete my account
+              </button>
+              <button onClick={() => setShowDelete(false)}
+                className="h-10 px-5 text-text3 text-[0.889rem]">
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

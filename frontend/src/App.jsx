@@ -6,6 +6,7 @@ import Collections from "./pages/Collections";
 import Settings from "./pages/Settings";
 import Login from "./pages/Login";
 import Onboarding from "./pages/Onboarding";
+import ResetPassword from "./pages/ResetPassword";
 import { Newspaper, FolderOpen, Settings as SettingsIcon, LogOut } from "lucide-react";
 
 const AuthContext = createContext(null);
@@ -111,6 +112,7 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<Login />} />
           <Route path="/onboarding" element={<Onboarding />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/*" element={
             <ProtectedRoute><Layout>
               <Routes>
