@@ -233,11 +233,14 @@ def score_paper(paper, profile, liked_papers, disliked_kws, dwell_papers, all_li
     if paper.get("paper_type") == "review":
         reasons.append({"type": "review", "label": "Review / Meta-analysis"})
 
-    # Preferred journal
-    pref_journals = [j.lower() for j in (profile.get("preferred_journals") or [])]
-    if paper.get("journal","").lower() in pref_journals:
-        content += 0.2
-        reasons.append({"type": "journal", "label": paper["journal"]})
+    # Preferred journal — fuzzy match (case-insensitive, partial)
+    paper_journal = paper.get("journal", "").lower()
+    for pj in (profile.get("preferred_journals") or []):
+        pj_lower = pj.lower()
+        if pj_lower in paper_journal or paper_journal in pj_lower:
+            content += 0.3
+            reasons.append({"type": "journal", "label": paper["journal"]})
+            break
 
     final = (
         W_CONTENT * content +
