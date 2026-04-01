@@ -217,6 +217,8 @@ def parse_article(article):
         paper_type = "review"
     elif any(s in title_lower for s in ["reply to", "letter to the editor", "re:", "comment on", "erratum", "corrigendum", "retraction"]):
         paper_type = "letter"
+    elif "editorial" in title_lower or "Editorial" in [pt for pt in pub_types]:
+        paper_type = "editorial"
 
     # Study type classification
     study_type = classify_study_type(title_lower, abstract.lower(), pub_types_lower)
