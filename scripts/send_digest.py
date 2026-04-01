@@ -12,7 +12,7 @@ import requests
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://vwdcqzcoovczmtzdyzbc.supabase.co")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
-FROM_EMAIL = os.environ.get("FROM_EMAIL", "Uro Daily Pick <noreply@uro-daily-pick.com>")
+FROM_EMAIL = os.environ.get("FROM_EMAIL", "Uro Daily Pick <onboarding@resend.dev>")
 
 
 def sb_get(path, params=None):
