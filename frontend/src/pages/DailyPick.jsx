@@ -251,10 +251,13 @@ export default function DailyPick() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [likeAnim, setLikeAnim] = useState(false);
 
-  // Dwell tracking — pauses when tab is hidden, caps at 5 min
+  // Dwell tracking — only counts when user is actively interacting
+  // Pauses on: tab hidden, 30s no mouse/scroll/key activity
+  // Caps at 5 min, min 10s to record
   const dwellPaperId = useRef(null);
-  const dwellAccum = useRef(0);        // accumulated seconds
-  const dwellLastTick = useRef(null);   // last Date.now() when visible
+  const dwellAccum = useRef(0);
+  const dwellLastTick = useRef(null);
+  const idleTimer = useRef(null);
 
   const pauseDwell = useCallback(() => {
     if (dwellLastTick.current) {
@@ -264,15 +267,22 @@ export default function DailyPick() {
   }, []);
 
   const resumeDwell = useCallback(() => {
-    if (dwellPaperId.current && !dwellLastTick.current) {
+    if (dwellPaperId.current && !dwellLastTick.current && !document.hidden) {
       dwellLastTick.current = Date.now();
     }
   }, []);
 
+  const resetIdleTimer = useCallback(() => {
+    resumeDwell();
+    clearTimeout(idleTimer.current);
+    idleTimer.current = setTimeout(() => pauseDwell(), 30000); // 30s idle → pause
+  }, [pauseDwell, resumeDwell]);
+
   const flushDwell = useCallback(async () => {
+    clearTimeout(idleTimer.current);
     pauseDwell();
-    const seconds = Math.min(dwellAccum.current, 300); // cap 5 min
-    if (dwellPaperId.current && user && seconds >= 10) { // min 10s
+    const seconds = Math.min(dwellAccum.current, 300);
+    if (dwellPaperId.current && user && seconds >= 10) {
       await supabase.from("read_history").insert({
         user_id: user.id, paper_id: dwellPaperId.current, dwell_seconds: seconds,
       });
@@ -283,16 +293,23 @@ export default function DailyPick() {
   }, [user, pauseDwell]);
 
   useEffect(() => {
-    const onVis = () => document.hidden ? pauseDwell() : resumeDwell();
+    const onVis = () => document.hidden ? pauseDwell() : resetIdleTimer();
+    const onActivity = () => resetIdleTimer();
     const onLeave = () => flushDwell();
     document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("mousemove", onActivity, { passive: true });
+    window.addEventListener("scroll", onActivity, { passive: true, capture: true });
+    window.addEventListener("keydown", onActivity, { passive: true });
     window.addEventListener("beforeunload", onLeave);
     return () => {
       flushDwell();
       document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("mousemove", onActivity);
+      window.removeEventListener("scroll", onActivity, { capture: true });
+      window.removeEventListener("keydown", onActivity);
       window.removeEventListener("beforeunload", onLeave);
     };
-  }, [flushDwell, pauseDwell, resumeDwell]);
+  }, [flushDwell, pauseDwell, resetIdleTimer]);
 
   useEffect(() => {
     if (!user) return;
