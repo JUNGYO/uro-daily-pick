@@ -177,9 +177,9 @@ export default function Settings() {
             <Bell size={18} className="text-warning" />Keyword Alerts
           </h2>
           <p className="text-[0.778rem] text-text3 mb-4">Get notified when new papers match your criteria.</p>
-          <div className="flex gap-2 mb-4">
+          <div className="flex flex-col sm:flex-row gap-2 mb-4">
             <select value={newAlertType} onChange={e => setNewAlertType(e.target.value)}
-              className={`${inputCls} w-auto`}>
+              className={`${inputCls} w-full sm:w-auto`}>
               <option value="keyword">Keyword</option>
               <option value="author">Author</option>
               <option value="journal">Journal</option>
@@ -247,13 +247,13 @@ function AccountSection({ user }) {
   };
 
   return (
-    <div className="bg-card rounded-xl border border-border p-6 mb-6">
+    <div className={sectionCls}>
       <h2 className="text-[1rem] font-semibold text-text1 mb-4 flex items-center gap-2">
         <Shield size={18} className="text-accent" />Account
       </h2>
 
       <p className="text-[0.889rem] text-text3 mb-4">
-        Signed in as <span className="text-text1 font-medium">{user?.email}</span>
+        Signed in as <span className="text-text1 font-medium break-all">{user?.email}</span>
       </p>
 
       {msg && <p className="text-[0.889rem] text-success mb-3">{msg}</p>}
@@ -264,12 +264,12 @@ function AccountSection({ user }) {
         <label className="text-[0.889rem] font-semibold text-text1 block mb-2 flex items-center gap-1.5">
           <Mail size={14} />Change email
         </label>
-        <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row gap-2">
           <input value={newEmail} onChange={e => setNewEmail(e.target.value)}
             placeholder="New email address" type="email"
-            className={`flex-1 ${inputCls}`} />
+            className={`w-full sm:flex-1 ${inputCls}`} />
           <button onClick={changeEmail}
-            className="h-11 px-4 bg-accent text-white rounded-lg text-[0.889rem] font-medium hover:bg-[#0066D6] transition-colors">
+            className="h-12 px-4 bg-accent text-white rounded-lg text-[0.889rem] font-medium hover:bg-[#0066D6] transition-colors shrink-0">
             Update
           </button>
         </div>
@@ -288,7 +288,7 @@ function AccountSection({ user }) {
             placeholder="Confirm new password" type="password"
             className={`w-full ${inputCls}`} />
           <button onClick={changePassword}
-            className="self-start h-11 px-4 bg-accent text-white rounded-lg text-[0.889rem] font-medium hover:bg-[#0066D6] transition-colors">
+            className="h-12 px-4 bg-accent text-white rounded-lg text-[0.889rem] font-medium hover:bg-[#0066D6] transition-colors self-start">
             Update password
           </button>
         </div>
