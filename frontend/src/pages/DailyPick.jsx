@@ -251,24 +251,48 @@ export default function DailyPick() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [likeAnim, setLikeAnim] = useState(false);
 
-  const dwellStart = useRef(null);
+  // Dwell tracking — pauses when tab is hidden, caps at 5 min
   const dwellPaperId = useRef(null);
+  const dwellAccum = useRef(0);        // accumulated seconds
+  const dwellLastTick = useRef(null);   // last Date.now() when visible
+
+  const pauseDwell = useCallback(() => {
+    if (dwellLastTick.current) {
+      dwellAccum.current += Math.round((Date.now() - dwellLastTick.current) / 1000);
+      dwellLastTick.current = null;
+    }
+  }, []);
+
+  const resumeDwell = useCallback(() => {
+    if (dwellPaperId.current && !dwellLastTick.current) {
+      dwellLastTick.current = Date.now();
+    }
+  }, []);
 
   const flushDwell = useCallback(async () => {
-    if (dwellStart.current && dwellPaperId.current && user) {
-      const seconds = Math.round((Date.now() - dwellStart.current) / 1000);
-      if (seconds >= 3) {
-        await supabase.from("read_history").insert({ user_id: user.id, paper_id: dwellPaperId.current, dwell_seconds: seconds });
-      }
+    pauseDwell();
+    const seconds = Math.min(dwellAccum.current, 300); // cap 5 min
+    if (dwellPaperId.current && user && seconds >= 10) { // min 10s
+      await supabase.from("read_history").insert({
+        user_id: user.id, paper_id: dwellPaperId.current, dwell_seconds: seconds,
+      });
     }
-    dwellStart.current = null; dwellPaperId.current = null;
-  }, [user]);
+    dwellPaperId.current = null;
+    dwellAccum.current = 0;
+    dwellLastTick.current = null;
+  }, [user, pauseDwell]);
 
   useEffect(() => {
+    const onVis = () => document.hidden ? pauseDwell() : resumeDwell();
     const onLeave = () => flushDwell();
+    document.addEventListener("visibilitychange", onVis);
     window.addEventListener("beforeunload", onLeave);
-    return () => { flushDwell(); window.removeEventListener("beforeunload", onLeave); };
-  }, [flushDwell]);
+    return () => {
+      flushDwell();
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("beforeunload", onLeave);
+    };
+  }, [flushDwell, pauseDwell, resumeDwell]);
 
   useEffect(() => {
     if (!user) return;
@@ -288,7 +312,9 @@ export default function DailyPick() {
 
   const selectPaper = (i) => {
     flushDwell(); setCur(i);
-    dwellPaperId.current = recs[i]?.paper_id; dwellStart.current = Date.now();
+    dwellPaperId.current = recs[i]?.paper_id;
+    dwellAccum.current = 0;
+    dwellLastTick.current = Date.now();
   };
 
   const doFeedback = async (action) => {
