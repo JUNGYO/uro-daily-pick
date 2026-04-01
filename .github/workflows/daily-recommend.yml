@@ -1,4 +1,4 @@
-name: Daily Recommendation Generation
+name: Daily Recommendation + Summarize
 
 on:
   schedule:
@@ -17,6 +17,19 @@ jobs:
 
       - name: Install dependencies
         run: pip install requests
+
+      - name: Classify new papers
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python scripts/classify_papers.py
+
+      - name: Generate Korean summaries
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python scripts/summarize_papers.py
 
       - name: Generate recommendations
         env:

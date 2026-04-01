@@ -9,6 +9,7 @@ on:
         type: choice
         options:
           - fetch-only
+          - summarize-only
           - recommend-only
           - fetch-and-recommend
           - email-only
@@ -32,6 +33,21 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python scripts/fetch_papers.py
+
+      - name: Classify papers
+        if: contains(fromJSON('["recommend-only","fetch-and-recommend","all"]'), github.event.inputs.task)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python scripts/classify_papers.py
+
+      - name: Summarize papers (Korean)
+        if: contains(fromJSON('["summarize-only","recommend-only","fetch-and-recommend","all"]'), github.event.inputs.task)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python scripts/summarize_papers.py
 
       - name: Generate recommendations
         if: contains(fromJSON('["recommend-only","fetch-and-recommend","all"]'), github.event.inputs.task)

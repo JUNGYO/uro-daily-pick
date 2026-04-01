@@ -145,6 +145,14 @@ function Detail({ rec, onFeedback, onPrev, onNext, hasPrev, hasNext, likeAnim })
             </div>
           )}
 
+          {/* Korean summary */}
+          {paper.summary_ko && (
+            <div className="bg-[rgba(0,122,255,0.03)] border border-[rgba(0,122,255,0.08)] rounded-lg p-4 mb-4">
+              <p className="text-[0.667rem] font-semibold text-accent uppercase tracking-widest mb-1.5">한글 요약</p>
+              <p className="text-[0.833rem] leading-[1.7] text-text1">{paper.summary_ko}</p>
+            </div>
+          )}
+
           {/* Abstract */}
           {paper.abstract && (
             <p className="text-[0.889rem] leading-[1.7] text-text2">{hl(paper.abstract, matched)}</p>
@@ -178,10 +186,18 @@ function Detail({ rec, onFeedback, onPrev, onNext, hasPrev, hasNext, likeAnim })
           </div>
 
           {/* Right */}
-          <a href={`https://pubmed.ncbi.nlm.nih.gov/${paper.pmid}/`} target="_blank" rel="noopener"
-            className="h-9 px-4 rounded-lg border border-border text-text2 text-[0.778rem] font-medium flex items-center gap-1.5 hover:bg-hover transition-colors no-underline">
-            PubMed <ExternalLink size={13} />
-          </a>
+          <div className="flex items-center gap-2">
+            {paper.doi && (
+              <a href={`https://doi.org/${paper.doi}`} target="_blank" rel="noopener"
+                className="h-9 px-4 rounded-lg bg-accent text-white text-[0.778rem] font-medium flex items-center gap-1.5 hover:bg-[#0066D6] transition-colors no-underline">
+                Full Text <ExternalLink size={13} />
+              </a>
+            )}
+            <a href={`https://pubmed.ncbi.nlm.nih.gov/${paper.pmid}/`} target="_blank" rel="noopener"
+              className="h-9 px-4 rounded-lg border border-border text-text2 text-[0.778rem] font-medium flex items-center gap-1.5 hover:bg-hover transition-colors no-underline">
+              PubMed <ExternalLink size={13} />
+            </a>
+          </div>
         </div>
       </div>
     </div>
