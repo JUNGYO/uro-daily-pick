@@ -48,11 +48,14 @@ def sb_patch(paper_id, data):
 
 def summarize(title, abstract):
     prompt = PROMPT.format(title=title or "Untitled", abstract=(abstract or "No abstract.")[:3000])
-    resp = requests.post(f"{GEMINI_URL}?key={GEMINI_API_KEY}",
-        headers={"Content-Type": "application/json"},
-        json={"contents": [{"role": "user", "parts": [{"text": prompt}]}],
-              "generationConfig": {"maxOutputTokens": 2048, "temperature": 0.5}},
-        timeout=30)
+    try:
+        resp = requests.post(f"{GEMINI_URL}?key={GEMINI_API_KEY}",
+            headers={"Content-Type": "application/json"},
+            json={"contents": [{"role": "user", "parts": [{"text": prompt}]}],
+                  "generationConfig": {"maxOutputTokens": 2048, "temperature": 0.5}},
+            timeout=120)
+    except requests.exceptions.RequestException:
+        return None
 
     if resp.status_code == 429 or resp.status_code == 503:
         return None  # rate limited, retry later
