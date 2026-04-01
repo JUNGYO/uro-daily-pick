@@ -69,8 +69,12 @@ function ListItem({ rec, index, selected, onClick }) {
             <TypeBadge type={st} />
             {fb === "like" && <Heart size={11} className="text-success fill-success" />}
           </div>
-          <p className="text-[0.833rem] font-semibold text-text1 leading-snug line-clamp-2">{rec.paper?.title}</p>
-          <p className="text-[0.722rem] text-text3 mt-0.5 truncate">{rec.paper?.journal}</p>
+          <p className="text-[0.833rem] md:line-clamp-2 font-semibold text-text1 leading-snug">{rec.paper?.title}</p>
+          <p className="text-[0.722rem] text-text3 mt-0.5">{rec.paper?.journal} · {rec.paper?.pub_date}</p>
+          {/* Korean summary — visible on mobile list */}
+          {rec.paper?.summary_ko && (
+            <p className="md:hidden text-[0.778rem] text-text2 leading-relaxed mt-1.5">{rec.paper.summary_ko}</p>
+          )}
         </div>
       </div>
     </button>
