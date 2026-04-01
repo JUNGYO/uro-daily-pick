@@ -7,6 +7,7 @@ import Settings from "./pages/Settings";
 import Login from "./pages/Login";
 import Onboarding from "./pages/Onboarding";
 import ResetPassword from "./pages/ResetPassword";
+import Landing from "./pages/Landing";
 import { Newspaper, FolderOpen, Settings as SettingsIcon, LogOut } from "lucide-react";
 
 const AuthContext = createContext(null);
@@ -46,7 +47,7 @@ function AuthProvider({ children }) {
 
 function ProtectedRoute({ children }) {
   const { user, profile } = useAuth();
-  if (!user) return <Navigate to="/login" />;
+  if (!user) return <Navigate to="/welcome" />;
   if (profile && !profile.onboarding_done) return <Navigate to="/onboarding" />;
   return children;
 }
@@ -110,6 +111,7 @@ export default function App() {
     <BrowserRouter basename="/uro-daily-pick">
       <AuthProvider>
         <Routes>
+          <Route path="/welcome" element={<Landing />} />
           <Route path="/login" element={<Login />} />
           <Route path="/onboarding" element={<Onboarding />} />
           <Route path="/reset-password" element={<ResetPassword />} />

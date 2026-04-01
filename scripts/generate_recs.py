@@ -324,7 +324,7 @@ def main():
                 scored.append((paper, score, reasons))
 
         scored.sort(key=lambda x: x[1], reverse=True)
-        top10 = scored[:10]
+        top5 = scored[:5]
 
         # Delete old recs for today
         sb("DELETE", "recommendations", params={
@@ -333,18 +333,18 @@ def main():
         })
 
         # Insert new recs
-        if top10:
+        if top5:
             recs = [{
                 "user_id": uid,
                 "paper_id": p["id"],
                 "score": s,
                 "reasons": json.dumps(r, ensure_ascii=False) if isinstance(r, dict) else r,
                 "rec_date": today,
-            } for p, s, r in top10]
+            } for p, s, r in top5]
             sb("POST", "recommendations", recs)
 
         name = profile.get("name", uid)
-        print(f"  [{name}] {len(top10)} recs")
+        print(f"  [{name}] {len(top5)} recs")
 
     print("Done.")
 

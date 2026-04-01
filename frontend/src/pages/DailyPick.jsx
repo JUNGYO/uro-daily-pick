@@ -407,12 +407,12 @@ export default function DailyPick() {
     }
 
     scored.sort((a, b) => b.score - a.score);
-    const top10 = scored.slice(0, 10);
+    const top5 = scored.slice(0, 5);
 
-    if (!top10.length) return;
+    if (!top5.length) return;
 
     // Save to recommendations table
-    const inserts = top10.map(({ paper, score }) => ({
+    const inserts = top5.map(({ paper, score }) => ({
       user_id: userId, paper_id: paper.id, score,
       reasons: JSON.stringify({ reasons: [], matched_terms: [] }),
       rec_date: today,
