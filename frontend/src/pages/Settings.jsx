@@ -145,9 +145,6 @@ export default function Settings() {
             onRemove={val => removeTag("keywords", val)}
             placeholder="e.g. prostate cancer, robotic surgery"
           />
-          {/* MeSH — auto-learned, read only */}
-          <LearnedSection label="MeSH Terms" items={form.mesh_terms} emptyMsg="Learned from your likes and reading history" />
-
           {/* Journals — user editable */}
           <TagField
             label="Preferred Journals"

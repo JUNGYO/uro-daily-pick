@@ -222,11 +222,6 @@ def authority_boost(paper):
 def score_paper(paper, profile, liked_papers, disliked_kws, dwell_papers, all_likes):
     """Compute final hybrid score for a paper."""
     content, matched_terms = text_match_score(paper, profile.get("keywords") or [])
-    # Also match mesh_terms from profile
-    mesh_content, mesh_matched = text_match_score(paper, profile.get("mesh_terms") or [])
-    content = max(content, mesh_content)
-    matched_terms = list(set(matched_terms + mesh_matched))
-
     behav, behav_reasons = behavioral_score(paper, liked_papers, disliked_kws, dwell_papers)
     collab = collaborative_score(paper["id"], profile["id"], all_likes)
     temporal = temporal_score(paper.get("pub_date"))
@@ -345,33 +340,8 @@ def main():
             } for p, s, r in top10]
             sb("POST", "recommendations", recs)
 
-        # ── Auto-learn MeSH terms and journals from behavior ──
-        engaged_papers = liked_papers + dwell_papers
-        if engaged_papers:
-            mesh_counter = Counter()
-            journal_counter = Counter()
-            for ep in engaged_papers:
-                for mt in (ep.get("mesh_terms") or []):
-                    if mt:
-                        mesh_counter[mt] += 1
-                j = ep.get("journal", "")
-                if j:
-                    journal_counter[j] += 1
-
-            # Top 10 MeSH, top 5 journals (appeared 2+ times)
-            learned_mesh = [t for t, c in mesh_counter.most_common(10) if c >= 1]
-            learned_journals = [j for j, c in journal_counter.most_common(5) if c >= 1]
-
-            update_data = {}
-            if learned_mesh:
-                update_data["mesh_terms"] = learned_mesh
-            if learned_journals:
-                update_data["preferred_journals"] = learned_journals
-            if update_data:
-                sb_patch("profiles", uid, update_data)
-
         name = profile.get("name", uid)
-        print(f"  [{name}] {len(top10)} recs | mesh:{len(learned_mesh if engaged_papers else [])} journals:{len(learned_journals if engaged_papers else [])}")
+        print(f"  [{name}] {len(top10)} recs")
 
     print("Done.")
 
