@@ -100,14 +100,17 @@ def main():
             continue
 
         summary = summarize(p["title"], p["abstract"])
+        if not summary:
+            time.sleep(3)
+            summary = summarize(p["title"], p["abstract"])  # retry once
         if summary:
             sb_patch(p["id"], {"summary_ko": summary})
             done += 1
             print(f"  [{i+1}/{len(papers)}] {p['pmid']}: {summary[:60]}...")
         else:
-            print(f"  [{i+1}/{len(papers)}] {p['pmid']}: FAILED (rate limit?)")
+            print(f"  [{i+1}/{len(papers)}] {p['pmid']}: FAILED")
 
-        time.sleep(4)  # ~15 RPM
+        time.sleep(1)
 
     print(f"Done. Summarized {done}/{len(papers)}.")
 
