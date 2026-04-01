@@ -15,19 +15,62 @@ SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 PUBMED_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 PUBMED_EMAIL = "uro-daily-pick@example.com"
 
-# Urology-focused base queries
-URO_QUERIES = [
-    '"Urology"[MeSH] OR "Urologic Neoplasms"[MeSH]',
-    '"Prostatic Neoplasms"[MeSH] OR "prostate cancer"',
-    '"Urinary Bladder Neoplasms"[MeSH] OR "bladder cancer"',
-    '"Kidney Neoplasms"[MeSH] OR "renal cell carcinoma"',
-    '"Robotic Surgical Procedures"[MeSH] AND "Urology"[MeSH]',
-    '"Prostatic Hyperplasia"[MeSH] OR "BPH"',
-    '"Urinary Incontinence"[MeSH]',
-    '"Erectile Dysfunction"[MeSH]',
-    '"Kidney Transplantation"[MeSH]',
-    '"Urolithiasis"[MeSH] OR "kidney stones"',
+# ── Major Journals ──
+# Urology
+URO_JOURNALS = [
+    "European Urology",
+    "Journal of Urology",
+    "BJU International",
+    "Urology",
+    "World Journal of Urology",
+    "Nature Reviews Urology",
+    "European Urology Focus",
+    "European Urology Oncology",
+    "Prostate Cancer and Prostatic Diseases",
+    "Neurourology and Urodynamics",
+    "Journal of Endourology",
+    "International Journal of Urology",
+    "Urologic Oncology",
+    "The Prostate",
+    "Scandinavian Journal of Urology",
+    "Asian Journal of Urology",
 ]
+
+# Oncology (publishes urology-relevant work)
+ONCO_JOURNALS = [
+    "Journal of Clinical Oncology",
+    "Lancet Oncology",
+    "JAMA Oncology",
+    "Annals of Oncology",
+    "Clinical Cancer Research",
+    "Cancer Research",
+    "Cancer",
+    "European Journal of Cancer",
+]
+
+# General top-tier (publish high-impact urology)
+GENERAL_JOURNALS = [
+    "New England Journal of Medicine",
+    "Lancet",
+    "JAMA",
+    "BMJ",
+    "Nature Medicine",
+    "JAMA Network Open",
+]
+
+def build_journal_queries():
+    """Build PubMed queries by journal."""
+    queries = []
+    # Each urology journal — fetch all recent papers
+    for j in URO_JOURNALS:
+        queries.append(f'"{j}"[Journal]')
+    # Oncology + General journals — only urology-related papers
+    uro_filter = "(urology OR urologic OR prostate OR bladder OR kidney OR renal OR testicular)"
+    for j in ONCO_JOURNALS + GENERAL_JOURNALS:
+        queries.append(f'"{j}"[Journal] AND {uro_filter}')
+    return queries
+
+URO_QUERIES = build_journal_queries()
 
 
 def supabase_request(method, path, data=None):
