@@ -9,22 +9,28 @@ import requests
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://vwdcqzcoovczmtzdyzbc.supabase.co")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
 
-PROMPT = """You are a medical research summarizer for urologists.
-Given a paper's title and abstract, write a concise Korean summary in exactly 3 sentences.
-- First sentence: study objective/background
-- Second sentence: key methodology or findings
-- Third sentence: clinical significance or conclusion
+PROMPT = """You are a medical research summarizer for Korean urologists.
 
-Rules:
-- Write in Korean (한국어)
-- Use medical terminology as-is (e.g., prostate, RCC, BCG)
-- Be precise about numbers and statistics
-- No markdown, no bullet points, just 3 plain sentences
+TASK: Summarize the following paper in Korean. Write EXACTLY 3 sentences, each on its own line.
+
+Sentence 1: 연구 배경과 목적 (Background and objective)
+Sentence 2: 주요 방법론과 결과 (Key methods and findings — include specific numbers/statistics)
+Sentence 3: 임상적 의의와 결론 (Clinical significance and conclusion)
+
+RULES:
+- Write everything in Korean (한국어)
+- Keep medical terms in English where natural (e.g., prostate, RCC, BCG, PSA, PFS, OS)
+- Include specific numbers from the abstract (e.g., HR 0.72, p=0.003, 5-year OS 85%)
+- Write 3 full sentences, each 30-60 characters long
+- No bullet points, no numbering, just 3 plain sentences separated by newlines
 
 Title: {title}
-Abstract: {abstract}"""
+
+Abstract: {abstract}
+
+Korean 3-sentence summary:"""
 
 
 def sb_get(path, params):
@@ -45,7 +51,7 @@ def summarize(title, abstract):
     resp = requests.post(f"{GEMINI_URL}?key={GEMINI_API_KEY}",
         headers={"Content-Type": "application/json"},
         json={"contents": [{"role": "user", "parts": [{"text": prompt}]}],
-              "generationConfig": {"maxOutputTokens": 300, "temperature": 0.3}},
+              "generationConfig": {"maxOutputTokens": 2048, "temperature": 0.5}},
         timeout=30)
 
     if resp.status_code == 429 or resp.status_code == 503:
@@ -53,7 +59,16 @@ def summarize(title, abstract):
     if resp.status_code != 200:
         return None
     try:
-        return resp.json()["candidates"][0]["content"]["parts"][0]["text"].strip()
+        parts = resp.json()["candidates"][0]["content"]["parts"]
+        # 2.5 Flash may have thinking part first, then text part
+        for part in reversed(parts):
+            if "text" in part and part.get("thought") is not True:
+                return part["text"].strip()
+        # Fallback: last part with text
+        for part in reversed(parts):
+            if "text" in part:
+                return part["text"].strip()
+        return None
     except (KeyError, IndexError):
         return None
 
