@@ -4,8 +4,8 @@ import { supabase } from "../lib/supabase";
 import { useAuth } from "../App";
 import { Save, Plus, X, Bell, Check, Shield, Trash2, Mail } from "lucide-react";
 
-const inputCls = "h-11 bg-card border border-border rounded-lg px-3 text-[1rem] text-text1 outline-none focus:border-accent transition-colors";
-const sectionCls = "bg-card rounded-xl border border-border p-6 mb-6";
+const inputCls = "h-12 bg-card border border-border rounded-lg px-4 text-[1rem] text-text1 outline-none focus:border-accent transition-colors";
+const sectionCls = "bg-card rounded-xl border border-border p-4 sm:p-6 mb-4 sm:mb-6";
 
 function TagField({ label, tags, onAdd, onRemove, placeholder }) {
   const [value, setValue] = useState("");
@@ -114,7 +114,7 @@ export default function Settings() {
 
   return (
     <div className="h-full overflow-y-auto">
-      <div className="max-w-[720px] mx-auto p-6 lg:p-10">
+      <div className="max-w-[720px] mx-auto p-4 sm:p-6 lg:p-10">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-[1.333rem] font-bold text-text1">Settings</h1>
           <button onClick={handleSave} disabled={saving}
@@ -127,7 +127,7 @@ export default function Settings() {
         {/* Profile */}
         <div className={sectionCls}>
           <h2 className="text-[1rem] font-semibold text-text1 mb-4">Profile</h2>
-          <div className="grid grid-cols-2 gap-4 mb-5">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
             <div>
               <label className="text-[0.778rem] text-text3 block mb-1.5">Name</label>
               <input value={form.name || ""} onChange={e => setForm({ ...form, name: e.target.value })} className={`w-full ${inputCls}`} />
@@ -218,8 +218,6 @@ function AccountSection({ user }) {
   const [err, setErr] = useState("");
   const [showDelete, setShowDelete] = useState(false);
   const navigate = useNavigate();
-
-  const inputCls = "h-11 bg-card border border-border rounded-lg px-3 text-[1rem] text-text1 outline-none focus:border-accent transition-colors";
 
   const changeEmail = async () => {
     if (!newEmail.trim()) return;
