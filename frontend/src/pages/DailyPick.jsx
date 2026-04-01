@@ -316,16 +316,99 @@ export default function DailyPick() {
     (async () => {
       setLoading(true);
       const today = new Date().toISOString().slice(0, 10);
+
+      // Try loading pre-generated recommendations
       const { data: recsData } = await supabase.from("recommendations").select("*, paper:papers(*)").eq("user_id", user.id).eq("rec_date", today).order("score", { ascending: false });
+
       if (recsData?.length) {
         const paperIds = recsData.map(r => r.paper_id);
         const { data: fbs } = await supabase.from("feedbacks").select("paper_id, action").eq("user_id", user.id).in("paper_id", paperIds);
         const fbMap = Object.fromEntries((fbs || []).map(f => [f.paper_id, f.action]));
         setRecs(recsData.map(r => ({ ...r, feedback_action: fbMap[r.paper_id] || null })));
+      } else {
+        // No pre-generated recs — generate on the fly
+        await generateInstantRecs(user.id, today);
       }
       setLoading(false);
     })();
   }, [user]);
+
+  const generateInstantRecs = async (userId, today) => {
+    // Get user profile
+    const { data: prof } = await supabase.from("profiles").select("keywords,preferred_journals,preferred_study_types").eq("id", userId).single();
+    const keywords = (prof?.keywords || []).map(k => k.toLowerCase());
+    const prefJournals = (prof?.preferred_journals || []).map(j => j.toLowerCase());
+    const prefTypes = prof?.preferred_study_types || [];
+
+    // Get papers from last 30 days
+    const cutoff = new Date(Date.now() - 30 * 86400000).toISOString().slice(0, 10);
+    const { data: papers } = await supabase.from("papers").select("*").gte("fetched_at", cutoff).order("pub_date", { ascending: false }).limit(300);
+    if (!papers?.length) return;
+
+    // Get already-seen papers
+    const { data: fbs } = await supabase.from("feedbacks").select("paper_id").eq("user_id", userId);
+    const { data: reads } = await supabase.from("read_history").select("paper_id").eq("user_id", userId);
+    const seenIds = new Set([...(fbs || []).map(f => f.paper_id), ...(reads || []).map(r => r.paper_id)]);
+
+    // Simple scoring
+    const scored = [];
+    for (const p of papers) {
+      if (seenIds.has(p.id)) continue;
+      const title = (p.title || "").toLowerCase();
+      const abstract = (p.abstract || "").toLowerCase();
+      const journal = (p.journal || "").toLowerCase();
+      const pType = p.study_type || "other";
+
+      let score = 0;
+      const reasons = [];
+
+      // Keyword match
+      for (const kw of keywords) {
+        if (title.includes(kw)) { score += 3; reasons.push({ type: "keyword", label: kw }); }
+        else if (abstract.includes(kw)) { score += 1; }
+      }
+
+      // Journal match
+      for (const pj of prefJournals) {
+        if (journal.includes(pj) || pj.includes(journal)) {
+          score += 2; reasons.push({ type: "journal", label: p.journal }); break;
+        }
+      }
+
+      // Study type match
+      if (prefTypes.includes(pType)) { score += 1.5; }
+
+      // Recency bonus
+      if (p.pub_date) {
+        const days = Math.max(0, (Date.now() - new Date(p.pub_date).getTime()) / 86400000);
+        score += Math.max(0, 1 - days / 30);
+      }
+
+      // Skip letters
+      if (title.includes("reply to") || title.includes("letter to") || title.includes("re:") || title.includes("erratum")) continue;
+
+      if (score > 0) scored.push({ paper: p, score: Math.round(score * 100) / 100 });
+    }
+
+    scored.sort((a, b) => b.score - a.score);
+    const top10 = scored.slice(0, 10);
+
+    if (!top10.length) return;
+
+    // Save to recommendations table
+    const inserts = top10.map(({ paper, score }) => ({
+      user_id: userId, paper_id: paper.id, score,
+      reasons: JSON.stringify({ reasons: [], matched_terms: [] }),
+      rec_date: today,
+    }));
+    await supabase.from("recommendations").insert(inserts);
+
+    // Reload
+    const { data: recsData } = await supabase.from("recommendations").select("*, paper:papers(*)").eq("user_id", userId).eq("rec_date", today).order("score", { ascending: false });
+    if (recsData?.length) {
+      setRecs(recsData.map(r => ({ ...r, feedback_action: null })));
+    }
+  };
 
   const selectPaper = (i) => {
     flushDwell(); setCur(i);
