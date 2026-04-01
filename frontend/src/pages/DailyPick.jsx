@@ -232,6 +232,13 @@ function MobileDetail({ rec, onFeedback, onBack, likeAnim }) {
             })}
           </div>
         )}
+        {/* Korean summary */}
+        {paper.summary_ko && (
+          <div className="bg-[rgba(0,122,255,0.03)] border border-[rgba(0,122,255,0.08)] rounded-lg p-4 mb-4">
+            <p className="text-[0.667rem] font-semibold text-accent uppercase tracking-widest mb-1.5">한글 요약</p>
+            <p className="text-[0.889rem] leading-[1.7] text-text1">{paper.summary_ko}</p>
+          </div>
+        )}
         {paper.abstract && <p className="text-[0.889rem] leading-[1.7] text-text2 mb-6">{hl(paper.abstract, matched)}</p>}
       </div>
       <div className="sticky bottom-0 bg-card border-t border-border px-5 py-3 flex items-center justify-between">
@@ -265,6 +272,25 @@ export default function DailyPick() {
   const [cur, setCur] = useState(0);
   const [loading, setLoading] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // Mobile back button: push/pop history state instead of navigating away
+  const openMobile = () => {
+    window.history.pushState({ mobileDetail: true }, "");
+    setMobileOpen(true);
+  };
+  const closeMobile = () => {
+    setMobileOpen(false);
+  };
+  useEffect(() => {
+    const onPop = (e) => {
+      if (mobileOpen) {
+        e.preventDefault();
+        setMobileOpen(false);
+      }
+    };
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [mobileOpen]);
   const [likeAnim, setLikeAnim] = useState(false);
 
   // Dwell tracking — only counts when user is actively interacting
@@ -450,7 +476,7 @@ export default function DailyPick() {
     }
 
     if ((action === "like" || action === "dislike") && cur < recs.length - 1) {
-      setTimeout(() => { selectPaper(cur + 1); setMobileOpen(false); }, 300);
+      setTimeout(() => { selectPaper(cur + 1); }, 300);
     }
   };
 
@@ -506,7 +532,7 @@ export default function DailyPick() {
       {/* Mobile detail overlay */}
       {mobileOpen && (
         <div className="md:hidden">
-          <MobileDetail rec={recs[cur]} onFeedback={doFeedback} onBack={() => setMobileOpen(false)} likeAnim={likeAnim} />
+          <MobileDetail rec={recs[cur]} onFeedback={doFeedback} onBack={() => { window.history.back(); }} likeAnim={likeAnim} />
         </div>
       )}
 
@@ -533,7 +559,7 @@ export default function DailyPick() {
           <div className="flex-1 overflow-y-auto px-2 pb-2">
             {recs.map((r, i) => (
               <ListItem key={r.id} rec={r} index={i} selected={i === cur}
-                onClick={() => { selectPaper(i); setMobileOpen(true); }} />
+                onClick={() => { selectPaper(i); openMobile(); }} />
             ))}
           </div>
 
