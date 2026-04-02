@@ -479,9 +479,7 @@ export default function DailyPick() {
       if (colId) await supabase.from("collection_papers").upsert({ collection_id: colId, paper_id: rec.paper_id }, { onConflict: "collection_id,paper_id" });
     }
 
-    if ((action === "like" || action === "dislike") && cur < recs.length - 1) {
-      setTimeout(() => { selectPaper(cur + 1); }, 300);
-    }
+    // Stay on current paper — user navigates manually
   };
 
   // Keyboard
