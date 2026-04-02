@@ -22,8 +22,9 @@ def sb_get(path, params=None):
 
 
 def get_digest_users():
-    """Users with email_digest enabled."""
-    return sb_get("profiles", {"select": "id,name,email_digest,digest_frequency", "email_digest": "eq.true"})
+    """Users with email digest enabled (not kakao)."""
+    users = sb_get("profiles", {"select": "id,name,email_digest,digest_frequency", "email_digest": "eq.true"})
+    return [u for u in users if u.get("digest_frequency") != "kakao"]
 
 
 def get_user_email(uid):

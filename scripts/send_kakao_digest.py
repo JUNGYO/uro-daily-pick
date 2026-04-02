@@ -76,8 +76,8 @@ def main():
 
     # Get Kakao users with tokens
     users = sb_get("profiles", {
-        "select": "id,name,kakao_access_token,kakao_refresh_token,login_provider,email_digest",
-        "login_provider": "eq.kakao",
+        "select": "id,name,kakao_access_token,kakao_refresh_token,login_provider,email_digest,digest_frequency",
+        "digest_frequency": "eq.kakao",
         "kakao_refresh_token": "neq.",
     })
 

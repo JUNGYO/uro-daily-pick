@@ -154,20 +154,28 @@ export default function Settings() {
             placeholder="e.g. European Urology, Journal of Urology"
           />
 
-          <div className="flex items-center gap-4 pt-4 border-t border-border">
-            <label className="flex items-center gap-2 cursor-pointer text-[0.889rem] text-text1">
-              <input type="checkbox" checked={form.email_digest || false}
-                onChange={e => setForm({ ...form, email_digest: e.target.checked })} className="accent-accent" />
-              Email digest
-            </label>
-            {form.email_digest && (
-              <select value={form.digest_frequency || "daily"}
-                onChange={e => setForm({ ...form, digest_frequency: e.target.value })}
-                className="h-9 bg-card border border-border rounded-lg px-3 text-[0.889rem] text-text1 outline-none">
-                <option value="daily">Daily</option>
-                <option value="weekly">Weekly</option>
-              </select>
-            )}
+          <div className="pt-4 border-t border-border">
+            <p className="text-[0.889rem] font-semibold text-text1 mb-3">Daily Digest</p>
+            <div className="flex flex-col gap-2">
+              {[
+                { value: "email", label: "Email", desc: "Receive via email every morning" },
+                { value: "kakao", label: "KakaoTalk", desc: "Receive via KakaoTalk (connect Kakao first)" },
+                { value: "off", label: "Off", desc: "No daily digest" },
+              ].map(opt => (
+                <label key={opt.value}
+                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors
+                    ${(form.digest_frequency || "email") === opt.value ? "border-accent bg-[rgba(0,122,255,0.04)]" : "border-border hover:bg-hover"}`}>
+                  <input type="radio" name="digest" value={opt.value}
+                    checked={(form.digest_frequency || "email") === opt.value}
+                    onChange={e => setForm({ ...form, digest_frequency: e.target.value, email_digest: e.target.value !== "off" })}
+                    className="accent-accent" />
+                  <div>
+                    <span className="text-[0.889rem] font-medium text-text1">{opt.label}</span>
+                    <p className="text-[0.722rem] text-text3">{opt.desc}</p>
+                  </div>
+                </label>
+              ))}
+            </div>
           </div>
         </div>
 
