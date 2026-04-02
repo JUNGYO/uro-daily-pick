@@ -87,7 +87,7 @@ export default function Settings() {
     await supabase.from("profiles").update({
       name: form.name, institution: form.institution, keywords: form.keywords,
       mesh_terms: form.mesh_terms, preferred_journals: form.preferred_journals,
-      email_digest: form.email_digest, digest_frequency: form.digest_frequency,
+      digest_email: form.digest_email ?? true, digest_kakao: form.digest_kakao ?? false,
     }).eq("id", user.id);
     await loadProfile(user.id);
     setSaved(true); setTimeout(() => setSaved(false), 2000);
@@ -158,16 +158,14 @@ export default function Settings() {
             <p className="text-[0.889rem] font-semibold text-text1 mb-3">Daily Digest</p>
             <div className="flex flex-col gap-2">
               {[
-                { value: "email", label: "Email", desc: "Receive via email every morning" },
-                { value: "kakao", label: "KakaoTalk", desc: "Receive via KakaoTalk (connect Kakao first)" },
-                { value: "off", label: "Off", desc: "No daily digest" },
+                { key: "digest_email", label: "Email", desc: "Receive via email every morning" },
+                { key: "digest_kakao", label: "KakaoTalk", desc: "Receive via KakaoTalk (connect Kakao first)" },
               ].map(opt => (
-                <label key={opt.value}
+                <label key={opt.key}
                   className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors
-                    ${(form.digest_frequency || "email") === opt.value ? "border-accent bg-[rgba(0,122,255,0.04)]" : "border-border hover:bg-hover"}`}>
-                  <input type="radio" name="digest" value={opt.value}
-                    checked={(form.digest_frequency || "email") === opt.value}
-                    onChange={e => setForm({ ...form, digest_frequency: e.target.value, email_digest: e.target.value !== "off" })}
+                    ${form[opt.key] ? "border-accent bg-[rgba(0,122,255,0.04)]" : "border-border hover:bg-hover"}`}>
+                  <input type="checkbox" checked={form[opt.key] || false}
+                    onChange={e => setForm({ ...form, [opt.key]: e.target.checked })}
                     className="accent-accent" />
                   <div>
                     <span className="text-[0.889rem] font-medium text-text1">{opt.label}</span>
