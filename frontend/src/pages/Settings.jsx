@@ -84,11 +84,15 @@ export default function Settings() {
 
   const handleSave = async () => {
     setSaving(true);
-    await supabase.from("profiles").update({
-      name: form.name, institution: form.institution, keywords: form.keywords,
-      mesh_terms: form.mesh_terms, preferred_journals: form.preferred_journals,
-      digest_email: form.digest_email ?? true, digest_kakao: form.digest_kakao ?? false,
+    const { error } = await supabase.from("profiles").update({
+      name: form.name || "",
+      institution: form.institution || "",
+      keywords: form.keywords || [],
+      preferred_journals: form.preferred_journals || [],
+      digest_email: form.digest_email ?? true,
+      digest_kakao: form.digest_kakao ?? false,
     }).eq("id", user.id);
+    if (error) { console.error("Save error:", error); setSaving(false); return; }
     await loadProfile(user.id);
     setSaved(true); setTimeout(() => setSaved(false), 2000);
     setSaving(false);
