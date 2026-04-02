@@ -19,11 +19,14 @@ function AuthProvider({ children }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    // Force loading to end after 5 seconds no matter what
+    const timeout = setTimeout(() => setLoading(false), 5000);
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
       if (session?.user) loadProfile(session.user.id);
       else setLoading(false);
-    });
+    }).catch(() => setLoading(false));
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setUser(session?.user ?? null);
@@ -31,21 +34,25 @@ function AuthProvider({ children }) {
         loadProfile(session.user.id);
         // Save Kakao tokens if OAuth login
         if (session.provider_token) {
-          await supabase.from("profiles").update({
-            kakao_access_token: session.provider_token,
-            kakao_refresh_token: session.provider_refresh_token || "",
-            login_provider: "kakao",
-          }).eq("id", session.user.id);
+          try {
+            await supabase.from("profiles").update({
+              kakao_access_token: session.provider_token,
+              kakao_refresh_token: session.provider_refresh_token || "",
+              login_provider: "kakao",
+            }).eq("id", session.user.id);
+          } catch (e) { console.error("Token save error:", e); }
         }
       } else { setProfile(null); setLoading(false); }
     });
 
-    return () => subscription.unsubscribe();
+    return () => { subscription.unsubscribe(); clearTimeout(timeout); };
   }, []);
 
   const loadProfile = async (uid) => {
-    const { data } = await supabase.from("profiles").select("*").eq("id", uid).single();
-    setProfile(data);
+    try {
+      const { data } = await supabase.from("profiles").select("*").eq("id", uid).single();
+      setProfile(data);
+    } catch (e) { console.error("Profile load error:", e); }
     setLoading(false);
   };
 
