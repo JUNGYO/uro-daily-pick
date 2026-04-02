@@ -13,6 +13,14 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
 
+  const handleKakaoLogin = async () => {
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "kakao",
+      options: { redirectTo: `${window.location.origin}/uro-daily-pick/` },
+    });
+    if (error) setError(error.message);
+  };
+
   const inputCls = "w-full h-12 bg-card border border-border rounded-lg px-4 text-[1rem] text-text1 outline-none focus:border-accent transition-colors";
 
   const handleSubmit = async (e) => {
@@ -110,6 +118,22 @@ export default function Login() {
               {loading ? "..." : mode === "forgot" ? "Send reset link" : mode === "signup" ? "Get started" : "Continue"}
             </button>
           </form>
+
+          {mode !== "forgot" && (
+            <>
+              <div className="flex items-center gap-3 my-4">
+                <div className="flex-1 h-px bg-border" />
+                <span className="text-[0.778rem] text-text3">or</span>
+                <div className="flex-1 h-px bg-border" />
+              </div>
+              <button onClick={handleKakaoLogin}
+                className="w-full h-11 rounded-lg flex items-center justify-center gap-2 text-[0.889rem] font-semibold transition-colors"
+                style={{ background: "#FEE500", color: "#191919" }}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="#191919"><path d="M12 3C6.48 3 2 6.36 2 10.5c0 2.7 1.8 5.1 4.5 6.45-.15.54-.6 2.1-.69 2.43-.1.42.15.42.33.3.13-.09 2.1-1.41 2.94-1.98.6.09 1.23.15 1.92.15 5.52 0 10-3.36 10-7.5S17.52 3 12 3z"/></svg>
+                Continue with Kakao
+              </button>
+            </>
+          )}
 
           <div className="mt-4 text-center">
             {mode === "forgot" ? (
