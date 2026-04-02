@@ -16,7 +16,10 @@ export default function Login() {
   const handleKakaoLogin = async () => {
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "kakao",
-      options: { redirectTo: `${window.location.origin}/uro-daily-pick/` },
+      options: {
+        redirectTo: `${window.location.origin}/uro-daily-pick/`,
+        scopes: "profile_nickname talk_message",
+      },
     });
     if (error) setError(error.message);
   };
