@@ -5,7 +5,7 @@ Schedule: 21:30 UTC (= 06:30 KST)
 """
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 import requests
 
@@ -37,7 +37,7 @@ def get_user_email(uid):
 
 
 def get_today_recs(uid):
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
     recs = sb_get("recommendations", {
         "select": "score,reasons,paper:papers(title,journal,pub_date,pmid,authors)",
         "user_id": f"eq.{uid}",
@@ -49,7 +49,7 @@ def get_today_recs(uid):
 
 
 def build_html(name, recs):
-    today_str = datetime.now().strftime("%B %d, %Y")
+    today_str = datetime.now(timezone(timedelta(hours=9))).strftime("%B %d, %Y")
 
     rows = ""
     for i, rec in enumerate(recs, 1):
@@ -160,7 +160,7 @@ def main():
         print("ERROR: SUPABASE_SERVICE_KEY not set")
         return
 
-    today_str = datetime.now().strftime("%B %d")
+    today_str = datetime.now(timezone(timedelta(hours=9))).strftime("%B %d")
     print(f"=== Sending digests for {today_str} ===")
 
     users = get_digest_users()

@@ -5,7 +5,7 @@ For users who signed in with Kakao.
 """
 import os
 import json
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 import requests
 
@@ -90,8 +90,8 @@ def main():
         print("ERROR: SUPABASE_SERVICE_KEY required")
         return
 
-    today = datetime.now().strftime("%Y-%m-%d")
-    today_display = datetime.now().strftime("%B %d")
+    today = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
+    today_display = datetime.now(timezone(timedelta(hours=9))).strftime("%B %d")
     print(f"=== Sending KakaoTalk digests for {today_display} ===")
 
     # Get Kakao users with tokens

@@ -361,7 +361,7 @@ export default function DailyPick() {
     if (!user) return;
     (async () => {
       setLoading(true);
-      const today = new Date().toISOString().slice(0, 10);
+      const today = new Date(Date.now() + 9*3600000).toISOString().slice(0, 10);
 
       // Try loading pre-generated recommendations
       const { data: recsData } = await supabase.from("recommendations").select("*, paper:papers(*)").eq("user_id", user.id).eq("rec_date", today).order("score", { ascending: false });

@@ -6,7 +6,7 @@ Run daily via GitHub Actions after fetch_papers.py.
 import os
 import json
 import math
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import Counter
 
 import requests
@@ -55,7 +55,7 @@ def get_all_profiles():
 
 
 def get_recent_papers(days=30):
-    cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+    cutoff = (datetime.now(timezone(timedelta(hours=9))) - timedelta(days=days)).strftime("%Y-%m-%d")
     return sb("GET", "papers", {
         "select": "id,pmid,title,abstract,authors,journal,pub_date,mesh_terms,keywords,paper_type,study_type",
         "fetched_at": f"gte.{cutoff}",
@@ -272,7 +272,7 @@ def main():
         print("ERROR: SUPABASE_SERVICE_KEY not set")
         return
 
-    today = datetime.now().strftime("%Y-%m-%d")
+    today = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
     print(f"=== Generating recommendations for {today} ===")
 
     profiles = get_all_profiles()
