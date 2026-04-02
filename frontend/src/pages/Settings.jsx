@@ -261,9 +261,12 @@ function AccountSection({ user, profile }) {
   const changeEmail = async () => {
     if (!newEmail.trim()) return;
     setErr(""); setMsg("");
-    const { error } = await supabase.auth.updateUser({ email: newEmail.trim() });
+    // Save email to profile (for digest), don't change auth email (breaks session)
+    const { error } = await supabase.from("profiles").update({
+      digest_email_address: newEmail.trim(),
+    }).eq("id", user.id);
     if (error) { setErr(error.message); return; }
-    setMsg("Confirmation email sent to your new address. Check both inboxes.");
+    setMsg("Email saved for digest delivery.");
     setNewEmail("");
   };
 
@@ -321,40 +324,44 @@ function AccountSection({ user, profile }) {
       {msg && <p className="text-[0.889rem] text-success mb-3">{msg}</p>}
       {err && <p className="text-[0.889rem] text-danger mb-3">{err}</p>}
 
-      {/* Change email */}
+      {/* Change email — for all users (email digest needs this) */}
       <div className="mb-5">
         <label className="text-[0.889rem] font-semibold text-text1 block mb-2 flex items-center gap-1.5">
-          <Mail size={14} />Change email
+          <Mail size={14} />Email for digest
         </label>
         <div className="flex flex-col sm:flex-row gap-2">
           <input value={newEmail} onChange={e => setNewEmail(e.target.value)}
-            placeholder="New email address" type="email"
+            placeholder={user?.email || "Enter email for digest"}
+            type="email"
             className={`w-full sm:flex-1 ${inputCls}`} />
           <button onClick={changeEmail}
             className="h-12 px-4 bg-accent text-white rounded-lg text-[0.889rem] font-medium hover:bg-[#0066D6] transition-colors shrink-0">
             Update
           </button>
         </div>
+        <p className="text-[0.722rem] text-text3 mt-1">Email digest will be sent to this address.</p>
       </div>
 
-      {/* Change password */}
-      <div className="mb-5">
-        <label className="text-[0.889rem] font-semibold text-text1 block mb-2 flex items-center gap-1.5">
-          <Shield size={14} />Change password
-        </label>
-        <div className="flex flex-col gap-2">
-          <input value={newPassword} onChange={e => setNewPassword(e.target.value)}
-            placeholder="New password (min 6 chars)" type="password"
-            className={`w-full ${inputCls}`} />
-          <input value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
-            placeholder="Confirm new password" type="password"
-            className={`w-full ${inputCls}`} />
-          <button onClick={changePassword}
-            className="h-12 px-4 bg-accent text-white rounded-lg text-[0.889rem] font-medium hover:bg-[#0066D6] transition-colors self-start">
-            Update password
-          </button>
+      {/* Change password — only for email users */}
+      {user?.app_metadata?.provider === "email" && (
+        <div className="mb-5">
+          <label className="text-[0.889rem] font-semibold text-text1 block mb-2 flex items-center gap-1.5">
+            <Shield size={14} />Change password
+          </label>
+          <div className="flex flex-col gap-2">
+            <input value={newPassword} onChange={e => setNewPassword(e.target.value)}
+              placeholder="New password (min 6 chars)" type="password"
+              className={`w-full ${inputCls}`} />
+            <input value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
+              placeholder="Confirm new password" type="password"
+              className={`w-full ${inputCls}`} />
+            <button onClick={changePassword}
+              className="h-12 px-4 bg-accent text-white rounded-lg text-[0.889rem] font-medium hover:bg-[#0066D6] transition-colors self-start">
+              Update password
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Delete account */}
       <div className="pt-4 border-t border-border">

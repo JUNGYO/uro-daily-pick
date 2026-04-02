@@ -1,0 +1,8 @@
+/uro-daily-pick/*
+  Cache-Control: no-cache
+
+/uro-daily-pick/index.html
+  Cache-Control: no-store
+
+/uro-daily-pick/assets/*
+  Cache-Control: public, max-age=31536000, immutable
