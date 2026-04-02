@@ -24,14 +24,14 @@ function AuthProvider({ children }) {
 
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
-      if (session?.user) loadProfile(session.user.id);
+      if (session?.user) loadProfile(session.user.id, true);
       else setLoading(false);
     }).catch(() => setLoading(false));
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setUser(session?.user ?? null);
       if (session?.user) {
-        loadProfile(session.user.id);
+        loadProfile(session.user.id, true);
         // Save Kakao tokens if OAuth login
         if (session.provider_token) {
           try {
@@ -48,12 +48,12 @@ function AuthProvider({ children }) {
     return () => { subscription.unsubscribe(); clearTimeout(timeout); };
   }, []);
 
-  const loadProfile = async (uid) => {
+  const loadProfile = async (uid, initialLoad = false) => {
     try {
       const { data } = await supabase.from("profiles").select("*").eq("id", uid).single();
       setProfile(data);
     } catch (e) { console.error("Profile load error:", e); }
-    setLoading(false);
+    if (initialLoad) setLoading(false);
   };
 
   if (loading) return <div className="min-h-screen flex items-center justify-center bg-bg text-text3 text-lg">Loading...</div>;
