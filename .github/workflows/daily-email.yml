@@ -1,4 +1,4 @@
-name: Daily Email Digest
+name: Daily Digest (Email + KakaoTalk)
 
 on:
   schedule:
@@ -24,3 +24,11 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
         run: python scripts/send_digest.py
+
+      - name: Send KakaoTalk digests
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          KAKAO_REST_KEY: ${{ secrets.KAKAO_REST_KEY }}
+          KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
+        run: python scripts/send_kakao_digest.py

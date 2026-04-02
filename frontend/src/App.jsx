@@ -25,10 +25,19 @@ function AuthProvider({ children }) {
       else setLoading(false);
     });
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (_event, session) => {
       setUser(session?.user ?? null);
-      if (session?.user) loadProfile(session.user.id);
-      else { setProfile(null); setLoading(false); }
+      if (session?.user) {
+        loadProfile(session.user.id);
+        // Save Kakao tokens if OAuth login
+        if (session.provider_token) {
+          await supabase.from("profiles").update({
+            kakao_access_token: session.provider_token,
+            kakao_refresh_token: session.provider_refresh_token || "",
+            login_provider: "kakao",
+          }).eq("id", session.user.id);
+        }
+      } else { setProfile(null); setLoading(false); }
     });
 
     return () => subscription.unsubscribe();
