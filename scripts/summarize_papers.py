@@ -81,12 +81,13 @@ def main():
         print("ERROR: SUPABASE_SERVICE_KEY and GEMINI_API_KEY required")
         return
 
-    # Get papers without Korean summary
+    # Get papers with abstract but without Korean summary
     papers = sb_get("papers", {
         "select": "id,pmid,title,abstract,summary_ko",
         "or": "(summary_ko.eq.,summary_ko.is.null)",
+        "abstract": "neq.",
         "order": "fetched_at.desc",
-        "limit": "100",
+        "limit": "200",
     })
 
     print(f"=== Summarizing {len(papers)} papers ===")
