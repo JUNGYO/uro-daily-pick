@@ -42,18 +42,36 @@ def refresh_kakao_token(refresh_token):
     return None, None
 
 
-def send_kakao_message(access_token, title, description, link_url):
-    """Send KakaoTalk message to self (나에게 보내기)."""
-    template = {
-        "object_type": "feed",
-        "content": {
+def send_kakao_message(access_token, papers, today_display):
+    """Send KakaoTalk list message with paper titles."""
+    site_url = "https://jungyo.github.io/uro-daily-pick/"
+
+    # Build list items (max 3 for list template)
+    contents = []
+    for p in papers[:3]:
+        paper = p.get("paper", {})
+        title = paper.get("title", "")[:50]
+        journal = paper.get("journal", "")
+        summary = paper.get("summary_ko", "")
+        pmid = paper.get("pmid", "")
+        pubmed_url = f"https://pubmed.ncbi.nlm.nih.gov/{pmid}/" if pmid else site_url
+
+        contents.append({
             "title": title,
-            "description": description,
+            "description": f"{journal}\n{summary[:80]}" if summary else journal,
             "image_url": "",
-            "link": {"web_url": link_url, "mobile_web_url": link_url},
-        },
+            "image_width": 0,
+            "image_height": 0,
+            "link": {"web_url": pubmed_url, "mobile_web_url": pubmed_url},
+        })
+
+    template = {
+        "object_type": "list",
+        "header_title": f"Uro Daily Pick - {today_display}",
+        "header_link": {"web_url": site_url, "mobile_web_url": site_url},
+        "contents": contents,
         "buttons": [
-            {"title": "View Papers", "link": {"web_url": link_url, "mobile_web_url": link_url}},
+            {"title": "오늘의 추천 보기", "link": {"web_url": site_url, "mobile_web_url": site_url}},
         ],
     }
 
@@ -62,6 +80,8 @@ def send_kakao_message(access_token, title, description, link_url):
         data={"template_object": json.dumps(template, ensure_ascii=False)},
         timeout=15)
 
+    if r.status_code != 200:
+        print(f"    Kakao API error: {r.status_code} {r.text[:200]}")
     return r.status_code == 200
 
 
@@ -118,23 +138,7 @@ def main():
             print(f"  [{name}] No recommendations, skipping")
             continue
 
-        # Build message
-        lines = []
-        for i, rec in enumerate(recs, 1):
-            p = rec.get("paper", {})
-            title = p.get("title", "")[:80]
-            journal = p.get("journal", "")
-            summary = p.get("summary_ko", "")
-            if summary:
-                lines.append(f"{i}. [{journal}] {title}\n{summary[:100]}")
-            else:
-                lines.append(f"{i}. [{journal}] {title}")
-
-        msg_title = f"Uro Daily Pick - {today_display}"
-        msg_desc = "\n\n".join(lines)
-        link = "https://jungyo.github.io/uro-daily-pick/"
-
-        if send_kakao_message(access_token, msg_title, msg_desc[:500], link):
+        if send_kakao_message(access_token, recs, today_display):
             sent += 1
             print(f"  [{name}] KakaoTalk sent ({len(recs)} papers)")
         else:
