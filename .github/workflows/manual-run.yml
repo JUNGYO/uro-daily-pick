@@ -12,7 +12,7 @@ on:
           - summarize-only
           - recommend-only
           - fetch-and-recommend
-          - email-only
+          - digest-only
           - all
 
 jobs:
@@ -56,10 +56,19 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python scripts/generate_recs.py
 
-      - name: Send emails
-        if: contains(fromJSON('["email-only","all"]'), github.event.inputs.task)
+      - name: Send email digests
+        if: contains(fromJSON('["digest-only","all"]'), github.event.inputs.task)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
         run: python scripts/send_digest.py
+
+      - name: Send KakaoTalk digests
+        if: contains(fromJSON('["digest-only","all"]'), github.event.inputs.task)
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          KAKAO_REST_KEY: ${{ secrets.KAKAO_REST_KEY }}
+          KAKAO_CLIENT_SECRET: ${{ secrets.KAKAO_CLIENT_SECRET }}
+        run: python scripts/send_kakao_digest.py
