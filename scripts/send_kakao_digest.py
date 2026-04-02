@@ -58,7 +58,7 @@ def send_kakao_message(access_token, papers, today_display):
 
         contents.append({
             "title": title,
-            "description": f"{journal}\n{summary[:80]}" if summary else journal,
+            "description": journal,
             "image_url": "",
             "image_width": 0,
             "image_height": 0,

@@ -134,7 +134,7 @@ def behavioral_score(paper, liked_papers, disliked_kws, dwell_papers):
 
     if liked_kw_match:
         score += min(1.0, liked_kw_match * 0.15)
-        reasons.append({"type": "learned", "label": f"{liked_kw_match} shared topics"})
+        reasons.append({"type": "learned", "label": "Based on your likes"})
 
     # Liked author overlap
     liked_authors = set()
@@ -157,7 +157,7 @@ def behavioral_score(paper, liked_papers, disliked_kws, dwell_papers):
     dwell_overlap = paper_terms & dwell_terms
     if dwell_overlap:
         score += min(0.3, len(dwell_overlap) * 0.05)
-        reasons.append({"type": "reading_pattern", "label": f"{len(dwell_overlap)} reading signals"})
+        reasons.append({"type": "reading_pattern", "label": "Based on your reading"})
 
     # Journal preference (from reading history)
     dwell_journals = Counter(dp.get("journal","").lower() for dp in dwell_papers if dp.get("journal"))
