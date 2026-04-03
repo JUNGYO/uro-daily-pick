@@ -91,6 +91,20 @@ export default function Insights() {
       heatCells.push({date: key, count: readDates[key]||0});
     }
   }
+  // Month labels for heatmap
+  var heatMonths = [];
+  var lastMonth = "";
+  for (var wi = 0; wi < weeks; wi++) {
+    var cellDate = new Date(today);
+    cellDate.setDate(cellDate.getDate() - ((weeks-1-wi)*7));
+    var mon = cellDate.toLocaleDateString("en-US",{month:"short"});
+    if (mon !== lastMonth) {
+      if (heatMonths.length) heatMonths[heatMonths.length-1].span = wi - heatMonths[heatMonths.length-1].start;
+      heatMonths.push({label:mon, start:wi, span:1});
+      lastMonth = mon;
+    }
+  }
+  if (heatMonths.length) heatMonths[heatMonths.length-1].span = weeks - heatMonths[heatMonths.length-1].start;
 
   // Insight
   var topKws = topicData.slice(0,2).map(function(d){return d[0]});
@@ -119,18 +133,34 @@ export default function Insights() {
           </div>
         )}
 
-        <div className="bg-card rounded-xl border border-border p-4 mb-4" style={{boxShadow:"0 1px 3px rgba(0,0,0,0.03)"}}>
-          <h2 className="text-[0.833rem] font-semibold text-text1 mb-3">Reading Activity</h2>
-          <div className="overflow-x-auto">
-            <div style={{display:"grid",gridTemplateRows:"repeat(7,12px)",gridAutoFlow:"column",gap:2,width:"fit-content"}}>
-              {heatCells.map(function(c,i) {
-                return <div key={i} title={c.date+": "+c.count+" papers"} className="rounded-sm" style={{width:12,height:12,background:HEAT[Math.min(5,c.count)],cursor:"pointer"}} />;
-              })}
+        <div className="bg-card rounded-xl border border-border p-4 sm:p-5 mb-4" style={{boxShadow:"0 1px 3px rgba(0,0,0,0.03)"}}>
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-[0.833rem] font-semibold text-text1">Reading Activity</h2>
+            <div className="flex items-center gap-1.5">
+              <span className="text-[0.667rem] text-text3">Less</span>
+              {HEAT.map(function(c,i){return <div key={i} className="rounded-sm" style={{width:11,height:11,background:c}} />;})}
+              <span className="text-[0.667rem] text-text3">More</span>
             </div>
-            <div className="flex items-center gap-1 mt-2">
-              <span style={{fontSize:9}} className="text-text3 mr-1">Less</span>
-              {HEAT.map(function(c,i){return <div key={i} className="rounded-sm" style={{width:10,height:10,background:c}} />;})}
-              <span style={{fontSize:9}} className="text-text3 ml-1">More</span>
+          </div>
+          <div className="overflow-x-auto">
+            <div style={{display:"flex",gap:3}}>
+              <div style={{display:"flex",flexDirection:"column",gap:3,paddingTop:20}}>
+                {["Mon","","Wed","","Fri","","Sun"].map(function(d,i){
+                  return <div key={i} className="text-text3 text-right" style={{height:14,fontSize:10,lineHeight:"14px",width:28}}>{d}</div>;
+                })}
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{display:"flex",gap:3,marginBottom:4}}>
+                  {heatMonths.map(function(m,i){
+                    return <div key={i} className="text-text3" style={{fontSize:10,width:m.span*17-3,flexShrink:0}}>{m.label}</div>;
+                  })}
+                </div>
+                <div style={{display:"grid",gridTemplateRows:"repeat(7,14px)",gridAutoFlow:"column",gap:3}}>
+                  {heatCells.map(function(c,i) {
+                    return <div key={i} title={c.date+": "+c.count+" papers"} className="rounded-sm hover:ring-2 hover:ring-accent hover:ring-offset-1" style={{width:14,height:14,background:HEAT[Math.min(5,c.count)],cursor:"pointer",transition:"transform 0.1s"}} />;
+                  })}
+                </div>
+              </div>
             </div>
           </div>
         </div>
