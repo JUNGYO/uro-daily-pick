@@ -89,6 +89,7 @@ export default function Settings() {
       institution: form.institution || "",
       keywords: form.keywords || [],
       preferred_journals: form.preferred_journals || [],
+      preferred_study_types: form.preferred_study_types || [],
       digest_email: form.digest_email ?? true,
       digest_kakao: form.digest_kakao ?? false,
     }).eq("id", user.id);
@@ -149,6 +150,27 @@ export default function Settings() {
             onRemove={val => removeTag("keywords", val)}
             placeholder="e.g. prostate cancer, robotic surgery"
           />
+          {/* Study types */}
+          <div className="mb-5">
+            <label className="text-[0.889rem] font-semibold text-text1 block mb-2">Preferred Study Types</label>
+            <div className="flex flex-wrap gap-2">
+              {["rct","basic_research","biomarker","retrospective","prospective","meta_analysis","ai_ml","surgical","imaging","epidemiology","guideline","review"].map(t => {
+                const active = (form.preferred_study_types || []).includes(t);
+                const label = t.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
+                return (
+                  <button key={t} type="button" onClick={() => {
+                    const cur = form.preferred_study_types || [];
+                    setForm({ ...form, preferred_study_types: active ? cur.filter(x => x !== t) : [...cur, t] });
+                  }}
+                    className={`h-8 px-3 rounded-lg text-[0.778rem] font-medium border transition-colors
+                      ${active ? "bg-[rgba(0,122,255,0.08)] text-accent border-accent" : "bg-card text-text3 border-border hover:border-text3"}`}>
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
           {/* Journals — user editable */}
           <TagField
             label="Preferred Journals"
