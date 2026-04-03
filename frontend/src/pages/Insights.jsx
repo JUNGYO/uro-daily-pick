@@ -147,80 +147,116 @@ function NetworkGraph({ graph, width, height }) {
     const maxCount = d3.max(graph.nodes, d => d.count) || 1;
     const maxLink = d3.max(graph.links, d => d.value) || 1;
 
-    // Deep copy for D3 mutation
     const nodes = graph.nodes.map(d => ({ ...d }));
     const links = graph.links.map(d => ({ ...d }));
 
+    const R = (d) => Math.sqrt(d.count / maxCount) * 40 + 20;
+
+    // Defs for glow filter + gradients
+    const defs = svg.append("defs");
+
+    // Glow filter
+    const filter = defs.append("filter").attr("id", "glow").attr("x", "-50%").attr("y", "-50%").attr("width", "200%").attr("height", "200%");
+    filter.append("feGaussianBlur").attr("stdDeviation", "4").attr("result", "blur");
+    const merge = filter.append("feMerge");
+    merge.append("feMergeNode").attr("in", "blur");
+    merge.append("feMergeNode").attr("in", "SourceGraphic");
+
+    // Radial gradients per cluster
+    CLUSTER_COLORS.forEach((color, i) => {
+      const grad = defs.append("radialGradient").attr("id", `grad-${i}`);
+      grad.append("stop").attr("offset", "0%").attr("stop-color", color).attr("stop-opacity", 0.3);
+      grad.append("stop").attr("offset", "100%").attr("stop-color", color).attr("stop-opacity", 0.05);
+    });
+
     const simulation = d3.forceSimulation(nodes)
-      .force("link", d3.forceLink(links).id(d => d.id).distance(100).strength(d => d.value / maxLink * 0.5))
-      .force("charge", d3.forceManyBody().strength(-200))
+      .force("link", d3.forceLink(links).id(d => d.id).distance(140).strength(d => d.value / maxLink * 0.4))
+      .force("charge", d3.forceManyBody().strength(-350))
       .force("center", d3.forceCenter(width / 2, height / 2))
-      .force("collision", d3.forceCollide().radius(d => nodeRadius(d, maxCount) + 15));
+      .force("collision", d3.forceCollide().radius(d => R(d) + 10));
 
     const g = svg.append("g");
     svg.call(d3.zoom().scaleExtent([0.3, 3]).on("zoom", (e) => g.attr("transform", e.transform)));
 
-    // Links
-    g.append("g").selectAll("line")
-      .data(links).join("line")
-      .attr("stroke", "#D1D5DB")
-      .attr("stroke-width", d => Math.max(1, d.value / maxLink * 5))
-      .attr("stroke-opacity", 0.5)
-      .attr("stroke-linecap", "round");
+    // Curved links
+    const link = g.append("g").selectAll("path")
+      .data(links).join("path")
+      .attr("fill", "none")
+      .attr("stroke", d => {
+        const c = CLUSTER_COLORS[nodes.find(n => n.id === (d.source.id || d.source))?.cluster || 0];
+        return c;
+      })
+      .attr("stroke-width", d => Math.max(1.5, d.value / maxLink * 4))
+      .attr("stroke-opacity", 0.2);
 
-    // Node groups
+    // Nodes
     const node = g.append("g").selectAll("g")
       .data(nodes).join("g")
+      .style("cursor", "grab")
       .call(d3.drag()
         .on("start", (e, d) => { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
         .on("drag", (e, d) => { d.fx = e.x; d.fy = e.y; })
         .on("end", (e, d) => { if (!e.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; }));
 
-    // Background circle (filled, soft)
+    // Outer glow circle
     node.append("circle")
-      .attr("r", d => nodeRadius(d, maxCount))
-      .attr("fill", d => CLUSTER_COLORS[d.cluster % CLUSTER_COLORS.length])
-      .attr("fill-opacity", 0.12)
-      .attr("stroke", d => CLUSTER_COLORS[d.cluster % CLUSTER_COLORS.length])
-      .attr("stroke-width", 2)
-      .attr("stroke-opacity", 0.6);
+      .attr("r", d => R(d) + 4)
+      .attr("fill", d => `url(#grad-${d.cluster % CLUSTER_COLORS.length})`)
+      .attr("filter", "url(#glow)");
 
-    // Label
-    node.append("text")
-      .text(d => d.id.length > 18 ? d.id.slice(0, 16) + "…" : d.id)
-      .attr("text-anchor", "middle")
-      .attr("dy", "0.35em")
-      .attr("font-size", d => Math.max(10, nodeRadius(d, maxCount) * 0.55))
+    // Main circle
+    node.append("circle")
+      .attr("r", d => R(d))
+      .attr("fill", "#FFFFFF")
+      .attr("stroke", d => CLUSTER_COLORS[d.cluster % CLUSTER_COLORS.length])
+      .attr("stroke-width", 2.5);
+
+    // Inner fill
+    node.append("circle")
+      .attr("r", d => R(d) - 1)
       .attr("fill", d => CLUSTER_COLORS[d.cluster % CLUSTER_COLORS.length])
+      .attr("fill-opacity", 0.06);
+
+    // Label — larger, bolder
+    node.append("text")
+      .text(d => {
+        const name = d.id;
+        const maxLen = Math.max(10, Math.floor(R(d) / 4));
+        return name.length > maxLen ? name.slice(0, maxLen - 1) + "…" : name;
+      })
+      .attr("text-anchor", "middle")
+      .attr("dy", "-0.1em")
+      .attr("font-size", d => Math.max(11, R(d) * 0.38))
+      .attr("fill", "#1D1D1F")
       .attr("font-weight", "600")
       .attr("font-family", "Inter, system-ui, sans-serif")
       .attr("pointer-events", "none");
 
-    // Count badge
+    // Count below label
     node.append("text")
-      .text(d => d.count)
+      .text(d => `${d.count} papers`)
       .attr("text-anchor", "middle")
-      .attr("dy", d => nodeRadius(d, maxCount) + 12)
-      .attr("font-size", 9)
+      .attr("dy", d => Math.max(11, R(d) * 0.38) * 0.8 + 4 + "px")
+      .attr("font-size", d => Math.max(9, R(d) * 0.25))
       .attr("fill", "#86868B")
       .attr("font-family", "Inter, system-ui, sans-serif")
       .attr("pointer-events", "none");
 
     simulation.on("tick", () => {
-      g.selectAll("line")
-        .attr("x1", d => d.source.x).attr("y1", d => d.source.y)
-        .attr("x2", d => d.target.x).attr("y2", d => d.target.y);
+      // Curved links
+      link.attr("d", d => {
+        const dx = d.target.x - d.source.x;
+        const dy = d.target.y - d.source.y;
+        const dr = Math.sqrt(dx * dx + dy * dy) * 1.5;
+        return `M${d.source.x},${d.source.y}A${dr},${dr} 0 0,1 ${d.target.x},${d.target.y}`;
+      });
       node.attr("transform", d => `translate(${d.x},${d.y})`);
     });
 
     return () => simulation.stop();
   }, [graph, width, height]);
 
-  return <svg ref={svgRef} width={width} height={height} />;
-}
-
-function nodeRadius(d, maxCount) {
-  return Math.sqrt(d.count / maxCount) * 30 + 12;
+  return <svg ref={svgRef} width={width} height={height} style={{ background: "#FAFBFC", borderRadius: 12 }} />;
 }
 
 export default function Insights() {
