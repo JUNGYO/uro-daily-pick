@@ -2,290 +2,205 @@ import { useState, useEffect, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../App";
 import * as d3 from "d3";
-import { Loader2 } from "lucide-react";
+import { Loader2, TrendingUp, BookOpen, Zap } from "lucide-react";
 
-// MeSH terms that add no insight — filter out
-const STOP_TERMS = new Set([
-  "humans", "male", "female", "aged", "middle aged", "aged, 80 and over",
-  "adult", "young adult", "adolescent", "child", "infant", "animals",
-  "treatment outcome", "follow-up studies", "time factors", "prognosis",
-  "risk factors", "retrospective studies", "prospective studies",
-  "cohort studies", "cross-sectional studies", "prevalence", "incidence",
-  "survival rate", "survival analysis", "kaplan-meier estimate",
-  "proportional hazards models", "multivariate analysis", "logistic models",
-  "predictive value of tests", "sensitivity and specificity",
-  "reproducibility of results", "reference values", "risk assessment",
-  "united states", "europe", "japan", "korea", "china",
-  "journal article", "research support", "english abstract",
-  "comparative study", "multicenter study", "randomized controlled trial",
-  "evaluation study", "validation study", "clinical trial",
-  "practice guideline", "meta-analysis", "systematic review", "review",
-  "case reports", "editorial", "letter", "comment",
-]);
+// Filter out generic MeSH
+const STOP = new Set(["humans","male","female","aged","middle aged","aged, 80 and over","adult","young adult","adolescent","child","animals","treatment outcome","follow-up studies","time factors","prognosis","risk factors","retrospective studies","prospective studies","cohort studies","prevalence","incidence","survival rate","survival analysis","proportional hazards models","multivariate analysis","logistic models","predictive value of tests","sensitivity and specificity","reproducibility of results","reference values","risk assessment","united states","europe","japan","korea","china","journal article","research support","english abstract","comparative study","multicenter study","randomized controlled trial","evaluation study","clinical trial","practice guideline","meta-analysis","systematic review","review","case reports","editorial","letter","comment"]);
 
-// Study type display
-const TYPE_LABELS = {
-  rct: "Clinical Trial", basic_research: "Basic Research", biomarker: "Biomarker",
-  retrospective: "Retrospective", prospective: "Prospective", meta_analysis: "Meta-analysis",
-  ai_ml: "AI / ML", surgical: "Surgical", imaging: "Imaging",
-  epidemiology: "Epidemiology", guideline: "Guideline", review: "Review",
-};
+const TOPIC_COLORS = ["#007AFF","#34C759","#FF9500","#AF52DE","#FF3B30","#00C7BE","#5856D6","#FF2D55","#8E8E93","#30B0C7","#A2845E","#636366","#48484A","#007AFF","#34C759"];
+const TYPE_LABELS = { rct:"Clinical Trial", basic_research:"Basic Research", biomarker:"Biomarker", retrospective:"Retrospective", prospective:"Prospective", meta_analysis:"Meta-analysis", ai_ml:"AI / ML", surgical:"Surgical", imaging:"Imaging", epidemiology:"Epidemiology", guideline:"Guideline", review:"Review" };
 
-// Color palette for clusters
-const CLUSTER_COLORS = ["#007AFF", "#34C759", "#FF9500", "#AF52DE", "#FF3B30", "#00C7BE", "#5856D6", "#FF2D55"];
+const HEAT_COLORS = ["#F5F5F7","#DBEAFE","#93C5FD","#3B82F6","#1D4ED8","#1E3A5F"];
 
-function buildGraph(papers) {
-  const kwCount = {};
-  const cooccur = {};
+/* ═══ Heatmap (GitHub 잔디) ═══ */
+function Heatmap({ readDates }) {
+  const weeks = 26;
+  const today = new Date();
+  const cells = [];
 
-  for (const p of papers) {
-    const terms = new Set();
-    // Only meaningful keywords/MeSH
-    for (const k of (p.keywords || [])) {
-      const kl = k.toLowerCase().trim();
-      if (kl.length > 2 && kl.length < 40 && !STOP_TERMS.has(kl)) terms.add(kl);
-    }
-    for (const m of (p.mesh_terms || [])) {
-      const ml = m.toLowerCase().trim();
-      if (ml.length > 2 && ml.length < 40 && !STOP_TERMS.has(ml)) terms.add(ml);
-    }
-
-    const arr = [...terms];
-    for (const t of arr) kwCount[t] = (kwCount[t] || 0) + 1;
-    for (let i = 0; i < arr.length; i++) {
-      for (let j = i + 1; j < arr.length; j++) {
-        const key = [arr[i], arr[j]].sort().join("|||");
-        cooccur[key] = (cooccur[key] || 0) + 1;
-      }
+  for (let w = weeks - 1; w >= 0; w--) {
+    for (let d = 0; d < 7; d++) {
+      const date = new Date(today);
+      date.setDate(date.getDate() - (w * 7 + (6 - d)));
+      const key = date.toISOString().slice(0, 10);
+      const count = readDates[key] || 0;
+      cells.push({ date: key, count, dayOfWeek: date.getDay(), weekAgo: w });
     }
   }
 
-  // Top 15 keywords
-  const topKw = Object.entries(kwCount)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 15)
-    .map(([k]) => k);
-  const topSet = new Set(topKw);
+  const months = [];
+  let lastMonth = "";
+  cells.forEach((c, i) => {
+    const m = new Date(c.date).toLocaleDateString("en-US", { month: "short" });
+    if (m !== lastMonth) { months.push({ label: m, x: Math.floor(i / 7) }); lastMonth = m; }
+  });
 
-  const nodes = topKw.map(k => ({ id: k, count: kwCount[k] }));
-  const links = [];
-  for (const [key, count] of Object.entries(cooccur)) {
-    if (count < 2) continue;
-    const [a, b] = key.split("|||");
-    if (topSet.has(a) && topSet.has(b)) {
-      links.push({ source: a, target: b, value: count });
-    }
-  }
-
-  // Assign cluster colors based on connectivity (simple: first connected component)
-  const adj = {};
-  for (const n of nodes) adj[n.id] = [];
-  for (const l of links) { adj[l.source]?.push(l.target); adj[l.target]?.push(l.source); }
-
-  let clusterIdx = 0;
-  const visited = new Set();
-  const nodeCluster = {};
-  for (const n of nodes) {
-    if (visited.has(n.id)) continue;
-    const queue = [n.id];
-    while (queue.length) {
-      const cur = queue.shift();
-      if (visited.has(cur)) continue;
-      visited.add(cur);
-      nodeCluster[cur] = clusterIdx;
-      for (const nb of (adj[cur] || [])) if (!visited.has(nb)) queue.push(nb);
-    }
-    clusterIdx++;
-  }
-  nodes.forEach(n => { n.cluster = nodeCluster[n.id] || 0; });
-
-  return { nodes, links };
+  return (
+    <div className="overflow-x-auto">
+      <div className="inline-block">
+        {/* Month labels */}
+        <div className="flex mb-1 ml-8" style={{ gap: 2 }}>
+          {Array.from({ length: weeks }, (_, w) => {
+            const m = months.find(m => m.x === weeks - 1 - w);
+            return <div key={w} className="text-[9px] text-text3" style={{ width: 14, textAlign: "center" }}>{m?.label || ""}</div>;
+          })}
+        </div>
+        <div className="flex">
+          {/* Day labels */}
+          <div className="flex flex-col mr-1" style={{ gap: 2 }}>
+            {["","M","","W","","F",""].map((d, i) => (
+              <div key={i} className="text-[9px] text-text3 flex items-center justify-end" style={{ width: 24, height: 14 }}>{d}</div>
+            ))}
+          </div>
+          {/* Grid */}
+          <div className="grid" style={{ gridTemplateRows: "repeat(7, 14px)", gridAutoFlow: "column", gap: 2 }}>
+            {cells.map((c, i) => {
+              const level = c.count === 0 ? 0 : Math.min(5, c.count);
+              return (
+                <div key={i} title={`${c.date}: ${c.count} papers`}
+                  className="rounded-[3px] transition-transform hover:scale-[1.4]"
+                  style={{ width: 14, height: 14, background: HEAT_COLORS[level], cursor: "pointer" }} />
+              );
+            })}
+          </div>
+        </div>
+        {/* Legend */}
+        <div className="flex items-center gap-1 mt-2 ml-8">
+          <span className="text-[9px] text-text3 mr-1">Less</span>
+          {HEAT_COLORS.map((c, i) => <div key={i} className="rounded-[2px]" style={{ width: 10, height: 10, background: c }} />)}
+          <span className="text-[9px] text-text3 ml-1">More</span>
+        </div>
+      </div>
+    </div>
+  );
 }
 
-function generateInsightText(papers, graph) {
-  if (!papers.length) return "";
-
-  // Study type distribution
-  const typeCounts = {};
-  for (const p of papers) {
-    const t = p.study_type || "other";
-    typeCounts[t] = (typeCounts[t] || 0) + 1;
-  }
-  const topType = Object.entries(typeCounts).sort((a, b) => b[1] - a[1])[0];
-
-  // Top keywords
-  const topKws = graph.nodes.slice(0, 3).map(n => n.id);
-
-  // Journal distribution
-  const journalCounts = {};
-  for (const p of papers) {
-    if (p.journal) journalCounts[p.journal] = (journalCounts[p.journal] || 0) + 1;
-  }
-  const topJournal = Object.entries(journalCounts).sort((a, b) => b[1] - a[1])[0];
-
-  const lines = [];
-  if (topKws.length >= 2) {
-    lines.push(`Your reading is centered on ${topKws.slice(0, 2).join(" and ")}.`);
-  }
-  if (topType) {
-    lines.push(`${Math.round(topType[1] / papers.length * 100)}% of your papers are ${TYPE_LABELS[topType[0]] || topType[0]}.`);
-  }
-  if (topJournal) {
-    lines.push(`Most read journal: ${topJournal[0]} (${topJournal[1]} papers).`);
-  }
-  return lines.join(" ");
-}
-
-function NetworkGraph({ graph, width, height }) {
+/* ═══ Treemap ═══ */
+function Treemap({ data, width, height }) {
   const svgRef = useRef(null);
 
   useEffect(() => {
-    if (!graph.nodes.length) return;
+    if (!data.length || !width) return;
     const svg = d3.select(svgRef.current);
     svg.selectAll("*").remove();
 
-    const maxCount = d3.max(graph.nodes, d => d.count) || 1;
-    const maxLink = d3.max(graph.links, d => d.value) || 1;
-
-    const nodes = graph.nodes.map(d => ({ ...d }));
-    const links = graph.links.map(d => ({ ...d }));
-
-    const R = (d) => Math.sqrt(d.count / maxCount) * 40 + 20;
-
-    // Defs for glow filter + gradients
-    const defs = svg.append("defs");
-
-    // Glow filter
-    const filter = defs.append("filter").attr("id", "glow").attr("x", "-50%").attr("y", "-50%").attr("width", "200%").attr("height", "200%");
-    filter.append("feGaussianBlur").attr("stdDeviation", "4").attr("result", "blur");
-    const merge = filter.append("feMerge");
-    merge.append("feMergeNode").attr("in", "blur");
-    merge.append("feMergeNode").attr("in", "SourceGraphic");
-
-    // Radial gradients per cluster
-    CLUSTER_COLORS.forEach((color, i) => {
-      const grad = defs.append("radialGradient").attr("id", `grad-${i}`);
-      grad.append("stop").attr("offset", "0%").attr("stop-color", color).attr("stop-opacity", 0.3);
-      grad.append("stop").attr("offset", "100%").attr("stop-color", color).attr("stop-opacity", 0.05);
-    });
-
-    const simulation = d3.forceSimulation(nodes)
-      .force("link", d3.forceLink(links).id(d => d.id).distance(140).strength(d => d.value / maxLink * 0.4))
-      .force("charge", d3.forceManyBody().strength(-350))
-      .force("center", d3.forceCenter(width / 2, height / 2))
-      .force("collision", d3.forceCollide().radius(d => R(d) + 10));
+    const root = d3.hierarchy({ children: data }).sum(d => d.value).sort((a, b) => b.value - a.value);
+    d3.treemap().size([width, height]).padding(3).round(true)(root);
 
     const g = svg.append("g");
-    svg.call(d3.zoom().scaleExtent([0.3, 3]).on("zoom", (e) => g.attr("transform", e.transform)));
 
-    // Curved links
-    const link = g.append("g").selectAll("path")
-      .data(links).join("path")
-      .attr("fill", "none")
-      .attr("stroke", d => {
-        const c = CLUSTER_COLORS[nodes.find(n => n.id === (d.source.id || d.source))?.cluster || 0];
-        return c;
-      })
-      .attr("stroke-width", d => Math.max(1.5, d.value / maxLink * 4))
-      .attr("stroke-opacity", 0.2);
+    const leaf = g.selectAll("g").data(root.leaves()).join("g")
+      .attr("transform", d => `translate(${d.x0},${d.y0})`);
 
-    // Nodes
-    const node = g.append("g").selectAll("g")
-      .data(nodes).join("g")
-      .style("cursor", "grab")
-      .call(d3.drag()
-        .on("start", (e, d) => { if (!e.active) simulation.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; })
-        .on("drag", (e, d) => { d.fx = e.x; d.fy = e.y; })
-        .on("end", (e, d) => { if (!e.active) simulation.alphaTarget(0); d.fx = null; d.fy = null; }));
+    // Rect with rounded corners
+    leaf.append("rect")
+      .attr("width", d => Math.max(0, d.x1 - d.x0))
+      .attr("height", d => Math.max(0, d.y1 - d.y0))
+      .attr("rx", 6)
+      .attr("fill", (d, i) => TOPIC_COLORS[i % TOPIC_COLORS.length])
+      .attr("fill-opacity", 0.85)
+      .style("cursor", "pointer")
+      .on("mouseover", function() { d3.select(this).attr("fill-opacity", 1); })
+      .on("mouseout", function() { d3.select(this).attr("fill-opacity", 0.85); });
 
-    // Outer glow circle
-    node.append("circle")
-      .attr("r", d => R(d) + 4)
-      .attr("fill", d => `url(#grad-${d.cluster % CLUSTER_COLORS.length})`)
-      .attr("filter", "url(#glow)");
-
-    // Main circle
-    node.append("circle")
-      .attr("r", d => R(d))
-      .attr("fill", "#FFFFFF")
-      .attr("stroke", d => CLUSTER_COLORS[d.cluster % CLUSTER_COLORS.length])
-      .attr("stroke-width", 2.5);
-
-    // Inner fill
-    node.append("circle")
-      .attr("r", d => R(d) - 1)
-      .attr("fill", d => CLUSTER_COLORS[d.cluster % CLUSTER_COLORS.length])
-      .attr("fill-opacity", 0.06);
-
-    // Label — larger, bolder
-    node.append("text")
-      .text(d => {
-        const name = d.id;
-        const maxLen = Math.max(10, Math.floor(R(d) / 4));
-        return name.length > maxLen ? name.slice(0, maxLen - 1) + "…" : name;
-      })
-      .attr("text-anchor", "middle")
-      .attr("dy", "-0.1em")
-      .attr("font-size", d => Math.max(11, R(d) * 0.38))
-      .attr("fill", "#1D1D1F")
+    // Label (only if rect is big enough)
+    leaf.filter(d => (d.x1 - d.x0) > 50 && (d.y1 - d.y0) > 25)
+      .append("text")
+      .attr("x", 8).attr("y", 18)
+      .text(d => d.data.name.length > 20 ? d.data.name.slice(0, 18) + "…" : d.data.name)
+      .attr("font-size", d => Math.min(13, Math.max(10, (d.x1 - d.x0) / 8)))
+      .attr("fill", "#FFF")
       .attr("font-weight", "600")
       .attr("font-family", "Inter, system-ui, sans-serif")
       .attr("pointer-events", "none");
 
-    // Count below label
-    node.append("text")
-      .text(d => `${d.count} papers`)
-      .attr("text-anchor", "middle")
-      .attr("dy", d => Math.max(11, R(d) * 0.38) * 0.8 + 4 + "px")
-      .attr("font-size", d => Math.max(9, R(d) * 0.25))
-      .attr("fill", "#86868B")
+    // Count
+    leaf.filter(d => (d.x1 - d.x0) > 50 && (d.y1 - d.y0) > 40)
+      .append("text")
+      .attr("x", 8).attr("y", 34)
+      .text(d => `${d.data.value} papers`)
+      .attr("font-size", 10)
+      .attr("fill", "rgba(255,255,255,0.7)")
       .attr("font-family", "Inter, system-ui, sans-serif")
       .attr("pointer-events", "none");
 
-    simulation.on("tick", () => {
-      // Curved links
-      link.attr("d", d => {
-        const dx = d.target.x - d.source.x;
-        const dy = d.target.y - d.source.y;
-        const dr = Math.sqrt(dx * dx + dy * dy) * 1.5;
-        return `M${d.source.x},${d.source.y}A${dr},${dr} 0 0,1 ${d.target.x},${d.target.y}`;
-      });
-      node.attr("transform", d => `translate(${d.x},${d.y})`);
-    });
+  }, [data, width, height]);
 
-    return () => simulation.stop();
-  }, [graph, width, height]);
-
-  return <svg ref={svgRef} width={width} height={height} style={{ background: "#FAFBFC", borderRadius: 12 }} />;
+  return <svg ref={svgRef} width={width} height={height} />;
 }
 
+/* ═══ Activity Ring ═══ */
+function Ring({ value, max, color, label, icon: Icon }) {
+  const r = 38;
+  const circ = 2 * Math.PI * r;
+  const pct = Math.min(1, value / Math.max(1, max));
+
+  return (
+    <div className="flex flex-col items-center">
+      <svg width="100" height="100" viewBox="0 0 100 100">
+        <circle cx="50" cy="50" r={r} fill="none" stroke="#F2F2F7" strokeWidth="7" />
+        <circle cx="50" cy="50" r={r} fill="none" stroke={color} strokeWidth="7"
+          strokeDasharray={`${pct * circ} ${circ}`} strokeLinecap="round"
+          transform="rotate(-90 50 50)" className="transition-all duration-700" />
+        <text x="50" y="46" textAnchor="middle" fontSize="18" fontWeight="700" fill="#1D1D1F">{value}</text>
+        <text x="50" y="60" textAnchor="middle" fontSize="9" fill="#86868B">/ {max}</text>
+      </svg>
+      <div className="flex items-center gap-1 mt-1">
+        <Icon size={12} style={{ color }} />
+        <span className="text-[0.722rem] text-text3 font-medium">{label}</span>
+      </div>
+    </div>
+  );
+}
+
+/* ═══ Main ═══ */
 export default function Insights() {
   const { user } = useAuth();
   const [papers, setPapers] = useState([]);
+  const [readDates, setReadDates] = useState({});
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({ total: 0, liked: 0 });
-  const containerRef = useRef(null);
-  const [dims, setDims] = useState({ w: 800, h: 500 });
+  const [stats, setStats] = useState({ total: 0, liked: 0, streak: 0 });
+  const treemapRef = useRef(null);
+  const [treemapW, setTreemapW] = useState(600);
 
   useEffect(() => {
     if (!user) return;
     (async () => {
       const { data: fbs } = await supabase.from("feedbacks").select("paper_id").eq("user_id", user.id).eq("action", "like");
-      const { data: reads } = await supabase.from("read_history").select("paper_id").eq("user_id", user.id);
+      const { data: reads } = await supabase.from("read_history").select("paper_id,clicked_at").eq("user_id", user.id);
+
       const paperIds = [...new Set([...(fbs || []).map(f => f.paper_id), ...(reads || []).map(r => r.paper_id)])];
+
+      // Date counts for heatmap
+      const dateCounts = {};
+      for (const r of (reads || [])) {
+        const d = r.clicked_at?.slice(0, 10);
+        if (d) dateCounts[d] = (dateCounts[d] || 0) + 1;
+      }
+      // Also count feedback dates
+      setReadDates(dateCounts);
+
       if (paperIds.length) {
         const { data } = await supabase.from("papers").select("id,keywords,mesh_terms,study_type,journal").in("id", paperIds);
         setPapers(data || []);
       }
-      setStats({ total: paperIds.length, liked: (fbs || []).length });
+
+      // Streak
+      let streak = 0;
+      const today = new Date();
+      for (let i = 0; i < 365; i++) {
+        const d = new Date(today); d.setDate(d.getDate() - i);
+        const key = d.toISOString().slice(0, 10);
+        if (dateCounts[key]) streak++; else break;
+      }
+
+      setStats({ total: paperIds.length, liked: (fbs || []).length, streak });
       setLoading(false);
     })();
   }, [user]);
 
   useEffect(() => {
-    const resize = () => {
-      if (containerRef.current) setDims({ w: containerRef.current.offsetWidth - 48, h: Math.max(400, window.innerHeight - 300) });
-    };
+    const resize = () => { if (treemapRef.current) setTreemapW(treemapRef.current.offsetWidth); };
     resize();
     window.addEventListener("resize", resize);
     return () => window.removeEventListener("resize", resize);
@@ -297,91 +212,87 @@ export default function Insights() {
     </div>
   );
 
-  const graph = buildGraph(papers);
-  const insight = generateInsightText(papers, graph);
+  // Topic data for treemap
+  const kwCount = {};
+  for (const p of papers) {
+    for (const k of (p.keywords || [])) { const kl = k.toLowerCase(); if (!STOP.has(kl) && kl.length > 2) kwCount[kl] = (kwCount[kl] || 0) + 1; }
+    for (const m of (p.mesh_terms || [])) { const ml = m.toLowerCase(); if (!STOP.has(ml) && ml.length > 2) kwCount[ml] = (kwCount[ml] || 0) + 1; }
+  }
+  const treemapData = Object.entries(kwCount).sort((a, b) => b[1] - a[1]).slice(0, 12).map(([name, value]) => ({ name, value }));
 
-  // Study type distribution for mini chart
+  // Study type distribution
   const typeCounts = {};
   for (const p of papers) { const t = p.study_type || "other"; typeCounts[t] = (typeCounts[t] || 0) + 1; }
   const typeEntries = Object.entries(typeCounts).sort((a, b) => b[1] - a[1]).slice(0, 6);
-  const maxTypeCount = typeEntries[0]?.[1] || 1;
+  const maxType = typeEntries[0]?.[1] || 1;
+
+  // Insight text
+  const topKws = treemapData.slice(0, 2).map(d => d.name);
+  const topType = typeEntries[0];
+  const topJournal = (() => { const j = {}; papers.forEach(p => { if (p.journal) j[p.journal] = (j[p.journal] || 0) + 1; }); return Object.entries(j).sort((a, b) => b[1] - a[1])[0]; })();
 
   return (
-    <div className="h-full overflow-y-auto" ref={containerRef}>
-      <div className="p-4 sm:p-6 lg:p-8 max-w-[1200px] mx-auto">
+    <div className="h-full overflow-y-auto">
+      <div className="p-4 sm:p-6 lg:p-8 max-w-[1000px] mx-auto">
 
         {/* Header */}
-        <div className="mb-6">
-          <h1 className="text-[1.222rem] font-bold text-text1 mb-1">Research Insights</h1>
-          <div className="flex items-center gap-4 text-[0.833rem]">
-            <span className="text-text3"><span className="font-semibold text-text1">{stats.total}</span> papers read</span>
-            <span className="text-text3"><span className="font-semibold text-accent">{stats.liked}</span> liked</span>
-          </div>
+        <h1 className="text-[1.222rem] font-bold text-text1 mb-6">Research Insights</h1>
+
+        {/* Activity Rings + Stats */}
+        <div className="bg-card rounded-xl border border-border p-5 mb-4 flex flex-col sm:flex-row items-center justify-around gap-6" style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
+          <Ring value={stats.total} max={50} color="#007AFF" label="Papers Read" icon={BookOpen} />
+          <Ring value={stats.liked} max={20} color="#34C759" label="Liked" icon={TrendingUp} />
+          <Ring value={stats.streak} max={30} color="#FF9500" label="Day Streak" icon={Zap} />
         </div>
 
-        {graph.nodes.length >= 3 ? (
-          <>
-            {/* Insight summary */}
-            {insight && (
-              <div className="bg-[rgba(0,122,255,0.04)] border border-[rgba(0,122,255,0.1)] rounded-xl p-4 mb-6">
-                <p className="text-[0.889rem] text-text1 leading-relaxed">{insight}</p>
-              </div>
-            )}
-
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              {/* Network graph — 2/3 width */}
-              <div className="lg:col-span-2 bg-card rounded-xl border border-border overflow-hidden" style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
-                <div className="px-5 py-3 border-b border-border">
-                  <h2 className="text-[0.889rem] font-semibold text-text1">Research Network</h2>
-                  <p className="text-[0.722rem] text-text3">{graph.nodes.length} topics · {graph.links.length} connections · drag to explore</p>
-                </div>
-                <NetworkGraph graph={graph} width={Math.min(dims.w, 800)} height={dims.h} />
-              </div>
-
-              {/* Side panel — study type distribution */}
-              <div className="space-y-4">
-                <div className="bg-card rounded-xl border border-border p-5" style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
-                  <h2 className="text-[0.889rem] font-semibold text-text1 mb-4">Study Types</h2>
-                  <div className="space-y-3">
-                    {typeEntries.map(([type, count], i) => (
-                      <div key={type}>
-                        <div className="flex items-center justify-between mb-1">
-                          <span className="text-[0.778rem] text-text2">{TYPE_LABELS[type] || type}</span>
-                          <span className="text-[0.722rem] text-text3 font-mono">{count}</span>
-                        </div>
-                        <div className="h-2 bg-hover rounded-full overflow-hidden">
-                          <div className="h-full rounded-full transition-all" style={{
-                            width: `${(count / maxTypeCount) * 100}%`,
-                            background: CLUSTER_COLORS[i % CLUSTER_COLORS.length],
-                          }} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Top keywords list */}
-                <div className="bg-card rounded-xl border border-border p-5" style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
-                  <h2 className="text-[0.889rem] font-semibold text-text1 mb-3">Top Keywords</h2>
-                  <div className="space-y-2">
-                    {graph.nodes.slice(0, 8).map((n, i) => (
-                      <div key={n.id} className="flex items-center gap-2">
-                        <span className="text-[0.722rem] text-text3 w-4 text-right">{i + 1}</span>
-                        <span className="text-[0.833rem] text-text1 flex-1">{n.id}</span>
-                        <span className="text-[0.722rem] text-text3 font-mono">{n.count}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </>
-        ) : (
-          <div className="bg-card rounded-xl border border-border p-8 text-center">
-            <p className="text-[1rem] text-text1 font-semibold mb-2">Not enough data yet</p>
-            <p className="text-[0.889rem] text-text3">Read and like more papers to see your research insights.</p>
+        {/* Insight text */}
+        {topKws.length >= 2 && (
+          <div className="bg-[rgba(0,122,255,0.04)] border border-[rgba(0,122,255,0.1)] rounded-xl p-4 mb-4">
+            <p className="text-[0.889rem] text-text1 leading-relaxed">
+              Your reading is centered on <strong>{topKws[0]}</strong> and <strong>{topKws[1]}</strong>.
+              {topType && ` ${Math.round(topType[1] / papers.length * 100)}% are ${TYPE_LABELS[topType[0]] || topType[0]}.`}
+              {topJournal && ` Most read: ${topJournal[0]} (${topJournal[1]}).`}
+            </p>
           </div>
         )}
+
+        {/* Heatmap */}
+        <div className="bg-card rounded-xl border border-border p-5 mb-4" style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
+          <h2 className="text-[0.889rem] font-semibold text-text1 mb-3">Reading Activity</h2>
+          <Heatmap readDates={readDates} />
+        </div>
+
+        {/* Treemap + Study Types */}
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
+          <div className="lg:col-span-3 bg-card rounded-xl border border-border p-5" ref={treemapRef} style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
+            <h2 className="text-[0.889rem] font-semibold text-text1 mb-3">Research Topics</h2>
+            {treemapData.length >= 3 ? (
+              <Treemap data={treemapData} width={treemapW - 40} height={280} />
+            ) : (
+              <p className="text-[0.833rem] text-text3 py-8 text-center">Read more papers to see topic distribution.</p>
+            )}
+          </div>
+
+          <div className="lg:col-span-2 bg-card rounded-xl border border-border p-5" style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
+            <h2 className="text-[0.889rem] font-semibold text-text1 mb-4">Study Types</h2>
+            <div className="space-y-3">
+              {typeEntries.map(([type, count], i) => (
+                <div key={type}>
+                  <div className="flex items-center justify-between mb-1">
+                    <span className="text-[0.778rem] text-text2">{TYPE_LABELS[type] || type}</span>
+                    <span className="text-[0.722rem] text-text3 font-mono">{count}</span>
+                  </div>
+                  <div className="h-2 bg-hover rounded-full overflow-hidden">
+                    <div className="h-full rounded-full transition-all duration-500" style={{
+                      width: `${(count / maxType) * 100}%`,
+                      background: TOPIC_COLORS[i % TOPIC_COLORS.length],
+                    }} />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );
