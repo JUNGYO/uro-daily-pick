@@ -8,7 +8,8 @@ import Login from "./pages/Login";
 import Onboarding from "./pages/Onboarding";
 import ResetPassword from "./pages/ResetPassword";
 import Landing from "./pages/Landing";
-import { Newspaper, FolderOpen, Settings as SettingsIcon, LogOut } from "lucide-react";
+import Insights from "./pages/Insights";
+import { Newspaper, FolderOpen, Settings as SettingsIcon, LogOut, Network } from "lucide-react";
 
 const AuthContext = createContext(null);
 export const useAuth = () => useContext(AuthContext);
@@ -79,6 +80,7 @@ function Layout({ children }) {
 
   const links = [
     { to: "/", icon: Newspaper, label: "Daily Pick" },
+    { to: "/insights", icon: Network, label: "Insights" },
     { to: "/collections", icon: FolderOpen, label: "Collections" },
     { to: "/settings", icon: SettingsIcon, label: "Settings" },
   ];
@@ -135,6 +137,7 @@ export default function App() {
             <ProtectedRoute><Layout>
               <Routes>
                 <Route path="/" element={<DailyPick />} />
+                <Route path="/insights" element={<Insights />} />
                 <Route path="/collections" element={<Collections />} />
                 <Route path="/settings" element={<Settings />} />
               </Routes>

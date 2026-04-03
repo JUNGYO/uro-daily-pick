@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../App";
-import { Heart, X, ExternalLink, RefreshCw, Loader2, Tag, User2, BookOpen, FlaskConical, Clock, Star, TrendingUp, Zap, ChevronLeft, ChevronRight, ChevronUp, ChevronDown } from "lucide-react";
+import { Heart, X, ExternalLink, RefreshCw, Loader2, Tag, User2, BookOpen, FlaskConical, Clock, Star, TrendingUp, Zap, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Share2, Copy, Check } from "lucide-react";
 
 /* ── Study type badge colors ── */
 const TYPE_STYLE = {
@@ -190,7 +190,25 @@ function Detail({ rec, onFeedback, onPrev, onNext, hasPrev, hasNext, likeAnim })
           </div>
 
           {/* Right */}
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5">
+            {/* Share */}
+            <button onClick={() => {
+              const url = `https://pubmed.ncbi.nlm.nih.gov/${paper.pmid}/`;
+              if (navigator.share) navigator.share({ title: paper.title, url });
+              else { navigator.clipboard.writeText(`${paper.title}\n${url}`); }
+            }}
+              className="w-9 h-9 rounded-lg border border-border flex items-center justify-center text-text3 hover:bg-hover transition-colors" title="Share">
+              <Share2 size={15} />
+            </button>
+            {/* Copy citation */}
+            <button onClick={() => {
+              const authors = (paper.authors || []).slice(0, 3).join(", ") + (paper.authors?.length > 3 ? " et al." : "");
+              const cite = `${authors}. ${paper.title} ${paper.journal}. ${paper.pub_date}. PMID: ${paper.pmid}`;
+              navigator.clipboard.writeText(cite);
+            }}
+              className="w-9 h-9 rounded-lg border border-border flex items-center justify-center text-text3 hover:bg-hover transition-colors" title="Copy citation">
+              <Copy size={15} />
+            </button>
             {paper.doi && (
               <a href={`https://doi.org/${paper.doi}`} target="_blank" rel="noopener"
                 className="h-9 px-4 rounded-lg bg-accent text-white text-[0.778rem] font-medium flex items-center gap-1.5 hover:bg-[#0066D6] transition-colors no-underline">
@@ -276,6 +294,8 @@ export default function DailyPick() {
   const [cur, setCur] = useState(0);
   const [loading, setLoading] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const todayKST = new Date(Date.now() + 9*3600000).toISOString().slice(0, 10);
+  const [selectedDate, setSelectedDate] = useState(todayKST);
 
   // Mobile back button: push/pop history state instead of navigating away
   const openMobile = () => {
@@ -361,10 +381,8 @@ export default function DailyPick() {
     if (!user) return;
     (async () => {
       setLoading(true);
-      const today = new Date(Date.now() + 9*3600000).toISOString().slice(0, 10);
-
-      // Try loading pre-generated recommendations
-      const { data: recsData } = await supabase.from("recommendations").select("*, paper:papers(*)").eq("user_id", user.id).eq("rec_date", today).order("score", { ascending: false });
+      // Try loading pre-generated recommendations for selected date
+      const { data: recsData } = await supabase.from("recommendations").select("*, paper:papers(*)").eq("user_id", user.id).eq("rec_date", selectedDate).order("score", { ascending: false });
 
       if (recsData?.length) {
         const paperIds = recsData.map(r => r.paper_id);
@@ -377,7 +395,7 @@ export default function DailyPick() {
       }
       setLoading(false);
     })();
-  }, [user]);
+  }, [user, selectedDate]);
 
   const generateInstantRecs = async (userId, today) => {
     // Get user profile
@@ -542,8 +560,26 @@ export default function DailyPick() {
         {/* ── List panel ── */}
         <div className={`w-full md:w-[320px] lg:w-[340px] xl:w-[360px] shrink-0 md:border-r border-border flex flex-col bg-bg ${mobileOpen ? "hidden md:flex" : ""}`}>
           <div className="px-4 py-2.5 flex items-center justify-between border-b border-border">
-            <span className="text-[0.778rem] font-medium text-text2">{new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}</span>
-            <span className="text-[0.722rem] text-text3 bg-hover px-2 py-0.5 rounded-md font-medium">{fbCount} / {recs.length} rated</span>
+            <div className="flex items-center gap-1">
+              <button onClick={() => {
+                const d = new Date(selectedDate); d.setDate(d.getDate() - 1);
+                setSelectedDate(d.toISOString().slice(0, 10)); setCur(0);
+              }} className="w-7 h-7 rounded flex items-center justify-center text-text3 hover:bg-hover">
+                <ChevronLeft size={14} />
+              </button>
+              <span className="text-[0.778rem] font-medium text-text2 min-w-[100px] text-center">
+                {selectedDate === todayKST ? "Today" : new Date(selectedDate + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" })}
+              </span>
+              <button onClick={() => {
+                if (selectedDate >= todayKST) return;
+                const d = new Date(selectedDate); d.setDate(d.getDate() + 1);
+                setSelectedDate(d.toISOString().slice(0, 10)); setCur(0);
+              }} disabled={selectedDate >= todayKST}
+                className="w-7 h-7 rounded flex items-center justify-center text-text3 hover:bg-hover disabled:opacity-20">
+                <ChevronRight size={14} />
+              </button>
+            </div>
+            <span className="text-[0.722rem] text-text3 bg-hover px-2 py-0.5 rounded-md font-medium">{fbCount}/{recs.length}</span>
           </div>
 
           {/* Progress */}
