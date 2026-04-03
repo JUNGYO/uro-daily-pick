@@ -1,5 +1,4 @@
 import { useNavigate } from "react-router-dom";
-import { ExternalLink } from "lucide-react";
 
 export default function Landing() {
   const navigate = useNavigate();

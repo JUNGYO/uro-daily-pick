@@ -9,10 +9,10 @@ from datetime import datetime, timezone, timedelta
 
 import requests
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://vwdcqzcoovczmtzdyzbc.supabase.co")
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
-KAKAO_REST_KEY = os.environ.get("KAKAO_REST_KEY", "59877241d10a6e24fc473b71d168d869")
-KAKAO_CLIENT_SECRET = os.environ.get("KAKAO_CLIENT_SECRET", "E8zudvrroHmLYH6k7Ilj4KdyOiGMYki6")
+KAKAO_REST_KEY = os.environ.get("KAKAO_REST_KEY", "")
+KAKAO_CLIENT_SECRET = os.environ.get("KAKAO_CLIENT_SECRET", "")
 
 
 def sb_get(path, params=None):

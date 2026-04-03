@@ -1,12 +1,12 @@
 """
 Uro Daily Pick - Korean Summary Generator
-Uses Gemini 2.5 Flash to generate 3-line Korean summaries.
+Uses Gemini 2.5 Pro to generate 3-line Korean summaries.
 """
 import os
 import time
 import requests
 
-SUPABASE_URL = os.environ.get("SUPABASE_URL", "https://vwdcqzcoovczmtzdyzbc.supabase.co")
+SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent"
@@ -63,7 +63,7 @@ def summarize(title, abstract):
         return None
     try:
         parts = resp.json()["candidates"][0]["content"]["parts"]
-        # 2.5 Flash may have thinking part first, then text part
+        # 2.5 Pro may have thinking part first, then text part
         for part in reversed(parts):
             if "text" in part and part.get("thought") is not True:
                 return part["text"].strip()
