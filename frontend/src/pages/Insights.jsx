@@ -12,7 +12,7 @@ function Ring({value, max, color, label, icon: Icon}) {
   var r = 34, circ = 2 * Math.PI * r, pct = Math.min(1, value / Math.max(1, max));
   return (
     <div className="flex flex-col items-center gap-1">
-      <svg width="84" height="84" viewBox="0 0 84 84">
+      <svg className="w-[68px] h-[68px] sm:w-[84px] sm:h-[84px]" viewBox="0 0 84 84">
         <circle cx="42" cy="42" r={r} fill="none" stroke="#F2F2F7" strokeWidth="6" />
         <circle cx="42" cy="42" r={r} fill="none" stroke={color} strokeWidth="6" strokeDasharray={pct*circ + " " + circ} strokeLinecap="round" transform="rotate(-90 42 42)" />
         <text x="42" y="39" textAnchor="middle" fontSize="16" fontWeight="700" fill="#1D1D1F">{value}</text>
@@ -82,8 +82,9 @@ export default function Insights() {
   var typeData = Object.entries(typeCounts).sort(function(a,b){return b[1]-a[1]}).slice(0,6);
   var maxType = typeData[0] ? typeData[0][1] : 1;
 
-  // Heatmap data
-  var weeks = 26, today = new Date(), heatCells = [];
+  // Heatmap data — responsive weeks (13 on mobile, 26 on desktop)
+  var isMobile = typeof window !== "undefined" && window.innerWidth < 640;
+  var weeks = isMobile ? 13 : 26, today = new Date(), heatCells = [];
   for (var w = weeks-1; w >= 0; w--) {
     for (var d = 0; d < 7; d++) {
       var date = new Date(today); date.setDate(date.getDate() - (w*7 + (6-d)));
@@ -159,22 +160,23 @@ export default function Insights() {
               <span className="text-[0.667rem] text-text3">More</span>
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <div style={{display:"flex",gap:3}}>
-              <div style={{display:"flex",flexDirection:"column",gap:3,paddingTop:20}}>
+          <div>
+            <div style={{display:"flex",gap:2}}>
+              <div className="hidden sm:flex" style={{flexDirection:"column",gap:2,paddingTop:18}}>
                 {["Mon","","Wed","","Fri","","Sun"].map(function(d,i){
-                  return <div key={i} className="text-text3 text-right" style={{height:14,fontSize:10,lineHeight:"14px",width:28}}>{d}</div>;
+                  return <div key={i} className="text-text3 text-right" style={{height:14,fontSize:10,lineHeight:"14px",width:24}}>{d}</div>;
                 })}
               </div>
               <div style={{flex:1,minWidth:0}}>
-                <div style={{display:"flex",gap:3,marginBottom:4}}>
+                <div style={{display:"flex",gap:2,marginBottom:3}}>
                   {heatMonths.map(function(m,i){
-                    return <div key={i} className="text-text3" style={{fontSize:10,width:m.span*17-3,flexShrink:0}}>{m.label}</div>;
+                    var cellSize = isMobile ? 16 : 14;
+                    return <div key={i} className="text-text3" style={{fontSize:10,width:m.span*(cellSize+2)-2,flexShrink:0}}>{m.label}</div>;
                   })}
                 </div>
-                <div style={{display:"grid",gridTemplateRows:"repeat(7,14px)",gridAutoFlow:"column",gap:3}}>
+                <div style={{display:"grid",gridTemplateRows:"repeat(7,1fr)",gridAutoFlow:"column",gap:2}}>
                   {heatCells.map(function(c,i) {
-                    return <div key={i} title={c.date+": "+c.count+" papers"} className="rounded-sm hover:ring-2 hover:ring-accent hover:ring-offset-1" style={{width:14,height:14,background:HEAT[Math.min(5,c.count)],cursor:"pointer",transition:"transform 0.1s"}} />;
+                    return <div key={i} title={c.date+": "+c.count+" papers"} className="rounded-sm aspect-square" style={{background:HEAT[Math.min(5,c.count)],cursor:"pointer",transition:"transform 0.1s",minWidth:0}} />;
                   })}
                 </div>
               </div>
