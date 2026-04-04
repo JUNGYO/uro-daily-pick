@@ -54,7 +54,7 @@ function TypeBadge({ type }) {
 /* ═══ Skeleton Loading ═══ */
 function SkeletonList() {
   return (
-    <div className="flex" style={{ height: "calc(100dvh - 48px - env(safe-area-inset-bottom, 0px))" }}>
+    <div className="flex" style={{ height: "100%" }}>
       <div className="w-full md:w-[320px] lg:w-[340px] xl:w-[360px] shrink-0 md:border-r border-border flex flex-col bg-bg">
         <div className="px-4 py-2.5 border-b border-border">
           <div className="h-5 w-24 bg-border/50 rounded animate-pulse mx-auto" />
@@ -719,7 +719,7 @@ export default function DailyPick() {
   if (loading) return <SkeletonList />;
 
   if (error) return (
-    <div className="flex items-center justify-center" style={{ height: "calc(100dvh - 48px - env(safe-area-inset-bottom, 0px))" }}>
+    <div className="flex items-center justify-center" style={{ height: "100%" }}>
       <div className="text-center max-w-sm">
         <div className="w-16 h-16 rounded-2xl bg-[rgba(255,59,48,0.06)] flex items-center justify-center mx-auto mb-4">
           <RefreshCw size={28} className="text-danger" />
@@ -735,7 +735,7 @@ export default function DailyPick() {
   );
 
   if (!recs.length) return (
-    <div className="flex items-center justify-center" style={{ height: "calc(100dvh - 48px - env(safe-area-inset-bottom, 0px))" }}>
+    <div className="flex items-center justify-center" style={{ height: "100%" }}>
       <div className="text-center max-w-sm">
         <div className="w-16 h-16 rounded-2xl bg-hover flex items-center justify-center mx-auto mb-4">
           <RefreshCw size={28} className="text-text3" />
@@ -771,7 +771,7 @@ export default function DailyPick() {
         </div>
       )}
 
-      <div className="flex" style={{ height: "calc(100dvh - 48px - env(safe-area-inset-bottom, 0px))" }}>
+      <div className="flex" style={{ height: "100%" }}>
         {/* ── List panel ── */}
         <div className={`w-full md:w-[320px] lg:w-[340px] xl:w-[360px] shrink-0 md:border-r border-border flex flex-col bg-bg ${mobileOpen ? "hidden md:flex" : ""}`}>
           <div className="px-4 py-2.5 flex items-center justify-between border-b border-border">
