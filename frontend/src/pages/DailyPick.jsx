@@ -288,6 +288,8 @@ function MobileDetail({ rec, onFeedback, onBack, likeAnim }) {
 /* ═══════════════════════════════════ */
 /*  Main Page                         */
 /* ═══════════════════════════════════ */
+const _recsCache = {};
+
 export default function DailyPick() {
   const { user } = useAuth();
   const [recs, setRecs] = useState([]);
@@ -381,9 +383,18 @@ export default function DailyPick() {
 
   useEffect(() => {
     if (!user) return;
+
+    // Use cached data instantly (no spinner on tab switch)
+    const cached = _recsCache[selectedDate];
+    if (cached && retryKey === 0) {
+      setRecs(cached);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
     (async () => {
-      setLoading(true);
-      setError(null);
       try {
         // Try loading pre-generated recommendations for selected date
         const { data: recsData } = await supabase.from("recommendations").select("*, paper:papers(*)").eq("user_id", user.id).eq("rec_date", selectedDate).order("score", { ascending: false });
@@ -392,7 +403,9 @@ export default function DailyPick() {
           const paperIds = recsData.map(r => r.paper_id);
           const { data: fbs } = await supabase.from("feedbacks").select("paper_id, action").eq("user_id", user.id).in("paper_id", paperIds);
           const fbMap = Object.fromEntries((fbs || []).map(f => [f.paper_id, f.action]));
-          setRecs(recsData.map(r => ({ ...r, feedback_action: fbMap[r.paper_id] || null })));
+          const result = recsData.map(r => ({ ...r, feedback_action: fbMap[r.paper_id] || null }));
+          _recsCache[selectedDate] = result;
+          setRecs(result);
         } else {
           // No pre-generated recs — generate on the fly
           await generateInstantRecs(user.id);
@@ -491,7 +504,11 @@ export default function DailyPick() {
     if (action === "like") { setLikeAnim(true); setTimeout(() => setLikeAnim(false), 300); }
 
     await supabase.rpc("upsert_feedback", { p_user_id: user.id, p_paper_id: rec.paper_id, p_action: action });
-    setRecs(p => p.map((r, i) => i === cur ? { ...r, feedback_action: action } : r));
+    setRecs(p => {
+      const updated = p.map((r, i) => i === cur ? { ...r, feedback_action: action } : r);
+      _recsCache[selectedDate] = updated;
+      return updated;
+    });
 
     if (action === "like") {
       let { data: cols } = await supabase.from("collections").select("id").eq("user_id", user.id).eq("name", "Liked Papers").limit(1);
