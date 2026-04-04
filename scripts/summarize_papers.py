@@ -74,8 +74,7 @@ def summarize(title, abstract):
         resp = requests.post(f"{GEMINI_URL}?key={GEMINI_API_KEY}",
             headers={"Content-Type": "application/json"},
             json={"contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                  "generationConfig": {"maxOutputTokens": 8192, "temperature": 0.5},
-                  "thinkingConfig": {"thinkingBudget": 0}},
+                  "generationConfig": {"maxOutputTokens": 8192, "temperature": 0.5}},
             timeout=120)
     except requests.exceptions.RequestException as e:
         print(f"    REQUEST ERROR: {e}")
