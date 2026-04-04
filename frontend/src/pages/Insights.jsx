@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../App";
 import { Loader2, TrendingUp, BookOpen, Zap } from "lucide-react";
@@ -21,6 +21,59 @@ function Ring({value, max, color, label, icon: Icon}) {
       <div className="flex items-center gap-1">
         <Icon size={11} style={{color: color}} />
         <span className="text-[0.667rem] text-text3 font-medium">{label}</span>
+      </div>
+    </div>
+  );
+}
+
+function HeatmapTable({ weeks, heatCells, heatMonths }) {
+  var containerRef = useRef(null);
+  var [cellSize, setCellSize] = useState(14);
+
+  useEffect(function() {
+    function calc() {
+      if (!containerRef.current) return;
+      var w = containerRef.current.offsetWidth;
+      var labelW = 20;
+      var gap = 2;
+      var available = w - labelW;
+      var size = Math.floor((available - gap * (weeks - 1)) / weeks);
+      setCellSize(Math.max(8, Math.min(18, size)));
+    }
+    calc();
+    window.addEventListener("resize", calc);
+    return function() { window.removeEventListener("resize", calc); };
+  }, [weeks]);
+
+  var gap = 2;
+  var days = [
+    {label:"M",color:"#86868B"},{label:"T",color:"#86868B"},{label:"W",color:"#86868B"},
+    {label:"T",color:"#86868B"},{label:"F",color:"#86868B"},{label:"S",color:"#007AFF"},{label:"S",color:"#FF3B30"}
+  ];
+
+  return (
+    <div ref={containerRef}>
+      {/* Month labels */}
+      <div style={{display:"flex",paddingLeft:22,marginBottom:2}}>
+        {heatMonths.map(function(m,i){
+          return <div key={i} className="text-text3" style={{fontSize:10,width:m.span*(cellSize+gap),flexShrink:0}}>{m.label}</div>;
+        })}
+      </div>
+      {/* Grid */}
+      <div style={{display:"grid",gridTemplateColumns:"20px 1fr"}}>
+        {/* Day labels */}
+        <div style={{display:"grid",gridTemplateRows:"repeat(7,"+cellSize+"px)",gap:gap}}>
+          {days.map(function(d,i){
+            return <div key={i} style={{fontSize:Math.min(10,cellSize-2),lineHeight:cellSize+"px",color:d.color,fontWeight:600,textAlign:"right",paddingRight:3}}>{d.label}</div>;
+          })}
+        </div>
+        {/* Cells */}
+        <div style={{display:"grid",gridTemplateRows:"repeat(7,"+cellSize+"px)",gridAutoColumns:cellSize+"px",gridAutoFlow:"column",gap:gap}}>
+          {heatCells.map(function(c,i){
+            return <div key={i} title={c.date+": "+c.count+" papers"} className="rounded-sm hover:ring-2 hover:ring-accent hover:ring-offset-1"
+              style={{width:cellSize,height:cellSize,background:HEAT[Math.min(5,c.count)],cursor:"pointer"}} />;
+          })}
+        </div>
       </div>
     </div>
   );
@@ -160,43 +213,7 @@ export default function Insights() {
               <span className="text-[0.667rem] text-text3">More</span>
             </div>
           </div>
-          {(() => {
-            var cellPx = 14, gapPx = 2, colW = cellPx + gapPx, labelW = 18;
-            return (
-              <div>
-                <table style={{borderCollapse:"separate",borderSpacing:gapPx+"px"}}>
-                  {/* Month header row */}
-                  <thead>
-                    <tr>
-                      <th style={{width:labelW}} />
-                      {heatMonths.map(function(m,i){
-                        return <th key={i} colSpan={m.span} className="text-text3" style={{fontSize:10,fontWeight:400,textAlign:"left",paddingBottom:2}}>{m.label}</th>;
-                      })}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {[0,1,2,3,4,5,6].map(function(row){
-                      var dayInfo = [
-                        {label:"M",color:"#86868B"},{label:"T",color:"#86868B"},{label:"W",color:"#86868B"},
-                        {label:"T",color:"#86868B"},{label:"F",color:"#86868B"},{label:"S",color:"#007AFF"},{label:"S",color:"#FF3B30"}
-                      ][row];
-                      return (
-                        <tr key={row}>
-                          <td style={{fontSize:10,fontWeight:600,color:dayInfo.color,textAlign:"right",paddingRight:3,width:labelW}}>{dayInfo.label}</td>
-                          {Array.from({length:weeks}).map(function(_,col){
-                            var cell = heatCells[col*7+row];
-                            return <td key={col} title={cell?cell.date+": "+cell.count+" papers":""}
-                              className="rounded-sm hover:ring-2 hover:ring-accent hover:ring-offset-1"
-                              style={{width:cellPx,height:cellPx,background:cell?HEAT[Math.min(5,cell.count)]:"#F5F5F7",cursor:"pointer",padding:0}} />;
-                          })}
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            );
-          })()}
+          <HeatmapTable weeks={weeks} heatCells={heatCells} heatMonths={heatMonths} />
         </div>
 
         <div className="bg-card rounded-xl border border-border p-4 mb-4" style={{boxShadow:"0 1px 3px rgba(0,0,0,0.03)"}}>
