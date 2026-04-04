@@ -274,7 +274,7 @@ def main():
     for query in URO_QUERIES:
         short = query[:50]
         try:
-            pmids = search_pmids(query, max_results=50, days_back=7)
+            pmids = search_pmids(query, max_results=200, days_back=7)
             new_pmids = [p for p in pmids if p not in existing]
             if new_pmids:
                 time.sleep(0.4)  # NCBI rate limit
