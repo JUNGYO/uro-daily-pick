@@ -813,20 +813,20 @@ export default function DailyPick() {
           </div>
 
           {/* Footer */}
-          <div className="px-3 py-1.5 border-t border-border flex items-center justify-between">
+          <div className="px-3 py-2 border-t border-border flex items-center justify-between">
             {fbCount === recs.length && recs.length > 0 ? (
-              <span className="text-[0.667rem] font-semibold text-success">All done!</span>
+              <span className="text-[0.778rem] font-semibold text-success">All done!</span>
             ) : (
-              <div className="hidden md:flex items-center gap-2">
+              <div className="hidden md:flex items-center gap-1.5">
                 {[["↑↓", "navigate"], ["L", "like"], ["D", "skip"]].map(([key, label]) => (
-                  <span key={key} className="inline-flex items-center gap-1 text-[0.667rem] text-text3">
-                    <kbd className="px-1 py-0.5 bg-hover border border-border rounded text-text2 font-medium text-[0.611rem]">{key}</kbd>
+                  <span key={key} className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-border text-[0.722rem] text-text3 bg-card">
+                    <kbd className="text-text1 font-semibold">{key}</kbd>
                     {label}
                   </span>
                 ))}
               </div>
             )}
-            <span className="text-[0.667rem] text-text3 font-medium">{fbCount}/{recs.length}</span>
+            <span className="text-[0.722rem] text-text3 bg-hover px-2 py-0.5 rounded-md font-medium">{fbCount}/{recs.length}</span>
           </div>
         </div>
 
