@@ -603,7 +603,8 @@ export default function DailyPick() {
         score += Math.max(0, 1 - days / 30);
       }
 
-      // Skip letters
+      // Skip letters and papers without abstract
+      if (!abstract || abstract.length < 100) continue;
       if (["reply to", "letter to", "research letter", "letter:", "re:", "erratum", "editorial", "comment on", "correspondence"].some(s => title.includes(s))) continue;
 
       if (score > 0) scored.push({ paper: p, score: Math.round(score * 100) / 100 });
