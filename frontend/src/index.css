@@ -34,3 +34,9 @@ body {
 
 /* Smooth transitions */
 * { transition-timing-function: cubic-bezier(0.2, 0, 0, 1); }
+
+/* Toast slide-up */
+@keyframes slideUp {
+  from { opacity: 0; transform: translate(-50%, 12px); }
+  to   { opacity: 1; transform: translate(-50%, 0); }
+}

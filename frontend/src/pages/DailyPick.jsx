@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useLocation } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../App";
-import { Heart, X, ExternalLink, RefreshCw, Loader2, Tag, User2, BookOpen, FlaskConical, Clock, Star, TrendingUp, Zap, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Share2, Copy, Check } from "lucide-react";
+import { Heart, X, ExternalLink, RefreshCw, Tag, User2, BookOpen, FlaskConical, Clock, Star, TrendingUp, Zap, ChevronLeft, ChevronRight, ChevronUp, ChevronDown, Share2, Copy, Check } from "lucide-react";
 
 /* ── Study type badge colors ── */
 const TYPE_STYLE = {
@@ -51,6 +51,70 @@ function TypeBadge({ type }) {
   );
 }
 
+/* ═══ Skeleton Loading ═══ */
+function SkeletonList() {
+  return (
+    <div className="flex" style={{ height: "calc(100vh - 56px)" }}>
+      <div className="w-full md:w-[320px] lg:w-[340px] xl:w-[360px] shrink-0 md:border-r border-border flex flex-col bg-bg">
+        <div className="px-4 py-2.5 border-b border-border">
+          <div className="h-5 w-24 bg-border/50 rounded animate-pulse mx-auto" />
+        </div>
+        <div className="px-4 py-2"><div className="flex gap-0.5">{[...Array(5)].map((_, i) => <div key={i} className="flex-1 h-1 rounded-full bg-border/50 animate-pulse" />)}</div></div>
+        <div className="flex-1 px-2 pb-2">
+          {[...Array(5)].map((_, i) => (
+            <div key={i} className="rounded-lg mb-0.5 p-3" style={{ borderLeft: "3px solid transparent", animationDelay: `${i * 100}ms` }}>
+              <div className="flex gap-2.5">
+                <div className="w-4 h-4 rounded bg-border/50 animate-pulse shrink-0" />
+                <div className="flex-1">
+                  <div className="h-4 w-16 bg-border/50 rounded animate-pulse mb-2" />
+                  <div className="h-4 w-full bg-border/50 rounded animate-pulse mb-1.5" />
+                  <div className="h-4 w-3/4 bg-border/50 rounded animate-pulse mb-1.5" />
+                  <div className="h-3 w-40 bg-border/40 rounded animate-pulse" />
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+      <div className="hidden md:flex flex-1 items-center justify-center">
+        <div className="w-full max-w-2xl p-8">
+          <div className="bg-card rounded-xl border border-border p-8">
+            <div className="h-4 w-32 bg-border/50 rounded animate-pulse mb-4" />
+            <div className="h-6 w-full bg-border/50 rounded animate-pulse mb-2" />
+            <div className="h-6 w-4/5 bg-border/50 rounded animate-pulse mb-4" />
+            <div className="h-4 w-60 bg-border/40 rounded animate-pulse mb-6" />
+            <div className="bg-[rgba(0,122,255,0.03)] rounded-lg p-4 mb-4">
+              <div className="h-3 w-16 bg-border/40 rounded animate-pulse mb-2" />
+              <div className="h-4 w-full bg-border/40 rounded animate-pulse mb-1" />
+              <div className="h-4 w-5/6 bg-border/40 rounded animate-pulse" />
+            </div>
+            <div className="space-y-2">{[...Array(4)].map((_, i) => <div key={i} className="h-4 bg-border/30 rounded animate-pulse" style={{ width: `${90 - i * 10}%` }} />)}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/* ═══ Toast ═══ */
+function Toast({ message, onUndo, onDismiss }) {
+  useEffect(() => {
+    const t = setTimeout(onDismiss, 3000);
+    return () => clearTimeout(t);
+  }, [onDismiss]);
+
+  return (
+    <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-[slideUp_0.2s_ease-out]">
+      <div className="flex items-center gap-3 bg-text1 text-white rounded-xl px-5 py-3 shadow-lg text-[0.833rem] font-medium">
+        <span>{message}</span>
+        {onUndo && (
+          <button onClick={onUndo} className="text-accent font-semibold hover:underline">Undo</button>
+        )}
+      </div>
+    </div>
+  );
+}
+
 /* ═══ List Item ═══ */
 function ListItem({ rec, index, selected, onClick }) {
   const fb = rec.feedback_action;
@@ -69,11 +133,11 @@ function ListItem({ rec, index, selected, onClick }) {
             <TypeBadge type={st} />
             {fb === "like" && <Heart size={11} className="text-success fill-success" />}
           </div>
-          <p className="text-[0.833rem] md:line-clamp-2 font-semibold text-text1 leading-snug">{rec.paper?.title}</p>
+          <p className="text-[0.833rem] line-clamp-2 font-semibold text-text1 leading-snug">{rec.paper?.title}</p>
           <p className="text-[0.722rem] text-text3 mt-0.5">{rec.paper?.journal} · {rec.paper?.pub_date}</p>
-          {/* Korean summary — visible on mobile list */}
+          {/* Korean summary preview */}
           {rec.paper?.summary_ko && (
-            <p className="md:hidden text-[0.778rem] text-text2 leading-relaxed mt-1.5">{rec.paper.summary_ko}</p>
+            <p className="text-[0.722rem] text-text2 leading-relaxed mt-1 line-clamp-2">{rec.paper.summary_ko}</p>
           )}
         </div>
       </div>
@@ -289,15 +353,23 @@ function MobileDetail({ rec, onFeedback, onBack, likeAnim }) {
 /*  Main Page                         */
 /* ═══════════════════════════════════ */
 const _recsCache = {};
+let _cachedUserId = null;
 
 export default function DailyPick() {
   const { user } = useAuth();
+
+  // Clear cache on user change (logout/login)
+  if (user?.id !== _cachedUserId) {
+    Object.keys(_recsCache).forEach(k => delete _recsCache[k]);
+    _cachedUserId = user?.id;
+  }
   const [recs, setRecs] = useState([]);
   const [cur, setCur] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [retryKey, setRetryKey] = useState(0);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [toast, setToast] = useState(null);
   const todayKST = new Date(Date.now() + 9*3600000).toISOString().slice(0, 10);
   const [selectedDate, setSelectedDate] = useState(todayKST);
 
@@ -499,16 +571,34 @@ export default function DailyPick() {
 
   const doFeedback = async (action) => {
     const rec = recs[cur]; if (!rec || !user) return;
+    const prevAction = rec.feedback_action;
 
     // Like animation
     if (action === "like") { setLikeAnim(true); setTimeout(() => setLikeAnim(false), 300); }
 
-    await supabase.rpc("upsert_feedback", { p_user_id: user.id, p_paper_id: rec.paper_id, p_action: action });
+    // Optimistic update
     setRecs(p => {
       const updated = p.map((r, i) => i === cur ? { ...r, feedback_action: action } : r);
       _recsCache[selectedDate] = updated;
       return updated;
     });
+
+    // Toast with undo
+    const title = rec.paper?.title?.slice(0, 40) + (rec.paper?.title?.length > 40 ? "..." : "");
+    setToast({
+      message: action === "like" ? `Liked: ${title}` : `Skipped: ${title}`,
+      onUndo: () => {
+        setRecs(p => {
+          const reverted = p.map((r, i) => i === cur ? { ...r, feedback_action: prevAction } : r);
+          _recsCache[selectedDate] = reverted;
+          return reverted;
+        });
+        supabase.rpc("upsert_feedback", { p_user_id: user.id, p_paper_id: rec.paper_id, p_action: prevAction || "none" });
+        setToast(null);
+      },
+    });
+
+    await supabase.rpc("upsert_feedback", { p_user_id: user.id, p_paper_id: rec.paper_id, p_action: action });
 
     if (action === "like") {
       let { data: cols } = await supabase.from("collections").select("id").eq("user_id", user.id).eq("name", "Liked Papers").limit(1);
@@ -516,8 +606,6 @@ export default function DailyPick() {
       if (!colId) { const { data: c } = await supabase.from("collections").insert({ user_id: user.id, name: "Liked Papers", color: "#34C759" }).select("id").single(); colId = c?.id; }
       if (colId) await supabase.from("collection_papers").upsert({ collection_id: colId, paper_id: rec.paper_id }, { onConflict: "collection_id,paper_id" });
     }
-
-    // Stay on current paper — user navigates manually
   };
 
   // Keyboard
@@ -543,14 +631,7 @@ export default function DailyPick() {
     return () => window.removeEventListener("keydown", h);
   }, [location.pathname]);
 
-  if (loading) return (
-    <div className="flex items-center justify-center" style={{ height: "calc(100vh - 56px)" }}>
-      <div className="text-center">
-        <Loader2 size={32} className="text-accent animate-spin mx-auto mb-3" />
-        <p className="text-[0.889rem] text-text3">Finding papers for you...</p>
-      </div>
-    </div>
-  );
+  if (loading) return <SkeletonList />;
 
   if (error) return (
     <div className="flex items-center justify-center" style={{ height: "calc(100vh - 56px)" }}>
@@ -670,6 +751,9 @@ export default function DailyPick() {
             likeAnim={likeAnim} />
         </div>
       </div>
+
+      {/* Toast notification */}
+      {toast && <Toast message={toast.message} onUndo={toast.onUndo} onDismiss={() => setToast(null)} />}
     </>
   );
 }
