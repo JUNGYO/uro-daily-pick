@@ -8,7 +8,6 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
-  const [keywords, setKeywords] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
@@ -31,10 +30,9 @@ export default function Login() {
           options: { data: { name } },
         });
         if (signUpError) throw signUpError;
-        const { data: { user } } = await supabase.auth.getUser();
-        if (user) {
-          const kws = keywords.split(",").map(k => k.trim()).filter(Boolean);
-          await supabase.from("profiles").update({ name, keywords: kws }).eq("id", user.id);
+        if (name) {
+          const { data: { user } } = await supabase.auth.getUser();
+          if (user) await supabase.from("profiles").update({ name }).eq("id", user.id);
         }
         navigate("/");
       } else {
@@ -95,13 +93,7 @@ export default function Login() {
             {mode !== "forgot" && (
               <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Password (min 6 chars)" required className={inputCls} />
             )}
-            {mode === "signup" && (
-              <div>
-                <input value={keywords} onChange={e => setKeywords(e.target.value)}
-                  placeholder="Research interests (comma separated)" className={inputCls} />
-                <p className="text-[0.778rem] text-text3 mt-1">e.g. prostate cancer, robotic surgery, BPH</p>
-              </div>
-            )}
+
 
             {error && <p className="text-[0.833rem] text-danger bg-[rgba(255,59,48,0.06)] border border-[rgba(255,59,48,0.12)] rounded-lg px-3 py-2">{error}</p>}
             {message && <p className="text-[0.833rem] text-success bg-[rgba(52,199,89,0.06)] border border-[rgba(52,199,89,0.12)] rounded-lg px-3 py-2">{message}</p>}
