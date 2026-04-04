@@ -77,15 +77,19 @@ def summarize(title, abstract):
                   "generationConfig": {"maxOutputTokens": 8192, "temperature": 0.5},
                   "thinkingConfig": {"thinkingBudget": 0}},
             timeout=120)
-    except requests.exceptions.RequestException:
+    except requests.exceptions.RequestException as e:
+        print(f"    REQUEST ERROR: {e}")
         return None
 
-    if resp.status_code == 429 or resp.status_code == 503:
-        return None  # rate limited, retry later
     if resp.status_code != 200:
+        print(f"    API ERROR {resp.status_code}: {resp.text[:300]}")
         return None
     try:
-        parts = resp.json()["candidates"][0]["content"]["parts"]
+        data = resp.json()
+        if not data.get("candidates"):
+            print(f"    NO CANDIDATES: {json.dumps(data)[:300]}")
+            return None
+        parts = data["candidates"][0]["content"]["parts"]
         # 2.5 Pro may have thinking part first, then text part
         for part in reversed(parts):
             if "text" in part and part.get("thought") is not True:
@@ -95,7 +99,8 @@ def summarize(title, abstract):
             if "text" in part:
                 return part["text"].strip()
         return None
-    except (KeyError, IndexError):
+    except (KeyError, IndexError) as e:
+        print(f"    PARSE ERROR: {e} — {resp.text[:200]}")
         return None
 
 
