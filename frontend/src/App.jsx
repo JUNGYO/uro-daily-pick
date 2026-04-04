@@ -77,10 +77,10 @@ function Layout({ children }) {
 
   return (
     <div className="min-h-screen bg-bg text-text1 flex flex-col">
-      {/* Desktop header */}
-      <header className="h-14 flex items-center justify-between px-4 md:px-8 bg-card border-b border-border shrink-0 sticky top-0 z-50">
+      {/* Header */}
+      <header className="h-12 md:h-14 flex items-center justify-between px-4 md:px-8 bg-card border-b border-border shrink-0 sticky top-0 z-50">
         <div className="flex items-center gap-2">
-          <svg width="22" height="22" viewBox="0 0 80 80" fill="none" className="shrink-0">
+          <svg width="20" height="20" viewBox="0 0 80 80" fill="none" className="shrink-0 md:w-[22px] md:h-[22px]">
             <polygon points="40,4 72,22 72,58 40,76 8,58 8,22" fill="none" stroke="#1D1D1F" strokeWidth="2"/>
             <line x1="40" y1="40" x2="40" y2="4.5" stroke="#007AFF" strokeWidth="1.5"/>
             <line x1="40" y1="40" x2="8.5" y2="58.5" stroke="#007AFF" strokeWidth="1.5"/>
@@ -90,7 +90,7 @@ function Layout({ children }) {
             <circle cx="8" cy="58" r="4" fill="none" stroke="#007AFF" strokeWidth="2"/>
             <circle cx="72" cy="58" r="4" fill="none" stroke="#007AFF" strokeWidth="2"/>
           </svg>
-          <span className="text-[1rem] md:text-[1.222rem] font-bold tracking-tight">Uro Daily Pick</span>
+          <span className="text-[0.889rem] md:text-[1.222rem] font-bold tracking-tight">Uro Daily Pick</span>
         </div>
         {/* Desktop nav */}
         <nav className="hidden md:flex items-center gap-1">

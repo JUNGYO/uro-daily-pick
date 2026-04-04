@@ -54,7 +54,7 @@ function TypeBadge({ type }) {
 /* ═══ Skeleton Loading ═══ */
 function SkeletonList() {
   return (
-    <div className="flex" style={{ height: "calc(100dvh - 56px)" }}>
+    <div className="flex" style={{ height: "calc(100dvh - 48px - env(safe-area-inset-bottom, 0px))" }}>
       <div className="w-full md:w-[320px] lg:w-[340px] xl:w-[360px] shrink-0 md:border-r border-border flex flex-col bg-bg">
         <div className="px-4 py-2.5 border-b border-border">
           <div className="h-5 w-24 bg-border/50 rounded animate-pulse mx-auto" />
@@ -364,14 +364,29 @@ function MobileDetail({ rec, onFeedback, onBack, likeAnim }) {
 
   return (
     <div className="fixed inset-0 z-40 bg-bg overflow-y-auto">
-      <div className="sticky top-0 z-10 bg-bg/95 backdrop-blur border-b border-border px-4 py-3 flex items-center gap-3">
+      <div className="sticky top-0 z-10 bg-bg/95 backdrop-blur border-b border-border px-4 py-2.5 flex items-center gap-3">
         <button onClick={onBack} className="w-9 h-9 rounded-lg flex items-center justify-center text-accent hover:bg-hover">
           <ChevronLeft size={22} />
         </button>
         <TypeBadge type={paper.study_type} />
+        {paper.clinical_relevance >= 4 && (
+          <span className="text-[0.611rem] font-bold px-1.5 py-0.5 rounded-md bg-[rgba(255,59,48,0.08)] text-danger">
+            {paper.clinical_relevance === 5 ? "Practice-Changing" : "High Relevance"}
+          </span>
+        )}
         <span className="text-[0.778rem] text-text3 truncate flex-1">{paper.journal}</span>
       </div>
-      <div className="p-5">
+      <div className="p-5 pb-24">
+        {/* Meta */}
+        <div className="flex items-center gap-2 text-[0.778rem] text-text3 mb-3">
+          <span>{paper.pub_date}</span>
+          {paper.abstract && (
+            <>
+              <span className="w-1 h-1 rounded-full bg-border" />
+              <span>{Math.max(1, Math.ceil(paper.abstract.split(/\s+/).length / 200))} min read</span>
+            </>
+          )}
+        </div>
         <h1 className="text-[1.222rem] font-bold leading-[1.35] text-text1 mb-3">{hl(paper.title, matched)}</h1>
         <p className="text-[0.833rem] text-text2 mb-4">{(paper.authors || []).slice(0, 5).join(", ")}{paper.authors?.length > 5 ? " et al." : ""}</p>
         {reasons.length > 0 && (
@@ -389,9 +404,11 @@ function MobileDetail({ rec, onFeedback, onBack, likeAnim }) {
             <p className="text-[0.889rem] leading-[1.7] text-text1">{paper.summary_ko}</p>
           </div>
         )}
+        {/* Details & Q&A accordion */}
+        {(paper.structured_data || paper.qa_data) && <DetailAccordion paper={paper} />}
         {paper.abstract && <p className="text-[0.889rem] leading-[1.7] text-text2 mb-6">{hl(paper.abstract, matched)}</p>}
       </div>
-      <div className="sticky bottom-0 bg-card border-t border-border px-5 py-3 flex items-center justify-between">
+      <div className="fixed bottom-0 left-0 right-0 z-50 bg-card/95 backdrop-blur border-t border-border px-5 py-3 flex items-center justify-between" style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom))" }}>
         <div className="flex items-center gap-3">
           <button onClick={() => onFeedback("dislike")} className="w-12 h-12 rounded-xl flex items-center justify-center transition-all"
             style={{ background: fb === "dislike" ? "rgba(255,59,48,0.08)" : "#F2F2F7", color: fb === "dislike" ? "#FF3B30" : "#C7C7CC" }}>
@@ -699,7 +716,7 @@ export default function DailyPick() {
   if (loading) return <SkeletonList />;
 
   if (error) return (
-    <div className="flex items-center justify-center" style={{ height: "calc(100dvh - 56px)" }}>
+    <div className="flex items-center justify-center" style={{ height: "calc(100dvh - 48px - env(safe-area-inset-bottom, 0px))" }}>
       <div className="text-center max-w-sm">
         <div className="w-16 h-16 rounded-2xl bg-[rgba(255,59,48,0.06)] flex items-center justify-center mx-auto mb-4">
           <RefreshCw size={28} className="text-danger" />
@@ -715,7 +732,7 @@ export default function DailyPick() {
   );
 
   if (!recs.length) return (
-    <div className="flex items-center justify-center" style={{ height: "calc(100dvh - 56px)" }}>
+    <div className="flex items-center justify-center" style={{ height: "calc(100dvh - 48px - env(safe-area-inset-bottom, 0px))" }}>
       <div className="text-center max-w-sm">
         <div className="w-16 h-16 rounded-2xl bg-hover flex items-center justify-center mx-auto mb-4">
           <RefreshCw size={28} className="text-text3" />
@@ -751,7 +768,7 @@ export default function DailyPick() {
         </div>
       )}
 
-      <div className="flex" style={{ height: "calc(100dvh - 56px)" }}>
+      <div className="flex" style={{ height: "calc(100dvh - 48px - env(safe-area-inset-bottom, 0px))" }}>
         {/* ── List panel ── */}
         <div className={`w-full md:w-[320px] lg:w-[340px] xl:w-[360px] shrink-0 md:border-r border-border flex flex-col bg-bg ${mobileOpen ? "hidden md:flex" : ""}`}>
           <div className="px-4 py-2.5 flex items-center justify-between border-b border-border">
