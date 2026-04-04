@@ -288,8 +288,8 @@ function Detail({ rec, onFeedback, onPrev, onNext, hasPrev, hasNext, likeAnim })
       </div>
 
       {/* Action bar — fixed at bottom of detail panel */}
-      <div className="shrink-0 border-t border-border bg-card px-5 md:px-6 xl:px-8 py-3 flex items-center justify-between">
-          {/* Left: prev/next + feedback */}
+      <div className="shrink-0 border-t border-border bg-card px-5 md:px-6 xl:px-8 py-2.5 flex items-center justify-between">
+          {/* Left: prev/next + feedback + keyboard hints */}
           <div className="flex items-center gap-2">
             <button onClick={onPrev} disabled={!hasPrev} className="w-8 h-8 rounded-lg flex items-center justify-center text-text3 border border-border hover:bg-hover disabled:opacity-20 transition-colors">
               <ChevronUp size={16} />
@@ -311,6 +311,11 @@ function Detail({ rec, onFeedback, onPrev, onNext, hasPrev, hasNext, likeAnim })
                 transition: "all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)" }}>
               <Heart size={20} fill={fb === "like" ? "#34C759" : "none"} />
             </button>
+            <div className="hidden md:flex items-center gap-1 ml-2 text-[0.611rem] text-text3">
+              <kbd className="px-1 py-0.5 bg-hover border border-border rounded font-medium">↑↓</kbd>
+              <kbd className="px-1 py-0.5 bg-hover border border-border rounded font-medium">L</kbd>
+              <kbd className="px-1 py-0.5 bg-hover border border-border rounded font-medium">D</kbd>
+            </div>
           </div>
 
           {/* Right */}
@@ -812,22 +817,12 @@ export default function DailyPick() {
             ))}
           </div>
 
-          {/* Footer */}
-          <div className="px-3 py-2 border-t border-border flex items-center justify-between">
-            {fbCount === recs.length && recs.length > 0 ? (
-              <span className="text-[0.778rem] font-semibold text-success">All done!</span>
-            ) : (
-              <div className="hidden md:flex items-center gap-1.5">
-                {[["↑↓", "navigate"], ["L", "like"], ["D", "skip"]].map(([key, label]) => (
-                  <span key={key} className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-lg border border-border text-[0.722rem] text-text3 bg-card">
-                    <kbd className="text-text1 font-semibold">{key}</kbd>
-                    {label}
-                  </span>
-                ))}
-              </div>
-            )}
-            <span className="text-[0.722rem] text-text3 bg-hover px-2 py-0.5 rounded-md font-medium">{fbCount}/{recs.length}</span>
-          </div>
+          {/* All done */}
+          {fbCount === recs.length && recs.length > 0 && (
+            <div className="px-3 py-2 border-t border-border text-center">
+              <span className="text-[0.722rem] font-semibold text-success">All done for today!</span>
+            </div>
+          )}
         </div>
 
         {/* ── Detail panel (desktop only) ── */}
