@@ -162,9 +162,9 @@ export default function Insights() {
           </div>
           <div>
             <div style={{display:"flex",gap:2}}>
-              <div className="hidden sm:flex" style={{flexDirection:"column",gap:2,paddingTop:18}}>
-                {["Mon","","Wed","","Fri","","Sun"].map(function(d,i){
-                  return <div key={i} className="text-text3 text-right" style={{height:14,fontSize:10,lineHeight:"14px",width:24}}>{d}</div>;
+              <div style={{display:"flex",flexDirection:"column",gap:2,paddingTop:18}}>
+                {["M","","W","","F","","S"].map(function(d,i){
+                  return <div key={i} className="text-text3 text-right" style={{height:14,fontSize:9,lineHeight:"14px",width:14}}>{d}</div>;
                 })}
               </div>
               <div style={{flex:1,minWidth:0}}>
