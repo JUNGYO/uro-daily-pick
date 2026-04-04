@@ -27,54 +27,69 @@ function Ring({value, max, color, label, icon: Icon}) {
 }
 
 function HeatmapTable({ weeks, heatCells, heatMonths }) {
-  var containerRef = useRef(null);
-  var [cellSize, setCellSize] = useState(14);
-
-  useEffect(function() {
-    function calc() {
-      if (!containerRef.current) return;
-      var w = containerRef.current.offsetWidth;
-      var labelW = 20;
-      var gap = 2;
-      var available = w - labelW;
-      var size = Math.floor((available - gap * (weeks - 1)) / weeks);
-      setCellSize(Math.max(8, Math.min(18, size)));
-    }
-    calc();
-    window.addEventListener("resize", calc);
-    return function() { window.removeEventListener("resize", calc); };
-  }, [weeks]);
-
-  var gap = 2;
   var days = [
     {label:"M",color:"#86868B"},{label:"T",color:"#86868B"},{label:"W",color:"#86868B"},
     {label:"T",color:"#86868B"},{label:"F",color:"#86868B"},{label:"S",color:"#007AFF"},{label:"S",color:"#FF3B30"}
   ];
 
+  // Single grid: col 0 = day labels, cols 1..weeks = data
+  // Row 0 = month labels, rows 1..7 = data
+  var cols = weeks + 1; // +1 for day label column
+  var rows = 8; // 1 month row + 7 day rows
+
+  // Build month header cells with correct colSpan via gridColumn
+  var monthCells = [];
+  var col = 2; // start after day-label column (grid is 1-indexed)
+  heatMonths.forEach(function(m) {
+    monthCells.push({ label: m.label, colStart: col, colEnd: col + m.span });
+    col += m.span;
+  });
+
   return (
-    <div ref={containerRef}>
-      {/* Month labels */}
-      <div style={{display:"flex",paddingLeft:22,marginBottom:2}}>
-        {heatMonths.map(function(m,i){
-          return <div key={i} className="text-text3" style={{fontSize:10,width:m.span*(cellSize+gap),flexShrink:0}}>{m.label}</div>;
-        })}
-      </div>
-      {/* Grid */}
-      <div style={{display:"grid",gridTemplateColumns:"20px 1fr"}}>
-        {/* Day labels */}
-        <div style={{display:"grid",gridTemplateRows:"repeat(7,"+cellSize+"px)",gap:gap}}>
-          {days.map(function(d,i){
-            return <div key={i} style={{fontSize:Math.min(10,cellSize-2),lineHeight:cellSize+"px",color:d.color,fontWeight:600,textAlign:"right",paddingRight:3}}>{d.label}</div>;
-          })}
-        </div>
-        {/* Cells */}
-        <div style={{display:"grid",gridTemplateRows:"repeat(7,"+cellSize+"px)",gridAutoColumns:cellSize+"px",gridAutoFlow:"column",gap:gap}}>
-          {heatCells.map(function(c,i){
-            return <div key={i} title={c.date+": "+c.count+" papers"} className="rounded-sm hover:ring-2 hover:ring-accent hover:ring-offset-1"
-              style={{width:cellSize,height:cellSize,background:HEAT[Math.min(5,c.count)],cursor:"pointer"}} />;
-          })}
-        </div>
-      </div>
+    <div style={{
+      display: "grid",
+      gridTemplateColumns: "16px repeat(" + weeks + ", 1fr)",
+      gridTemplateRows: "auto repeat(7, 1fr)",
+      gap: 2,
+      width: "100%",
+    }}>
+      {/* Row 0, Col 0: empty corner */}
+      <div />
+      {/* Row 0: month labels */}
+      {monthCells.map(function(m, i) {
+        return <div key={i} className="text-text3" style={{
+          gridColumn: m.colStart + " / " + m.colEnd,
+          gridRow: 1,
+          fontSize: 10,
+          lineHeight: "16px",
+        }}>{m.label}</div>;
+      })}
+      {/* Rows 1-7: day labels + cells */}
+      {days.map(function(d, row) {
+        var items = [];
+        // Day label
+        items.push(
+          <div key={"label-"+row} style={{
+            gridColumn: 1, gridRow: row + 2,
+            fontSize: 10, fontWeight: 600, color: d.color,
+            display: "flex", alignItems: "center", justifyContent: "flex-end", paddingRight: 2,
+          }}>{d.label}</div>
+        );
+        // Cells for this day across all weeks
+        for (var w = 0; w < weeks; w++) {
+          var cell = heatCells[w * 7 + row];
+          items.push(
+            <div key={"c-"+row+"-"+w} title={cell ? cell.date + ": " + cell.count + " papers" : ""}
+              className="rounded-sm hover:ring-2 hover:ring-accent hover:ring-offset-1"
+              style={{
+                gridColumn: w + 2, gridRow: row + 2,
+                background: cell ? HEAT[Math.min(5, cell.count)] : "#F5F5F7",
+                cursor: "pointer", aspectRatio: "1",
+              }} />
+          );
+        }
+        return items;
+      })}
     </div>
   );
 }
