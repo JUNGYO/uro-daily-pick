@@ -133,13 +133,16 @@ export default function Insights() {
 
   // Topic data
   var kwCount = {};
+  function toArr(v) {
+    if (Array.isArray(v)) return v;
+    if (typeof v === "string") { try { var p = JSON.parse(v); if (Array.isArray(p)) return p; } catch(e) {} }
+    return [];
+  }
   papers.forEach(function(p) {
-    var kws = Array.isArray(p.keywords) ? p.keywords : [];
-    var mesh = Array.isArray(p.mesh_terms) ? p.mesh_terms : [];
-    try { if (typeof p.keywords === "string") kws = JSON.parse(p.keywords); } catch(e) {}
-    try { if (typeof p.mesh_terms === "string") mesh = JSON.parse(p.mesh_terms); } catch(e) {}
-    kws.forEach(function(k) { var kl=k.toLowerCase(); if(!STOP.has(kl)&&kl.length>2&&kl.length<40) kwCount[kl]=(kwCount[kl]||0)+1; });
-    mesh.forEach(function(m) { var ml=m.toLowerCase(); if(!STOP.has(ml)&&ml.length>2&&ml.length<40) kwCount[ml]=(kwCount[ml]||0)+1; });
+    var kws = toArr(p.keywords);
+    var mesh = toArr(p.mesh_terms);
+    kws.forEach(function(k) { if(typeof k==="string"){var kl=k.toLowerCase(); if(!STOP.has(kl)&&kl.length>2&&kl.length<40) kwCount[kl]=(kwCount[kl]||0)+1;} });
+    mesh.forEach(function(m) { if(typeof m==="string"){var ml=m.toLowerCase(); if(!STOP.has(ml)&&ml.length>2&&ml.length<40) kwCount[ml]=(kwCount[ml]||0)+1;} });
   });
   var topicData = Object.entries(kwCount).sort(function(a,b){return b[1]-a[1]}).slice(0,10);
   var topicTotal = topicData.reduce(function(s,d){return s+d[1]},0) || 1;
