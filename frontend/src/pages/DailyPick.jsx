@@ -146,6 +146,44 @@ function ListItem({ rec, index, selected, onClick }) {
   );
 }
 
+/* ═══ Collapsible Detail Section ═══ */
+function DetailAccordion({ paper }) {
+  const [open, setOpen] = useState(false);
+  const sd = paper.structured_data ? (typeof paper.structured_data === "string" ? JSON.parse(paper.structured_data) : paper.structured_data) : null;
+  const qa = paper.qa_data ? (typeof paper.qa_data === "string" ? JSON.parse(paper.qa_data) : paper.qa_data) : [];
+  const hasSd = sd && (sd.study_design || sd.sample_size || sd.key_finding);
+  const hasQa = qa?.length > 0;
+  if (!hasSd && !hasQa) return null;
+
+  return (
+    <div className="mb-4">
+      <button onClick={() => setOpen(!open)}
+        className="flex items-center gap-2 text-[0.778rem] font-semibold text-accent hover:underline transition-colors">
+        <ChevronRight size={14} className={`transition-transform duration-200 ${open ? "rotate-90" : ""}`} />
+        Details & Q&A
+      </button>
+      {open && (
+        <div className="mt-3 space-y-3 animate-[fadeIn_0.15s_ease-out]">
+          {hasSd && (
+            <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-[0.778rem]">
+              {sd.study_design && <span className="text-text3">Design: <span className="text-text1 font-medium">{sd.study_design}</span></span>}
+              {sd.sample_size && sd.sample_size !== "N/A" && <span className="text-text3">N: <span className="text-text1 font-medium">{sd.sample_size}</span></span>}
+              {sd.population && <span className="text-text3">Pop: <span className="text-text1 font-medium">{sd.population}</span></span>}
+              {sd.key_finding && <div className="w-full text-text3">Key: <span className="text-text1 font-medium">{sd.key_finding}</span></div>}
+            </div>
+          )}
+          {hasQa && qa.map((item, i) => (
+            <div key={i} className="bg-[rgba(255,149,0,0.04)] border border-[rgba(255,149,0,0.1)] rounded-lg p-3">
+              <p className="text-[0.833rem] font-semibold text-text1 mb-1">Q. {item.q}</p>
+              <p className="text-[0.833rem] leading-[1.6] text-text2">{item.a}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ═══ Detail Panel ═══ */
 function Detail({ rec, onFeedback, onPrev, onNext, hasPrev, hasNext, likeAnim }) {
   const paper = rec.paper;
@@ -241,34 +279,8 @@ function Detail({ rec, onFeedback, onPrev, onNext, hasPrev, hasNext, likeAnim })
             </div>
           )}
 
-          {/* Structured data */}
-          {paper.structured_data && (() => {
-            const sd = typeof paper.structured_data === "string" ? JSON.parse(paper.structured_data) : paper.structured_data;
-            return (sd.study_design || sd.sample_size || sd.key_finding) ? (
-              <div className="flex flex-wrap gap-x-4 gap-y-1.5 mb-4 text-[0.778rem]">
-                {sd.study_design && <span className="text-text3">Design: <span className="text-text1 font-medium">{sd.study_design}</span></span>}
-                {sd.sample_size && sd.sample_size !== "N/A" && <span className="text-text3">N: <span className="text-text1 font-medium">{sd.sample_size}</span></span>}
-                {sd.population && <span className="text-text3">Pop: <span className="text-text1 font-medium">{sd.population}</span></span>}
-                {sd.key_finding && <div className="w-full text-text3">Key: <span className="text-text1 font-medium">{sd.key_finding}</span></div>}
-              </div>
-            ) : null;
-          })()}
-
-          {/* Q&A */}
-          {paper.qa_data && (() => {
-            const qa = typeof paper.qa_data === "string" ? JSON.parse(paper.qa_data) : paper.qa_data;
-            return qa?.length > 0 ? (
-              <div className="bg-[rgba(255,149,0,0.04)] border border-[rgba(255,149,0,0.1)] rounded-lg p-4 mb-4">
-                <p className="text-[0.667rem] font-semibold text-warning uppercase tracking-widest mb-1.5">Q&A</p>
-                {qa.map((item, i) => (
-                  <div key={i}>
-                    <p className="text-[0.833rem] font-semibold text-text1 mb-1">Q. {item.q}</p>
-                    <p className="text-[0.833rem] leading-[1.6] text-text2">{item.a}</p>
-                  </div>
-                ))}
-              </div>
-            ) : null;
-          })()}
+          {/* Details accordion (structured data + Q&A) */}
+          {(paper.structured_data || paper.qa_data) && <DetailAccordion paper={paper} />}
 
           {/* Abstract */}
           {paper.abstract && (
