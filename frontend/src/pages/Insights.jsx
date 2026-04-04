@@ -142,7 +142,7 @@ export default function Insights() {
     mesh.forEach(function(m) { var ml=m.toLowerCase(); if(!STOP.has(ml)&&ml.length>2&&ml.length<40) kwCount[ml]=(kwCount[ml]||0)+1; });
   });
   var topicData = Object.entries(kwCount).sort(function(a,b){return b[1]-a[1]}).slice(0,10);
-  var topicTotal = topicData.reduce(function(s,d){return s+d[1]},0);
+  var topicTotal = topicData.reduce(function(s,d){return s+d[1]},0) || 1;
 
   // Study types
   var typeCounts = {};
@@ -213,7 +213,7 @@ export default function Insights() {
           <div className="bg-[rgba(0,122,255,0.04)] border border-[rgba(0,122,255,0.1)] rounded-xl p-4 mb-4">
             <p className="text-[0.833rem] text-text1 leading-relaxed">
               Your reading is centered on <strong>{topKws[0]}</strong> and <strong>{topKws[1]}</strong>.
-              {topType ? " " + Math.round(topType[1]/papers.length*100) + "% are " + (TYPE_LABELS[topType[0]]||topType[0]) + "." : ""}
+              {topType && papers.length ? " " + Math.round(topType[1]/papers.length*100) + "% are " + (TYPE_LABELS[topType[0]]||topType[0]) + "." : ""}
               {topJ ? " Most read: " + topJ[0] + " (" + topJ[1] + ")." : ""}
             </p>
           </div>
