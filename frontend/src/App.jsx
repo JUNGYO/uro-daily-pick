@@ -77,6 +77,7 @@ function Layout({ children }) {
 
   return (
     <div className="min-h-screen bg-bg text-text1 flex flex-col">
+      {/* Desktop header */}
       <header className="h-14 flex items-center justify-between px-4 md:px-8 bg-card border-b border-border shrink-0 sticky top-0 z-50">
         <div className="flex items-center gap-2">
           <svg width="22" height="22" viewBox="0 0 80 80" fill="none" className="shrink-0">
@@ -89,27 +90,43 @@ function Layout({ children }) {
             <circle cx="8" cy="58" r="4" fill="none" stroke="#007AFF" strokeWidth="2"/>
             <circle cx="72" cy="58" r="4" fill="none" stroke="#007AFF" strokeWidth="2"/>
           </svg>
-          <span className="text-[1rem] md:text-[1.222rem] font-bold tracking-tight hidden sm:inline">Uro Daily Pick</span>
+          <span className="text-[1rem] md:text-[1.222rem] font-bold tracking-tight">Uro Daily Pick</span>
         </div>
-        <nav className="flex items-center gap-0.5 md:gap-1">
+        {/* Desktop nav */}
+        <nav className="hidden md:flex items-center gap-1">
           {links.map(({ to, icon: Icon, label }) => (
             <NavLink key={to} to={to} end={to === "/"}
               className={({ isActive }) =>
-                `flex items-center gap-1.5 h-9 px-2.5 md:px-4 rounded-lg text-[0.778rem] md:text-[0.889rem] font-medium transition-colors
+                `flex items-center gap-1.5 h-9 px-4 rounded-lg text-[0.889rem] font-medium transition-colors
                  ${isActive ? "bg-[rgba(0,122,255,0.08)] text-accent" : "text-text3 hover:bg-hover"}`
               }>
-              <Icon size={18} /><span className="hidden sm:inline">{label}</span>
+              <Icon size={18} />{label}
             </NavLink>
           ))}
         </nav>
         <div className="flex items-center gap-2 md:gap-4">
           <span className="text-[0.778rem] text-text3 hidden md:inline">{profile?.name || user?.email}</span>
-          <button onClick={logout} className="w-9 h-9 rounded-lg flex items-center justify-center text-text3 hover:bg-hover transition-colors">
+          <button onClick={logout} className="w-9 h-9 rounded-lg flex items-center justify-center text-text3 hover:bg-hover transition-colors" aria-label="Logout">
             <LogOut size={18} />
           </button>
         </div>
       </header>
-      <main className="flex-1 overflow-hidden">{children}</main>
+
+      <main className="flex-1 overflow-hidden pb-16 md:pb-0">{children}</main>
+
+      {/* Mobile bottom tab bar */}
+      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-card/95 backdrop-blur border-t border-border flex items-stretch justify-around" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
+        {links.map(({ to, icon: Icon, label }) => (
+          <NavLink key={to} to={to} end={to === "/"}
+            className={({ isActive }) =>
+              `flex flex-col items-center justify-center gap-0.5 py-2 px-3 min-w-[64px] transition-colors
+               ${isActive ? "text-accent" : "text-text3"}`
+            }>
+            <Icon size={20} />
+            <span className="text-[0.611rem] font-medium">{label}</span>
+          </NavLink>
+        ))}
+      </nav>
     </div>
   );
 }

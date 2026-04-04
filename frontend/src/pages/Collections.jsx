@@ -74,14 +74,26 @@ export default function Collections() {
               <h3 className="text-[0.889rem] font-semibold text-text1">{col.name}</h3>
             </div>
           ))}
-          {!cols.length && <p className="text-text3 col-span-full text-center py-8">No collections yet</p>}
+          {!cols.length && (
+            <div className="col-span-full flex flex-col items-center py-12">
+              <div className="w-16 h-16 rounded-2xl bg-hover flex items-center justify-center mb-4">
+                <FolderPlus size={28} className="text-text3" />
+              </div>
+              <p className="text-[1rem] font-semibold text-text1 mb-1">No collections yet</p>
+              <p className="text-[0.833rem] text-text3 mb-4">Like papers in Daily Pick to auto-save them.</p>
+              <button onClick={() => setShowCreate(true)}
+                className="h-10 px-5 bg-accent text-white rounded-lg text-[0.833rem] font-medium hover:bg-[#0066D6] transition-colors">
+                Create collection
+              </button>
+            </div>
+          )}
         </div>
 
         {activeCol && (
           <div>
             <h2 className="text-[1rem] font-semibold text-text1 mb-3">{activeCol.name}</h2>
             {!papers.length
-              ? <p className="text-text3">Empty collection. Save papers from Daily Pick.</p>
+              ? <p className="text-[0.889rem] text-text3 text-center py-8 bg-hover rounded-lg">No papers yet — like papers in Daily Pick to save them here.</p>
               : papers.map(p => (
                 <div key={p.pmid} className="flex items-center gap-3 p-3 bg-card border border-border rounded-lg mb-2">
                   <FileText size={16} className="text-text3 shrink-0" />

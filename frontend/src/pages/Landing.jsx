@@ -1,4 +1,5 @@
 import { useNavigate } from "react-router-dom";
+import { Sparkles, Languages, BookOpen } from "lucide-react";
 
 export default function Landing() {
   const navigate = useNavigate();
@@ -40,11 +41,14 @@ export default function Landing() {
       <div className="max-w-[720px] mx-auto px-6 pb-20">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {[
-            { title: "Personalized", desc: "키워드, 저널 선호, 좋아요 이력으로 당신만의 추천을 생성합니다." },
-            { title: "한글 요약", desc: "AI가 논문을 3문장 한글로 요약합니다. 30초에 핵심을 파악하세요." },
-            { title: "Major Journals", desc: "European Urology, JCO, Lancet 등 30개 메이저 저널만 수집합니다." },
+            { icon: Sparkles, color: "#007AFF", bg: "rgba(0,122,255,0.08)", title: "Personalized", desc: "키워드, 저널 선호, 좋아요 이력으로 당신만의 추천을 생성합니다." },
+            { icon: Languages, color: "#34C759", bg: "rgba(52,199,89,0.08)", title: "한글 요약", desc: "AI가 논문을 3문장 한글로 요약합니다. 30초에 핵심을 파악하세요." },
+            { icon: BookOpen, color: "#FF9500", bg: "rgba(255,149,0,0.08)", title: "Major Journals", desc: "European Urology, JCO, Lancet 등 30개 메이저 저널만 수집합니다." },
           ].map(f => (
-            <div key={f.title} className="bg-card rounded-xl border border-border p-5" style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.03)" }}>
+            <div key={f.title} className="bg-card rounded-xl border border-border p-5 hover:shadow-md transition-shadow" style={{ boxShadow: "0 2px 8px rgba(0,0,0,0.06)" }}>
+              <div className="w-10 h-10 rounded-xl flex items-center justify-center mb-3" style={{ background: f.bg }}>
+                <f.icon size={20} style={{ color: f.color }} />
+              </div>
               <h3 className="text-[0.889rem] font-semibold text-text1 mb-2">{f.title}</h3>
               <p className="text-[0.778rem] text-text3 leading-relaxed">{f.desc}</p>
             </div>

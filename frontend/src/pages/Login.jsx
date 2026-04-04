@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
+import { Loader2 } from "lucide-react";
 
 export default function Login() {
   const [mode, setMode] = useState("signin"); // signin | signup | forgot
@@ -102,12 +103,12 @@ export default function Login() {
               </div>
             )}
 
-            {error && <p className="text-[0.889rem] text-danger">{error}</p>}
-            {message && <p className="text-[0.889rem] text-success">{message}</p>}
+            {error && <p className="text-[0.833rem] text-danger bg-[rgba(255,59,48,0.06)] border border-[rgba(255,59,48,0.12)] rounded-lg px-3 py-2">{error}</p>}
+            {message && <p className="text-[0.833rem] text-success bg-[rgba(52,199,89,0.06)] border border-[rgba(52,199,89,0.12)] rounded-lg px-3 py-2">{message}</p>}
 
             <button type="submit" disabled={loading}
               className="w-full h-11 rounded-lg bg-accent text-white text-[0.889rem] font-semibold hover:bg-[#0066D6] disabled:opacity-50 transition-colors mt-2">
-              {loading ? "..." : mode === "forgot" ? "Send reset link" : mode === "signup" ? "Get started" : "Continue"}
+              {loading ? <Loader2 size={16} className="animate-spin" /> : mode === "forgot" ? "Send reset link" : mode === "signup" ? "Get started" : "Continue"}
             </button>
           </form>
 

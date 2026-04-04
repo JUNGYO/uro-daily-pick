@@ -54,7 +54,7 @@ function TypeBadge({ type }) {
 /* ═══ Skeleton Loading ═══ */
 function SkeletonList() {
   return (
-    <div className="flex" style={{ height: "calc(100vh - 56px)" }}>
+    <div className="flex" style={{ height: "calc(100dvh - 56px)" }}>
       <div className="w-full md:w-[320px] lg:w-[340px] xl:w-[360px] shrink-0 md:border-r border-border flex flex-col bg-bg">
         <div className="px-4 py-2.5 border-b border-border">
           <div className="h-5 w-24 bg-border/50 rounded animate-pulse mx-auto" />
@@ -153,8 +153,15 @@ function Detail({ rec, onFeedback, onPrev, onNext, hasPrev, hasNext, likeAnim })
   const fb = rec.feedback_action;
   const detailRef = useRef(null);
   const st = paper?.study_type;
+  const [copied, setCopied] = useState(null); // 'share' | 'cite'
 
-  useEffect(() => { detailRef.current?.scrollTo(0, 0); }, [paper?.pmid]);
+  const [fadeIn, setFadeIn] = useState(true);
+  useEffect(() => {
+    detailRef.current?.scrollTo(0, 0);
+    setCopied(null);
+    setFadeIn(false);
+    requestAnimationFrame(() => setFadeIn(true));
+  }, [paper?.pmid]);
 
   if (!paper) return (
     <div className="flex-1 flex items-center justify-center">
@@ -164,7 +171,8 @@ function Detail({ rec, onFeedback, onPrev, onNext, hasPrev, hasNext, likeAnim })
 
   return (
     <div ref={detailRef} className="flex-1 overflow-y-auto p-4 md:p-5 xl:p-6">
-      <div className="bg-card rounded-xl border border-border overflow-hidden" style={{ boxShadow: "0 1px 6px rgba(0,0,0,0.04)" }}>
+      <div className={`bg-card rounded-xl border border-border overflow-hidden transition-opacity duration-200 ${fadeIn ? "opacity-100" : "opacity-0"}`}
+        style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04)" }}>
         <div className="p-5 md:p-6 xl:p-8">
 
           {/* Meta row */}
@@ -259,19 +267,22 @@ function Detail({ rec, onFeedback, onPrev, onNext, hasPrev, hasNext, likeAnim })
             <button onClick={() => {
               const url = `https://pubmed.ncbi.nlm.nih.gov/${paper.pmid}/`;
               if (navigator.share) navigator.share({ title: paper.title, url });
-              else { navigator.clipboard.writeText(`${paper.title}\n${url}`); }
+              else { navigator.clipboard.writeText(`${paper.title}\n${url}`); setCopied("share"); setTimeout(() => setCopied(null), 1500); }
             }}
-              className="w-9 h-9 rounded-lg border border-border flex items-center justify-center text-text3 hover:bg-hover transition-colors" title="Share">
-              <Share2 size={15} />
+              className={`w-9 h-9 rounded-lg border flex items-center justify-center transition-all duration-200
+                ${copied === "share" ? "border-success bg-[rgba(52,199,89,0.08)] text-success" : "border-border text-text3 hover:bg-hover"}`} title="Share">
+              {copied === "share" ? <Check size={15} /> : <Share2 size={15} />}
             </button>
             {/* Copy citation */}
             <button onClick={() => {
               const authors = (paper.authors || []).slice(0, 3).join(", ") + (paper.authors?.length > 3 ? " et al." : "");
               const cite = `${authors}. ${paper.title} ${paper.journal}. ${paper.pub_date}. PMID: ${paper.pmid}`;
               navigator.clipboard.writeText(cite);
+              setCopied("cite"); setTimeout(() => setCopied(null), 1500);
             }}
-              className="w-9 h-9 rounded-lg border border-border flex items-center justify-center text-text3 hover:bg-hover transition-colors" title="Copy citation">
-              <Copy size={15} />
+              className={`w-9 h-9 rounded-lg border flex items-center justify-center transition-all duration-200
+                ${copied === "cite" ? "border-success bg-[rgba(52,199,89,0.08)] text-success" : "border-border text-text3 hover:bg-hover"}`} title="Copy citation">
+              {copied === "cite" ? <Check size={15} /> : <Copy size={15} />}
             </button>
             {paper.doi && (
               <a href={`https://doi.org/${paper.doi}`} target="_blank" rel="noopener"
@@ -634,7 +645,7 @@ export default function DailyPick() {
   if (loading) return <SkeletonList />;
 
   if (error) return (
-    <div className="flex items-center justify-center" style={{ height: "calc(100vh - 56px)" }}>
+    <div className="flex items-center justify-center" style={{ height: "calc(100dvh - 56px)" }}>
       <div className="text-center max-w-sm">
         <div className="w-16 h-16 rounded-2xl bg-[rgba(255,59,48,0.06)] flex items-center justify-center mx-auto mb-4">
           <RefreshCw size={28} className="text-danger" />
@@ -650,7 +661,7 @@ export default function DailyPick() {
   );
 
   if (!recs.length) return (
-    <div className="flex items-center justify-center" style={{ height: "calc(100vh - 56px)" }}>
+    <div className="flex items-center justify-center" style={{ height: "calc(100dvh - 56px)" }}>
       <div className="text-center max-w-sm">
         <div className="w-16 h-16 rounded-2xl bg-hover flex items-center justify-center mx-auto mb-4">
           <RefreshCw size={28} className="text-text3" />
@@ -686,7 +697,7 @@ export default function DailyPick() {
         </div>
       )}
 
-      <div className="flex" style={{ height: "calc(100vh - 56px)" }}>
+      <div className="flex" style={{ height: "calc(100dvh - 56px)" }}>
         {/* ── List panel ── */}
         <div className={`w-full md:w-[320px] lg:w-[340px] xl:w-[360px] shrink-0 md:border-r border-border flex flex-col bg-bg ${mobileOpen ? "hidden md:flex" : ""}`}>
           <div className="px-4 py-2.5 flex items-center justify-between border-b border-border">
