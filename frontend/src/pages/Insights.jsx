@@ -161,8 +161,16 @@ export default function Insights() {
             </div>
           </div>
           <div>
-            <div style={{display:"flex",gap:2}}>
-              <div style={{display:"flex",flexDirection:"column",gap:2,paddingTop:18}}>
+            {/* Month labels */}
+            <div style={{display:"flex",gap:0,marginLeft:20,marginBottom:2}}>
+              {heatMonths.map(function(m,i){
+                return <div key={i} className="text-text3" style={{fontSize:10,width:m.span*(14+2),flexShrink:0}}>{m.label}</div>;
+              })}
+            </div>
+            {/* Day labels + heatmap grid */}
+            <div style={{display:"grid",gridTemplateColumns:"18px 1fr",gap:0}}>
+              {/* Day labels column — same grid layout as cells */}
+              <div style={{display:"grid",gridTemplateRows:"repeat(7,14px)",gap:2}}>
                 {[
                   {label:"M",color:"#86868B"},
                   {label:"T",color:"#86868B"},
@@ -172,21 +180,14 @@ export default function Insights() {
                   {label:"S",color:"#007AFF"},
                   {label:"S",color:"#FF3B30"},
                 ].map(function(d,i){
-                  return <div key={i} style={{height:14,fontSize:9,lineHeight:"14px",width:14,color:d.color,textAlign:"right",fontWeight:500}}>{d.label}</div>;
+                  return <div key={i} style={{fontSize:10,lineHeight:"14px",color:d.color,fontWeight:600,textAlign:"right",paddingRight:4}}>{d.label}</div>;
                 })}
               </div>
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{display:"flex",gap:2,marginBottom:3}}>
-                  {heatMonths.map(function(m,i){
-                    var cellSize = isMobile ? 16 : 14;
-                    return <div key={i} className="text-text3" style={{fontSize:10,width:m.span*(cellSize+2)-2,flexShrink:0}}>{m.label}</div>;
-                  })}
-                </div>
-                <div style={{display:"grid",gridTemplateRows:"repeat(7,1fr)",gridAutoFlow:"column",gap:2}}>
-                  {heatCells.map(function(c,i) {
-                    return <div key={i} title={c.date+": "+c.count+" papers"} className="rounded-sm aspect-square" style={{background:HEAT[Math.min(5,c.count)],cursor:"pointer",transition:"transform 0.1s",minWidth:0}} />;
-                  })}
-                </div>
+              {/* Cells */}
+              <div style={{display:"grid",gridTemplateRows:"repeat(7,14px)",gridAutoFlow:"column",gap:2}}>
+                {heatCells.map(function(c,i) {
+                  return <div key={i} title={c.date+": "+c.count+" papers"} className="rounded-sm hover:ring-2 hover:ring-accent hover:ring-offset-1" style={{width:14,height:14,background:HEAT[Math.min(5,c.count)],cursor:"pointer"}} />;
+                })}
               </div>
             </div>
           </div>
