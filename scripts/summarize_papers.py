@@ -52,7 +52,8 @@ def summarize(title, abstract):
         resp = requests.post(f"{GEMINI_URL}?key={GEMINI_API_KEY}",
             headers={"Content-Type": "application/json"},
             json={"contents": [{"role": "user", "parts": [{"text": prompt}]}],
-                  "generationConfig": {"maxOutputTokens": 2048, "temperature": 0.5}},
+                  "generationConfig": {"maxOutputTokens": 8192, "temperature": 0.5},
+                  "thinkingConfig": {"thinkingBudget": 0}},
             timeout=120)
     except requests.exceptions.RequestException:
         return None
@@ -81,22 +82,27 @@ def main():
         print("ERROR: SUPABASE_SERVICE_KEY and GEMINI_API_KEY required")
         return
 
-    # Get papers with abstract but without Korean summary
+    # Get papers with abstract but without Korean summary (or needing re-summarize)
     papers = sb_get("papers", {
         "select": "id,pmid,title,abstract,summary_ko",
-        "or": "(summary_ko.eq.,summary_ko.is.null)",
         "abstract": "neq.",
         "order": "fetched_at.desc",
         "limit": "200",
     })
 
-    print(f"=== Summarizing {len(papers)} papers ===")
-
     done = 0
     failed = 0
+    def needs_summary(s):
+        """Check if summary is missing or truncated (< 3 lines)."""
+        if not s:
+            return True
+        lines = [l for l in s.strip().split('\n') if l.strip()]
+        return len(lines) < 3
+
+    papers = [p for p in papers if needs_summary(p.get("summary_ko"))]
+    print(f"=== Summarizing {len(papers)} papers ===")
+
     for i, p in enumerate(papers):
-        if p.get("summary_ko"):
-            continue
         if not p.get("abstract"):
             sb_patch(p["id"], {"summary_ko": ""})
             continue
