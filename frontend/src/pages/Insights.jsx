@@ -163,8 +163,16 @@ export default function Insights() {
           <div>
             <div style={{display:"flex",gap:2}}>
               <div style={{display:"flex",flexDirection:"column",gap:2,paddingTop:18}}>
-                {["M","","W","","F","","S"].map(function(d,i){
-                  return <div key={i} className="text-text3 text-right" style={{height:14,fontSize:9,lineHeight:"14px",width:14}}>{d}</div>;
+                {[
+                  {label:"M",color:"#86868B"},
+                  {label:"T",color:"#86868B"},
+                  {label:"W",color:"#86868B"},
+                  {label:"T",color:"#86868B"},
+                  {label:"F",color:"#86868B"},
+                  {label:"S",color:"#007AFF"},
+                  {label:"S",color:"#FF3B30"},
+                ].map(function(d,i){
+                  return <div key={i} style={{height:14,fontSize:9,lineHeight:"14px",width:14,color:d.color,textAlign:"right",fontWeight:500}}>{d.label}</div>;
                 })}
               </div>
               <div style={{flex:1,minWidth:0}}>
