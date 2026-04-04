@@ -104,9 +104,9 @@ def main():
         print("ERROR: SUPABASE_SERVICE_KEY and GEMINI_API_KEY required")
         return
 
-    # Get papers with abstract but without Korean summary (or needing re-summarize)
+    # Get papers with abstract — re-summarize if missing qa_data or summary
     papers = sb_get("papers", {
-        "select": "id,pmid,title,abstract,summary_ko",
+        "select": "id,pmid,title,abstract,summary_ko,qa_data,clinical_relevance",
         "abstract": "neq.",
         "order": "fetched_at.desc",
         "limit": "200",
@@ -114,14 +114,21 @@ def main():
 
     done = 0
     failed = 0
-    def needs_summary(s):
-        """Check if summary is missing or truncated (< 3 lines)."""
+    def needs_update(p):
+        s = p.get("summary_ko")
         if not s:
             return True
         lines = [l for l in s.strip().split('\n') if l.strip()]
-        return len(lines) < 3
+        if len(lines) < 3:
+            return True
+        # Re-summarize if missing structured/qa data
+        if not p.get("qa_data") or p.get("qa_data") == "[]":
+            return True
+        if not p.get("clinical_relevance") or p.get("clinical_relevance") == 0:
+            return True
+        return False
 
-    papers = [p for p in papers if needs_summary(p.get("summary_ko"))]
+    papers = [p for p in papers if needs_update(p)]
     print(f"=== Summarizing {len(papers)} papers ===")
 
     for i, p in enumerate(papers):
