@@ -76,7 +76,7 @@ function Layout({ children }) {
   ];
 
   return (
-    <div className="min-h-screen bg-bg text-text1 flex flex-col">
+    <div className="h-screen bg-bg text-text1 flex flex-col overflow-hidden">
       {/* Header */}
       <header className="h-12 md:h-14 flex items-center justify-between px-4 md:px-8 bg-card border-b border-border shrink-0 sticky top-0 z-50">
         <div className="flex items-center gap-2">
@@ -112,7 +112,7 @@ function Layout({ children }) {
         </div>
       </header>
 
-      <main className="flex-1 overflow-hidden pb-16 md:pb-0">{children}</main>
+      <main className="flex-1 min-h-0 overflow-hidden pb-16 md:pb-0">{children}</main>
 
       {/* Mobile bottom tab bar */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-card/95 backdrop-blur border-t border-border flex items-stretch justify-around" style={{ paddingBottom: "env(safe-area-inset-bottom)" }}>
