@@ -209,10 +209,11 @@ function Detail({ rec, onFeedback, onPrev, onNext, hasPrev, hasNext, likeAnim })
   );
 
   return (
-    <div ref={detailRef} className="flex-1 overflow-y-auto p-4 md:p-5 xl:p-6">
-      <div className={`bg-card rounded-xl border border-border overflow-hidden transition-opacity duration-200 ${fadeIn ? "opacity-100" : "opacity-0"}`}
-        style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04)" }}>
-        <div className="p-5 md:p-6 xl:p-8">
+    <div className="flex-1 flex flex-col">
+      <div ref={detailRef} className="flex-1 overflow-y-auto p-4 md:p-5 xl:p-6">
+        <div className={`bg-card rounded-xl border border-border overflow-hidden transition-opacity duration-200 ${fadeIn ? "opacity-100" : "opacity-0"}`}
+          style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04)" }}>
+          <div className="p-5 md:p-6 xl:p-8">
 
           {/* Meta row */}
           <div className="flex items-center gap-2 flex-wrap mb-4">
@@ -287,9 +288,11 @@ function Detail({ rec, onFeedback, onPrev, onNext, hasPrev, hasNext, likeAnim })
             <p className="text-[0.889rem] leading-[1.7] text-text2">{hl(paper.abstract, matched)}</p>
           )}
         </div>
+        </div>
+      </div>
 
-        {/* Action bar */}
-        <div className="border-t border-border px-5 md:px-6 xl:px-8 py-3 flex items-center justify-between">
+      {/* Action bar — fixed at bottom of detail panel */}
+      <div className="shrink-0 border-t border-border bg-card px-5 md:px-6 xl:px-8 py-3 flex items-center justify-between">
           {/* Left: prev/next + feedback */}
           <div className="flex items-center gap-2">
             <button onClick={onPrev} disabled={!hasPrev} className="w-8 h-8 rounded-lg flex items-center justify-center text-text3 border border-border hover:bg-hover disabled:opacity-20 transition-colors">
@@ -349,7 +352,6 @@ function Detail({ rec, onFeedback, onPrev, onNext, hasPrev, hasNext, likeAnim })
             </a>
           </div>
         </div>
-      </div>
     </div>
   );
 }
