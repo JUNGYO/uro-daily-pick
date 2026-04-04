@@ -91,7 +91,6 @@ export default function Settings() {
       preferred_journals: form.preferred_journals || [],
       preferred_study_types: form.preferred_study_types || [],
       digest_email: form.digest_email ?? true,
-      digest_kakao: form.digest_kakao ?? false,
     }).eq("id", user.id);
     if (error) { console.error("Save error:", error); setSaving(false); return; }
     await loadProfile(user.id);
@@ -182,24 +181,16 @@ export default function Settings() {
 
           <div className="pt-4 border-t border-border">
             <p className="text-[0.889rem] font-semibold text-text1 mb-3">Daily Digest</p>
-            <div className="flex flex-col gap-2">
-              {[
-                { key: "digest_email", label: "Email", desc: "Receive via email every morning" },
-                { key: "digest_kakao", label: "KakaoTalk", desc: "Receive via KakaoTalk (connect Kakao first)" },
-              ].map(opt => (
-                <label key={opt.key}
-                  className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors
-                    ${form[opt.key] ? "border-accent bg-[rgba(0,122,255,0.04)]" : "border-border hover:bg-hover"}`}>
-                  <input type="checkbox" checked={form[opt.key] || false}
-                    onChange={e => setForm({ ...form, [opt.key]: e.target.checked })}
-                    className="accent-accent" />
-                  <div>
-                    <span className="text-[0.889rem] font-medium text-text1">{opt.label}</span>
-                    <p className="text-[0.722rem] text-text3">{opt.desc}</p>
-                  </div>
-                </label>
-              ))}
-            </div>
+            <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors
+              ${form.digest_email ? "border-accent bg-[rgba(0,122,255,0.04)]" : "border-border hover:bg-hover"}`}>
+              <input type="checkbox" checked={form.digest_email || false}
+                onChange={e => setForm({ ...form, digest_email: e.target.checked })}
+                className="accent-accent" />
+              <div>
+                <span className="text-[0.889rem] font-medium text-text1">Email</span>
+                <p className="text-[0.722rem] text-text3">Receive via email every morning</p>
+              </div>
+            </label>
           </div>
         </div>
 
@@ -249,36 +240,7 @@ function AccountSection({ user, profile }) {
   const [msg, setMsg] = useState("");
   const [err, setErr] = useState("");
   const [showDelete, setShowDelete] = useState(false);
-  const [kakaoLinked, setKakaoLinked] = useState(profile?.login_provider === "kakao");
   const navigate = useNavigate();
-
-  const linkKakao = async () => {
-    setErr(""); setMsg("");
-    const { error } = await supabase.auth.linkIdentity({
-      provider: "kakao",
-      options: {
-        redirectTo: `${window.location.origin}/uro-daily-pick/settings`,
-        scopes: "talk_message",
-      },
-    });
-    if (error) setErr(error.message);
-  };
-
-  const unlinkKakao = async () => {
-    setErr(""); setMsg("");
-    // Get identities
-    const { data: { user: currentUser } } = await supabase.auth.getUser();
-    const kakaoIdentity = currentUser?.identities?.find(i => i.provider === "kakao");
-    if (kakaoIdentity) {
-      const { error } = await supabase.auth.unlinkIdentity(kakaoIdentity);
-      if (error) { setErr(error.message); return; }
-    }
-    await supabase.from("profiles").update({
-      kakao_access_token: "", kakao_refresh_token: "", login_provider: "email",
-    }).eq("id", user.id);
-    setKakaoLinked(false);
-    setMsg("Kakao disconnected.");
-  };
 
   const changeEmail = async () => {
     if (!newEmail.trim()) return;
@@ -319,29 +281,6 @@ function AccountSection({ user, profile }) {
       <p className="text-[0.889rem] text-text3 mb-4">
         Signed in as <span className="text-text1 font-medium break-all">{user?.email}</span>
       </p>
-
-      {/* Kakao connection */}
-      <div className="mb-5 p-4 rounded-lg border border-border bg-bg">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="#191919"><path d="M12 3C6.48 3 2 6.36 2 10.5c0 2.7 1.8 5.1 4.5 6.45-.15.54-.6 2.1-.69 2.43-.1.42.15.42.33.3.13-.09 2.1-1.41 2.94-1.98.6.09 1.23.15 1.92.15 5.52 0 10-3.36 10-7.5S17.52 3 12 3z"/></svg>
-            <span className="text-[0.889rem] font-semibold text-text1">KakaoTalk</span>
-            {kakaoLinked && <span className="text-[0.722rem] font-medium text-success bg-[rgba(52,199,89,0.08)] px-2 py-0.5 rounded">Connected</span>}
-          </div>
-          {kakaoLinked ? (
-            <button onClick={unlinkKakao} className="text-[0.778rem] text-danger hover:underline">Disconnect</button>
-          ) : (
-            <button onClick={linkKakao}
-              className="h-9 px-4 rounded-lg text-[0.778rem] font-semibold transition-colors"
-              style={{ background: "#FEE500", color: "#191919" }}>
-              Connect Kakao
-            </button>
-          )}
-        </div>
-        <p className="text-[0.722rem] text-text3 mt-2">
-          {kakaoLinked ? "Daily picks will be sent to your KakaoTalk every morning." : "Connect to receive daily picks via KakaoTalk."}
-        </p>
-      </div>
 
       {msg && <p className="text-[0.889rem] text-success mb-3">{msg}</p>}
       {err && <p className="text-[0.889rem] text-danger mb-3">{err}</p>}

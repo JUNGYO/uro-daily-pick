@@ -83,7 +83,7 @@ def build_html(name, recs):
               {journal} &middot; {pub_date}
             </div>
             <a href="https://pubmed.ncbi.nlm.nih.gov/{pmid}/" target="_blank"
-               style="color:#1D1D1F;font-size:17px;font-weight:700;text-decoration:none;line-height:1.4;">
+               class="paper-title" style="color:#1D1D1F;font-size:16px;font-weight:700;text-decoration:none;line-height:1.4;display:block;">
               {title}
             </a>
             <div style="color:#86868B;font-size:14px;margin-top:6px;">{author_str}</div>
@@ -94,9 +94,19 @@ def build_html(name, recs):
     return f"""
     <!DOCTYPE html>
     <html>
-    <head><meta charset="utf-8"></head>
+    <head>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      <style>
+        @media (max-width: 480px) {{
+          .digest-body {{ padding: 20px 12px !important; }}
+          .digest-card {{ padding: 20px !important; }}
+          .paper-title {{ font-size: 15px !important; }}
+        }}
+      </style>
+    </head>
     <body style="margin:0;padding:0;background:#F5F5F7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;">
-      <div style="max-width:600px;margin:0 auto;padding:40px 20px;">
+      <div class="digest-body" style="max-width:600px;margin:0 auto;padding:40px 20px;">
         <div style="text-align:center;margin-bottom:32px;">
           <svg width="36" height="36" viewBox="0 0 80 80" fill="none" style="margin:0 auto 8px;">
             <polygon points="40,4 72,22 72,58 40,76 8,58 8,22" fill="none" stroke="#1D1D1F" stroke-width="1.5"/>
@@ -111,7 +121,7 @@ def build_html(name, recs):
           <div style="font-size:24px;font-weight:700;color:#1D1D1F;">Uro Daily Pick</div>
           <div style="font-size:14px;color:#86868B;margin-top:4px;">{today_str}</div>
         </div>
-        <div style="background:#FFFFFF;border-radius:16px;padding:32px;box-shadow:0 1px 4px rgba(0,0,0,0.04);">
+        <div class="digest-card" style="background:#FFFFFF;border-radius:16px;padding:32px;box-shadow:0 1px 4px rgba(0,0,0,0.04);">
           <div style="font-size:15px;color:#48494B;margin-bottom:20px;">
             Hi {name or "there"}, here are your top picks for today:
           </div>

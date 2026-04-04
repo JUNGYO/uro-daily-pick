@@ -93,6 +93,7 @@ def main():
     print(f"=== Summarizing {len(papers)} papers ===")
 
     done = 0
+    failed = 0
     for i, p in enumerate(papers):
         if p.get("summary_ko"):
             continue
@@ -104,16 +105,24 @@ def main():
         if not summary:
             time.sleep(3)
             summary = summarize(p["title"], p["abstract"])  # retry once
+        if not summary:
+            time.sleep(5)
+            summary = summarize(p["title"], p["abstract"])  # retry twice
+
         if summary:
+            lines = [l for l in summary.strip().split('\n') if l.strip()]
+            if len(lines) != 3:
+                print(f"  [{i+1}/{len(papers)}] {p['pmid']}: MALFORMED ({len(lines)} lines, expected 3)")
             sb_patch(p["id"], {"summary_ko": summary})
             done += 1
             print(f"  [{i+1}/{len(papers)}] {p['pmid']}: {summary[:60]}...")
         else:
-            print(f"  [{i+1}/{len(papers)}] {p['pmid']}: FAILED")
+            failed += 1
+            print(f"  [{i+1}/{len(papers)}] {p['pmid']}: FAILED after 3 attempts")
 
         time.sleep(1)
 
-    print(f"Done. Summarized {done}/{len(papers)}.")
+    print(f"Done. Summarized {done}/{len(papers)}. Failed: {failed}")
 
 
 if __name__ == "__main__":

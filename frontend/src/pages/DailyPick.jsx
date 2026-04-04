@@ -293,6 +293,8 @@ export default function DailyPick() {
   const [recs, setRecs] = useState([]);
   const [cur, setCur] = useState(0);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
+  const [retryKey, setRetryKey] = useState(0);
   const [mobileOpen, setMobileOpen] = useState(false);
   const todayKST = new Date(Date.now() + 9*3600000).toISOString().slice(0, 10);
   const [selectedDate, setSelectedDate] = useState(todayKST);
@@ -381,23 +383,29 @@ export default function DailyPick() {
     if (!user) return;
     (async () => {
       setLoading(true);
-      // Try loading pre-generated recommendations for selected date
-      const { data: recsData } = await supabase.from("recommendations").select("*, paper:papers(*)").eq("user_id", user.id).eq("rec_date", selectedDate).order("score", { ascending: false });
+      setError(null);
+      try {
+        // Try loading pre-generated recommendations for selected date
+        const { data: recsData } = await supabase.from("recommendations").select("*, paper:papers(*)").eq("user_id", user.id).eq("rec_date", selectedDate).order("score", { ascending: false });
 
-      if (recsData?.length) {
-        const paperIds = recsData.map(r => r.paper_id);
-        const { data: fbs } = await supabase.from("feedbacks").select("paper_id, action").eq("user_id", user.id).in("paper_id", paperIds);
-        const fbMap = Object.fromEntries((fbs || []).map(f => [f.paper_id, f.action]));
-        setRecs(recsData.map(r => ({ ...r, feedback_action: fbMap[r.paper_id] || null })));
-      } else {
-        // No pre-generated recs — generate on the fly
-        await generateInstantRecs(user.id, today);
+        if (recsData?.length) {
+          const paperIds = recsData.map(r => r.paper_id);
+          const { data: fbs } = await supabase.from("feedbacks").select("paper_id, action").eq("user_id", user.id).in("paper_id", paperIds);
+          const fbMap = Object.fromEntries((fbs || []).map(f => [f.paper_id, f.action]));
+          setRecs(recsData.map(r => ({ ...r, feedback_action: fbMap[r.paper_id] || null })));
+        } else {
+          // No pre-generated recs — generate on the fly
+          await generateInstantRecs(user.id);
+        }
+      } catch (err) {
+        console.error("Failed to load recommendations:", err);
+        setError("Failed to load recommendations. Please try again.");
       }
       setLoading(false);
     })();
-  }, [user, selectedDate]);
+  }, [user, selectedDate, retryKey]);
 
-  const generateInstantRecs = async (userId, today) => {
+  const generateInstantRecs = async (userId) => {
     // Get user profile
     const { data: prof } = await supabase.from("profiles").select("keywords,preferred_journals,preferred_study_types").eq("id", userId).single();
     const keywords = (prof?.keywords || []).map(k => k.toLowerCase());
@@ -424,19 +432,17 @@ export default function DailyPick() {
       const pType = p.study_type || "other";
 
       let score = 0;
-      const reasons = [];
 
-      // Keyword match
+      // Keyword match (word boundary)
       for (const kw of keywords) {
-        if (title.includes(kw)) { score += 3; reasons.push({ type: "keyword", label: kw }); }
-        else if (abstract.includes(kw)) { score += 1; }
+        const re = new RegExp(`\\b${kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
+        if (re.test(title)) { score += 3; }
+        else if (re.test(abstract)) { score += 1; }
       }
 
       // Journal match
       for (const pj of prefJournals) {
-        if (journal.includes(pj) || pj.includes(journal)) {
-          score += 2; reasons.push({ type: "journal", label: p.journal }); break;
-        }
+        if (journal.includes(pj) || pj.includes(journal)) { score += 2; break; }
       }
 
       // Study type match
@@ -459,19 +465,16 @@ export default function DailyPick() {
 
     if (!top5.length) return;
 
-    // Save to recommendations table
-    const inserts = top5.map(({ paper, score }) => ({
-      user_id: userId, paper_id: paper.id, score,
-      reasons: JSON.stringify({ reasons: [], matched_terms: [] }),
-      rec_date: today,
-    }));
-    await supabase.from("recommendations").insert(inserts);
-
-    // Reload
-    const { data: recsData } = await supabase.from("recommendations").select("*, paper:papers(*)").eq("user_id", userId).eq("rec_date", today).order("score", { ascending: false });
-    if (recsData?.length) {
-      setRecs(recsData.map(r => ({ ...r, feedback_action: null })));
-    }
+    // Set recs directly in state (no DB insert — RLS blocks client INSERT on recommendations)
+    setRecs(top5.map(({ paper, score }, i) => ({
+      id: `instant-${i}`,
+      user_id: userId,
+      paper_id: paper.id,
+      paper,
+      score,
+      rec_date: selectedDate,
+      feedback_action: null,
+    })));
   };
 
   const selectPaper = (i) => {
@@ -527,20 +530,49 @@ export default function DailyPick() {
     <div className="flex items-center justify-center" style={{ height: "calc(100vh - 56px)" }}>
       <div className="text-center">
         <Loader2 size={32} className="text-accent animate-spin mx-auto mb-3" />
-        <p className="text-[0.889rem] text-text3">Loading today's picks...</p>
+        <p className="text-[0.889rem] text-text3">Finding papers for you...</p>
+      </div>
+    </div>
+  );
+
+  if (error) return (
+    <div className="flex items-center justify-center" style={{ height: "calc(100vh - 56px)" }}>
+      <div className="text-center max-w-sm">
+        <div className="w-16 h-16 rounded-2xl bg-[rgba(255,59,48,0.06)] flex items-center justify-center mx-auto mb-4">
+          <RefreshCw size={28} className="text-danger" />
+        </div>
+        <p className="text-[1.111rem] font-semibold text-text1 mb-2">Something went wrong</p>
+        <p className="text-[0.889rem] text-text3 leading-relaxed mb-4">{error}</p>
+        <button onClick={() => { setError(null); setRetryKey(k => k + 1); }}
+          className="h-10 px-5 bg-accent text-white rounded-lg text-[0.889rem] font-medium hover:bg-[#0066D6] transition-colors">
+          Try again
+        </button>
       </div>
     </div>
   );
 
   if (!recs.length) return (
-    <div className="flex items-center justify-center h-full p-8">
+    <div className="flex items-center justify-center" style={{ height: "calc(100vh - 56px)" }}>
       <div className="text-center max-w-sm">
         <div className="w-16 h-16 rounded-2xl bg-hover flex items-center justify-center mx-auto mb-4">
           <RefreshCw size={28} className="text-text3" />
         </div>
-        <p className="text-[1.111rem] font-semibold text-text1 mb-2">No picks yet</p>
-        <p className="text-[0.889rem] text-text3 leading-relaxed mb-4">Recommendations are generated every morning at 6:00 AM KST. Make sure your research keywords are set in Settings.</p>
-        <a href="/uro-daily-pick/settings" className="text-[0.889rem] text-accent font-medium hover:underline">Go to Settings</a>
+        <p className="text-[1.111rem] font-semibold text-text1 mb-2">
+          {selectedDate !== todayKST ? "No picks for this date" : "No picks yet"}
+        </p>
+        <p className="text-[0.889rem] text-text3 leading-relaxed mb-4">
+          {selectedDate !== todayKST
+            ? "There are no recommendations for this date."
+            : "New papers are collected every morning at 6:00 AM KST. Make sure your research keywords are set in Settings."}
+        </p>
+        {selectedDate !== todayKST ? (
+          <button onClick={() => { setSelectedDate(todayKST); setCur(0); }}
+            className="h-10 px-5 bg-accent text-white rounded-lg text-[0.889rem] font-medium hover:bg-[#0066D6] transition-colors">
+            Go to today
+          </button>
+        ) : (
+          <a href="/uro-daily-pick/settings" className="text-[0.889rem] text-accent font-medium hover:underline">Go to Settings</a>
+        )}
       </div>
     </div>
   );

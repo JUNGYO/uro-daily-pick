@@ -1,5 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate, NavLink, useNavigate } from "react-router-dom";
-import { useState, useEffect, createContext, useContext } from "react";
+import { useState, useEffect, createContext, useContext, Component } from "react";
 import { supabase } from "./lib/supabase";
 import DailyPick from "./pages/DailyPick";
 import Collections from "./pages/Collections";
@@ -33,16 +33,6 @@ function AuthProvider({ children }) {
       setUser(session?.user ?? null);
       if (session?.user) {
         loadProfile(session.user.id, true);
-        // Save Kakao tokens if OAuth login
-        if (session.provider_token) {
-          try {
-            await supabase.from("profiles").update({
-              kakao_access_token: session.provider_token,
-              kakao_refresh_token: session.provider_refresh_token || "",
-              login_provider: "kakao",
-            }).eq("id", session.user.id);
-          } catch (e) { console.error("Token save error:", e); }
-        }
       } else { setProfile(null); setLoading(false); }
     });
 
@@ -124,10 +114,31 @@ function Layout({ children }) {
   );
 }
 
+class ErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  static getDerivedStateFromError(error) { return { error }; }
+  render() {
+    if (this.state.error) {
+      return (
+        <div className="min-h-screen flex items-center justify-center bg-bg">
+          <div className="text-center">
+            <p className="text-[1rem] text-text1 mb-2">Something went wrong</p>
+            <button onClick={() => window.location.reload()}
+              className="h-10 px-5 bg-accent text-white rounded-lg text-[0.889rem] font-medium">
+              Reload
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
+}
+
 export default function App() {
   return (
     <BrowserRouter basename="/uro-daily-pick">
-      <AuthProvider>
+      <ErrorBoundary><AuthProvider>
         <Routes>
           <Route path="/welcome" element={<Landing />} />
           <Route path="/login" element={<Login />} />
@@ -144,7 +155,7 @@ export default function App() {
             </Layout></ProtectedRoute>
           } />
         </Routes>
-      </AuthProvider>
+      </AuthProvider></ErrorBoundary>
     </BrowserRouter>
   );
 }

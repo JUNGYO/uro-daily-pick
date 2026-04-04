@@ -63,5 +63,3 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
         run: python scripts/send_digest.py
-
-      # KakaoTalk digest disabled — pending channel business verification

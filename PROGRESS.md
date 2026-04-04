@@ -15,7 +15,7 @@
 GitHub Pages (free)           <- React static build
        |
 Supabase (free tier)
-  |- Auth                     <- Kakao + Email login
+  |- Auth                     <- Email login
   |- PostgreSQL               <- All data
   |- RLS                      <- Row-level security
        |
@@ -31,7 +31,7 @@ GitHub Actions (free)
 - **Backend**: Supabase (PostgreSQL + Auth + RLS + Edge Functions)
 - **AI**: Gemini 2.5 Pro (Korean paper summaries, ~$3/month)
 - **Email**: Resend (free tier, 3000/month)
-- **Auth**: Supabase Auth (Kakao OAuth + Email/Password)
+- **Auth**: Supabase Auth (Email/Password)
 - **CI/CD**: GitHub Actions (cron + deploy)
 - **Hosting**: GitHub Pages (free)
 
@@ -68,17 +68,16 @@ GitHub Actions (free)
 
 ### User Management
 - [x] Email signup/login
-- [x] Kakao OAuth login
+
 - [x] Password reset via email
 - [x] Password change (email users)
 - [x] Account deletion
-- [x] Kakao account linking (Connect Kakao in Settings)
+
 - [x] Onboarding (keyword input + suggested tags)
 
 ### Daily Digest
 - [x] Email digest via Resend (06:30 KST daily)
-- [x] KakaoTalk digest (implemented but disabled — pending channel verification)
-- [x] Digest channel selection (Email / KakaoTalk / both / off)
+- [x] Digest on/off toggle
 - [x] All dates use KST (UTC+9)
 
 ### UI/UX
@@ -114,8 +113,7 @@ GitHub Actions (free)
 - [x] Research Keywords (tag input)
 - [x] Preferred Journals (tag input)
 - [x] Preferred Study Types (toggle buttons)
-- [x] Digest channel preference (Email / KakaoTalk)
-- [x] Kakao Connect/Disconnect
+- [x] Email digest toggle
 - [x] Account management (email, password, delete)
 
 ### Automation (GitHub Actions)
@@ -147,15 +145,12 @@ GitHub Actions (free)
 
 ### Credentials
 - **Supabase URL**: https://vwdcqzcoovczmtzdyzbc.supabase.co
-- **Kakao App ID**: 1421003
-- **GitHub Secrets**: SUPABASE_URL, SUPABASE_SERVICE_KEY, GEMINI_API_KEY, RESEND_API_KEY, KAKAO_REST_KEY, KAKAO_CLIENT_SECRET
+- **GitHub Secrets**: SUPABASE_URL, SUPABASE_SERVICE_KEY, GEMINI_API_KEY, RESEND_API_KEY
 
 ---
 
 ## Known Issues
 - Browser cache/session can cause loading freeze (5s timeout fallback)
-- KakaoTalk message links go to root domain (need channel business verification)
-- KakaoTalk digest disabled pending Kakao channel verification
 - `mesh_terms` stored as JSON string in some papers (handled with try/parse)
 
 ## Next Steps
@@ -163,8 +158,7 @@ GitHub Actions (free)
 2. **Network effects** — Activate collaborative filtering when 50+ users
 3. **Abstract structuring** — Parse into Background/Methods/Results/Conclusion
 4. **Paper notes** — User annotations on liked papers
-5. **Kakao channel** — Complete business verification for channel messages
-6. **User acquisition** — Share with Korean urology professors
+5. **User acquisition** — Share with Korean urology professors
 
 ---
 
