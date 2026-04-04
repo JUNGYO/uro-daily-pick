@@ -311,11 +311,6 @@ function Detail({ rec, onFeedback, onPrev, onNext, hasPrev, hasNext, likeAnim })
                 transition: "all 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)" }}>
               <Heart size={20} fill={fb === "like" ? "#34C759" : "none"} />
             </button>
-            <div className="hidden md:flex items-center gap-1 ml-2 text-[0.611rem] text-text3">
-              <kbd className="px-1 py-0.5 bg-hover border border-border rounded font-medium">↑↓</kbd>
-              <kbd className="px-1 py-0.5 bg-hover border border-border rounded font-medium">L</kbd>
-              <kbd className="px-1 py-0.5 bg-hover border border-border rounded font-medium">D</kbd>
-            </div>
           </div>
 
           {/* Right */}
