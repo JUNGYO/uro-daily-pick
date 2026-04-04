@@ -112,6 +112,23 @@ export default function Insights() {
   var journals = {}; papers.forEach(function(p){if(p.journal) journals[p.journal]=(journals[p.journal]||0)+1;});
   var topJ = Object.entries(journals).sort(function(a,b){return b[1]-a[1]})[0];
 
+  if (!stats.total && !loading) return (
+    <div className="h-full overflow-y-auto">
+      <div className="p-4 sm:p-6 max-w-[800px] mx-auto">
+        <h1 className="text-[1.111rem] font-bold text-text1 mb-5">Research Insights</h1>
+        <div className="flex flex-col items-center py-16">
+          <div className="w-20 h-20 rounded-2xl bg-hover flex items-center justify-center mb-4">
+            <BookOpen size={32} className="text-text3" />
+          </div>
+          <p className="text-[1.111rem] font-semibold text-text1 mb-2">No data yet</p>
+          <p className="text-[0.889rem] text-text3 text-center max-w-xs leading-relaxed">
+            Start reading and liking papers in Daily Pick. Your insights will appear here.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
     <div className="h-full overflow-y-auto">
       <div className="p-4 sm:p-6 max-w-[800px] mx-auto">

@@ -3,6 +3,7 @@ Uro Daily Pick - Korean Summary Generator
 Uses Gemini 2.5 Pro to generate 3-line Korean summaries.
 """
 import os
+import json
 import time
 import requests
 
@@ -13,24 +14,45 @@ GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5
 
 PROMPT = """You are a medical research summarizer for Korean urologists.
 
-TASK: Summarize the following paper in Korean. Write EXACTLY 3 sentences, each on its own line.
+TASK: Analyze the following paper and respond in EXACTLY this JSON format (no markdown, no code fences):
 
-Sentence 1: 연구 배경과 목적 (Background and objective)
-Sentence 2: 주요 방법론과 결과 (Key methods and findings — include specific numbers/statistics)
-Sentence 3: 임상적 의의와 결론 (Clinical significance and conclusion)
+{{
+  "summary_ko": "sentence1\\nsentence2\\nsentence3",
+  "structured": {{
+    "study_design": "e.g. RCT, retrospective cohort, meta-analysis",
+    "sample_size": "e.g. 1,234 patients or N/A",
+    "key_finding": "one-line key result with numbers",
+    "population": "e.g. mCRPC patients, localized RCC"
+  }},
+  "clinical_relevance": 1-5,
+  "qa": [
+    {{"q": "key clinical question in Korean", "a": "concise answer in Korean with data"}}
+  ]
+}}
 
-RULES:
-- Write everything in Korean (한국어)
-- Keep medical terms in English where natural (e.g., prostate, RCC, BCG, PSA, PFS, OS)
-- Include specific numbers from the abstract (e.g., HR 0.72, p=0.003, 5-year OS 85%)
-- Write 3 full sentences, each 30-60 characters long
-- No bullet points, no numbering, just 3 plain sentences separated by newlines
+RULES for summary_ko (3 Korean sentences, separated by \\n):
+- Sentence 1: 연구 배경과 목적
+- Sentence 2: 주요 방법론과 결과 (include specific numbers)
+- Sentence 3: 임상적 의의와 결론
+- Write in Korean, keep medical terms in English (prostate, RCC, PSA, HR, OS)
+- Include numbers from abstract (HR 0.72, p=0.003, 5-year OS 85%)
+
+RULES for clinical_relevance (integer 1-5):
+- 5 = Practice-changing (new standard of care)
+- 4 = High relevance (strong evidence, likely to influence practice)
+- 3 = Moderate (useful data, incremental advance)
+- 2 = Low (early/preclinical, niche population)
+- 1 = Minimal (case report, editorial, commentary)
+
+RULES for qa (1 question-answer pair):
+- Ask the most clinically important question a urologist would have
+- Answer concisely in Korean with specific data from the paper
 
 Title: {title}
 
 Abstract: {abstract}
 
-Korean 3-sentence summary:"""
+JSON response:"""
 
 
 def sb_get(path, params):
@@ -107,21 +129,45 @@ def main():
             sb_patch(p["id"], {"summary_ko": ""})
             continue
 
-        summary = summarize(p["title"], p["abstract"])
-        if not summary:
+        raw = summarize(p["title"], p["abstract"])
+        if not raw:
             time.sleep(3)
-            summary = summarize(p["title"], p["abstract"])  # retry once
-        if not summary:
+            raw = summarize(p["title"], p["abstract"])
+        if not raw:
             time.sleep(5)
-            summary = summarize(p["title"], p["abstract"])  # retry twice
+            raw = summarize(p["title"], p["abstract"])
 
-        if summary:
-            lines = [l for l in summary.strip().split('\n') if l.strip()]
-            if len(lines) != 3:
-                print(f"  [{i+1}/{len(papers)}] {p['pmid']}: MALFORMED ({len(lines)} lines, expected 3)")
-            sb_patch(p["id"], {"summary_ko": summary})
+        if raw:
+            # Parse JSON response
+            patch_data = {}
+            try:
+                # Strip markdown code fences if present
+                cleaned = raw.strip()
+                if cleaned.startswith("```"):
+                    cleaned = "\n".join(cleaned.split("\n")[1:])
+                if cleaned.endswith("```"):
+                    cleaned = cleaned[:-3]
+                parsed = json.loads(cleaned.strip())
+                patch_data["summary_ko"] = parsed.get("summary_ko", "")
+                if parsed.get("structured"):
+                    patch_data["structured_data"] = json.dumps(parsed["structured"], ensure_ascii=False)
+                if parsed.get("clinical_relevance"):
+                    patch_data["clinical_relevance"] = int(parsed["clinical_relevance"])
+                if parsed.get("qa"):
+                    patch_data["qa_data"] = json.dumps(parsed["qa"], ensure_ascii=False)
+            except (json.JSONDecodeError, ValueError):
+                # Fallback: treat as plain text summary
+                patch_data["summary_ko"] = raw
+                print(f"  [{i+1}/{len(papers)}] {p['pmid']}: JSON parse failed, saved as plain text")
+
+            summary_ko = patch_data.get("summary_ko", "")
+            lines = [l for l in summary_ko.strip().split('\n') if l.strip()]
+            if len(lines) != 3 and summary_ko:
+                print(f"  [{i+1}/{len(papers)}] {p['pmid']}: MALFORMED ({len(lines)} lines)")
+
+            sb_patch(p["id"], patch_data)
             done += 1
-            print(f"  [{i+1}/{len(papers)}] {p['pmid']}: {summary[:60]}...")
+            print(f"  [{i+1}/{len(papers)}] {p['pmid']}: OK (cr={patch_data.get('clinical_relevance','?')})")
         else:
             failed += 1
             print(f"  [{i+1}/{len(papers)}] {p['pmid']}: FAILED after 3 attempts")

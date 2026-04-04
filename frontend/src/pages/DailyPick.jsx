@@ -131,6 +131,7 @@ function ListItem({ rec, index, selected, onClick }) {
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 mb-1">
             <TypeBadge type={st} />
+            {rec.paper?.clinical_relevance >= 4 && <span className="text-[0.611rem] font-bold text-danger">★</span>}
             {fb === "like" && <Heart size={11} className="text-success fill-success" />}
           </div>
           <p className="text-[0.833rem] line-clamp-2 font-semibold text-text1 leading-snug">{rec.paper?.title}</p>
@@ -178,9 +179,20 @@ function Detail({ rec, onFeedback, onPrev, onNext, hasPrev, hasNext, likeAnim })
           {/* Meta row */}
           <div className="flex items-center gap-2 flex-wrap mb-4">
             <TypeBadge type={st} />
+            {paper.clinical_relevance >= 4 && (
+              <span className="text-[0.667rem] font-bold px-1.5 py-0.5 rounded-md bg-[rgba(255,59,48,0.08)] text-danger">
+                {paper.clinical_relevance === 5 ? "Practice-Changing" : "High Relevance"}
+              </span>
+            )}
             <span className="text-[0.833rem] font-semibold text-accent">{paper.journal}</span>
             <span className="w-1 h-1 rounded-full bg-border" />
             <span className="text-[0.833rem] text-text3">{paper.pub_date}</span>
+            {paper.abstract && (
+              <>
+                <span className="w-1 h-1 rounded-full bg-border" />
+                <span className="text-[0.778rem] text-text3">{Math.max(1, Math.ceil(paper.abstract.split(/\s+/).length / 200))} min read</span>
+              </>
+            )}
             <div className="flex-1" />
             <div className="flex items-center gap-2">
               <div className="w-16 h-[3px] bg-border rounded-full overflow-hidden">
@@ -228,6 +240,35 @@ function Detail({ rec, onFeedback, onPrev, onNext, hasPrev, hasNext, likeAnim })
               <p className="text-[0.833rem] leading-[1.7] text-text1">{paper.summary_ko}</p>
             </div>
           )}
+
+          {/* Structured data */}
+          {paper.structured_data && (() => {
+            const sd = typeof paper.structured_data === "string" ? JSON.parse(paper.structured_data) : paper.structured_data;
+            return (sd.study_design || sd.sample_size || sd.key_finding) ? (
+              <div className="flex flex-wrap gap-x-4 gap-y-1.5 mb-4 text-[0.778rem]">
+                {sd.study_design && <span className="text-text3">Design: <span className="text-text1 font-medium">{sd.study_design}</span></span>}
+                {sd.sample_size && sd.sample_size !== "N/A" && <span className="text-text3">N: <span className="text-text1 font-medium">{sd.sample_size}</span></span>}
+                {sd.population && <span className="text-text3">Pop: <span className="text-text1 font-medium">{sd.population}</span></span>}
+                {sd.key_finding && <div className="w-full text-text3">Key: <span className="text-text1 font-medium">{sd.key_finding}</span></div>}
+              </div>
+            ) : null;
+          })()}
+
+          {/* Q&A */}
+          {paper.qa_data && (() => {
+            const qa = typeof paper.qa_data === "string" ? JSON.parse(paper.qa_data) : paper.qa_data;
+            return qa?.length > 0 ? (
+              <div className="bg-[rgba(255,149,0,0.04)] border border-[rgba(255,149,0,0.1)] rounded-lg p-4 mb-4">
+                <p className="text-[0.667rem] font-semibold text-warning uppercase tracking-widest mb-1.5">Q&A</p>
+                {qa.map((item, i) => (
+                  <div key={i}>
+                    <p className="text-[0.833rem] font-semibold text-text1 mb-1">Q. {item.q}</p>
+                    <p className="text-[0.833rem] leading-[1.6] text-text2">{item.a}</p>
+                  </div>
+                ))}
+              </div>
+            ) : null;
+          })()}
 
           {/* Abstract */}
           {paper.abstract && (
@@ -741,6 +782,14 @@ export default function DailyPick() {
                 onClick={() => { selectPaper(i); openMobile(); }} />
             ))}
           </div>
+
+          {/* All done banner */}
+          {fbCount === recs.length && recs.length > 0 && (
+            <div className="mx-2 mb-2 p-3 bg-[rgba(52,199,89,0.06)] border border-[rgba(52,199,89,0.12)] rounded-lg text-center">
+              <p className="text-[0.833rem] font-semibold text-success">All done for today!</p>
+              <p className="text-[0.722rem] text-text3 mt-0.5">Come back tomorrow for new picks.</p>
+            </div>
+          )}
 
           {/* Keyboard hints — desktop only */}
           <div className="hidden md:flex px-3 py-2 border-t border-border items-center gap-2">

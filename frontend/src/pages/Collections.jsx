@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../App";
-import { FolderPlus, Trash2, FileText } from "lucide-react";
+import { FolderPlus, Trash2, FileText, X } from "lucide-react";
 
 export default function Collections() {
   const { user } = useAuth();
@@ -95,12 +95,18 @@ export default function Collections() {
             {!papers.length
               ? <p className="text-[0.889rem] text-text3 text-center py-8 bg-hover rounded-lg">No papers yet — like papers in Daily Pick to save them here.</p>
               : papers.map(p => (
-                <div key={p.pmid} className="flex items-center gap-3 p-3 bg-card border border-border rounded-lg mb-2">
+                <div key={p.pmid} className="flex items-center gap-3 p-3 bg-card border border-border rounded-lg mb-2 group">
                   <FileText size={16} className="text-text3 shrink-0" />
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1">
                     <div className="text-[0.889rem] font-medium text-text1 truncate">{p.title}</div>
                     <div className="text-[0.778rem] text-text3">{p.journal} · {p.pub_date}</div>
                   </div>
+                  <button onClick={async () => {
+                    await supabase.from("collection_papers").delete().eq("collection_id", activeCol.id).eq("paper_id", p.id);
+                    setPapers(prev => prev.filter(pp => pp.id !== p.id));
+                  }} className="opacity-0 group-hover:opacity-100 text-text3 hover:text-danger transition-all shrink-0" title="Remove">
+                    <X size={16} />
+                  </button>
                 </div>
               ))}
           </div>

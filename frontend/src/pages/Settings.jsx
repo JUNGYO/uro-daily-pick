@@ -74,10 +74,29 @@ export default function Settings() {
   const [newAlertValue, setNewAlertValue] = useState("");
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
+  const [learned, setLearned] = useState({ authors: [], keywords: [], journals: [] });
 
   useEffect(() => {
     if (profile) setForm({ ...profile });
-    if (user) supabase.from("alerts").select("*").eq("user_id", user.id).then(({ data }) => setAlerts(data || []));
+    if (user) {
+      supabase.from("alerts").select("*").eq("user_id", user.id).then(({ data }) => setAlerts(data || []));
+      // Load auto-learned data from liked papers
+      (async () => {
+        const { data: fbs } = await supabase.from("feedbacks").select("paper_id").eq("user_id", user.id).eq("action", "like");
+        if (!fbs?.length) return;
+        const ids = fbs.map(f => f.paper_id);
+        const { data: papers } = await supabase.from("papers").select("authors,keywords,journal").in("id", ids);
+        if (!papers?.length) return;
+        const ac = {}, kc = {}, jc = {};
+        papers.forEach(p => {
+          (p.authors || []).forEach(a => { ac[a] = (ac[a] || 0) + 1; });
+          (Array.isArray(p.keywords) ? p.keywords : []).forEach(k => { kc[k.toLowerCase()] = (kc[k.toLowerCase()] || 0) + 1; });
+          if (p.journal) jc[p.journal] = (jc[p.journal] || 0) + 1;
+        });
+        const top = (obj, n) => Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, n).map(e => e[0]);
+        setLearned({ authors: top(ac, 5), keywords: top(kc, 8), journals: top(jc, 5) });
+      })();
+    }
   }, [profile, user]);
 
   if (!form) return <div className="flex items-center justify-center h-full text-text3">Loading...</div>;
@@ -178,6 +197,15 @@ export default function Settings() {
             onRemove={val => removeTag("preferred_journals", val)}
             placeholder="e.g. European Urology, Journal of Urology"
           />
+
+          {/* Auto-learned from likes */}
+          {(learned.keywords.length > 0 || learned.authors.length > 0 || learned.journals.length > 0) && (
+            <div className="pt-4 border-t border-border mb-5">
+              <LearnedSection label="Learned Keywords" items={learned.keywords} emptyMsg="Like papers to learn your interests." />
+              <LearnedSection label="Learned Authors" items={learned.authors} emptyMsg="Like papers to discover frequent authors." />
+              <LearnedSection label="Learned Journals" items={learned.journals} emptyMsg="Like papers to learn journal preferences." />
+            </div>
+          )}
 
           <div className="pt-4 border-t border-border">
             <p className="text-[0.889rem] font-semibold text-text1 mb-3">Daily Digest</p>
