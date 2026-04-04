@@ -16,10 +16,11 @@ body {
 
 * { box-sizing: border-box; }
 
-::-webkit-scrollbar { width: 8px; }
-::-webkit-scrollbar-track { background: #F2F2F7; }
-::-webkit-scrollbar-thumb { background: #C7C7CC; border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: #A1A1A6; }
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: transparent; border-radius: 3px; transition: background 0.2s; }
+*:hover > ::-webkit-scrollbar-thumb, *::-webkit-scrollbar-thumb:hover { background: #C7C7CC; }
+*::-webkit-scrollbar-thumb:active { background: #A1A1A6; }
 
 .line-clamp-2 {
   display: -webkit-box;

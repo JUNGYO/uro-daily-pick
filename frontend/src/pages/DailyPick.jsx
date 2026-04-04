@@ -122,17 +122,21 @@ function ListItem({ rec, index, selected, onClick }) {
 
   return (
     <button onClick={onClick}
-      className={`w-full text-left transition-all duration-200 rounded-lg
+      className={`w-full h-full text-left transition-all duration-200 rounded-lg flex flex-col justify-center
         ${selected ? "bg-card shadow-sm ring-1 ring-accent/20" : fb === "like" ? "bg-[rgba(52,199,89,0.03)]" : "hover:bg-hover"}
         ${fb === "dislike" ? "opacity-35" : ""}`}
-      style={{ padding: "8px 12px", borderLeft: selected ? "3px solid #007AFF" : fb === "like" ? "3px solid #34C759" : "3px solid transparent" }}>
-      <div className="flex gap-2 items-center">
-        <span className="text-[0.722rem] font-bold text-text3 w-4 shrink-0 text-right">{index + 1}</span>
-        <TypeBadge type={st} />
-        {rec.paper?.clinical_relevance >= 4 && <span className="text-[0.611rem] font-bold text-danger">★</span>}
-        {fb === "like" && <Heart size={11} className="text-success fill-success shrink-0" />}
-        {fb === "dislike" && <X size={11} className="text-text3 shrink-0" />}
-        <p className="text-[0.778rem] font-medium text-text1 leading-snug line-clamp-2 flex-1 min-w-0">{rec.paper?.title}</p>
+      style={{ padding: "6px 10px", borderLeft: selected ? "3px solid #007AFF" : fb === "like" ? "3px solid #34C759" : "3px solid transparent" }}>
+      <div className="flex items-start gap-2">
+        <span className="text-[0.667rem] font-bold text-text3 w-3 shrink-0 text-right mt-0.5">{index + 1}</span>
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-1.5 mb-0.5">
+            <TypeBadge type={st} />
+            <span className="text-[0.667rem] text-text3 truncate">{rec.paper?.journal}</span>
+            {rec.paper?.clinical_relevance >= 4 && <span className="text-[0.611rem] font-bold text-danger shrink-0">★</span>}
+            {fb === "like" && <Heart size={10} className="text-success fill-success shrink-0" />}
+          </div>
+          <p className="text-[0.722rem] font-medium text-text1 leading-snug">{rec.paper?.title}</p>
+        </div>
       </div>
     </button>
   );
@@ -785,7 +789,6 @@ export default function DailyPick() {
                 <ChevronRight size={14} />
               </button>
             </div>
-            <span className="text-[0.722rem] text-text3 bg-hover px-2 py-0.5 rounded-md font-medium">{fbCount}/{recs.length}</span>
           </div>
 
           {/* Progress */}
@@ -799,30 +802,31 @@ export default function DailyPick() {
             </div>
           </div>
 
-          {/* Paper list — no scroll, 5 items fit */}
-          <div className="flex-1 flex flex-col px-2 pb-2">
+          {/* Paper list — equal height rows, no scroll */}
+          <div className="flex-1 flex flex-col gap-px px-2 py-1">
             {recs.map((r, i) => (
-              <ListItem key={r.id} rec={r} index={i} selected={i === cur}
-                onClick={() => { selectPaper(i); openMobile(); }} />
+              <div key={r.id} className="flex-1">
+                <ListItem rec={r} index={i} selected={i === cur}
+                  onClick={() => { selectPaper(i); openMobile(); }} />
+              </div>
             ))}
           </div>
 
-          {/* All done banner */}
-          {fbCount === recs.length && recs.length > 0 && (
-            <div className="mx-2 mb-2 p-3 bg-[rgba(52,199,89,0.06)] border border-[rgba(52,199,89,0.12)] rounded-lg text-center">
-              <p className="text-[0.833rem] font-semibold text-success">All done for today!</p>
-              <p className="text-[0.722rem] text-text3 mt-0.5">Come back tomorrow for new picks.</p>
-            </div>
-          )}
-
-          {/* Keyboard hints — desktop only */}
-          <div className="hidden md:flex px-3 py-2 border-t border-border items-center gap-2">
-            {[["↑↓", "navigate"], ["L", "like"], ["D", "skip"]].map(([key, label]) => (
-              <span key={key} className="inline-flex items-center gap-1 text-[0.667rem] text-text3">
-                <kbd className="px-1.5 py-0.5 bg-hover border border-border rounded text-text2 font-medium text-[0.667rem]">{key}</kbd>
-                {label}
-              </span>
-            ))}
+          {/* Footer */}
+          <div className="px-3 py-1.5 border-t border-border flex items-center justify-between">
+            {fbCount === recs.length && recs.length > 0 ? (
+              <span className="text-[0.667rem] font-semibold text-success">All done!</span>
+            ) : (
+              <div className="hidden md:flex items-center gap-2">
+                {[["↑↓", "navigate"], ["L", "like"], ["D", "skip"]].map(([key, label]) => (
+                  <span key={key} className="inline-flex items-center gap-1 text-[0.667rem] text-text3">
+                    <kbd className="px-1 py-0.5 bg-hover border border-border rounded text-text2 font-medium text-[0.611rem]">{key}</kbd>
+                    {label}
+                  </span>
+                ))}
+              </div>
+            )}
+            <span className="text-[0.667rem] text-text3 font-medium">{fbCount}/{recs.length}</span>
           </div>
         </div>
 
