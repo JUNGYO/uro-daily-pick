@@ -82,7 +82,7 @@ def build_html(name, recs):
             <div style="color:#007AFF;font-size:13px;font-weight:600;margin-bottom:6px;">
               {journal} &middot; {pub_date}
             </div>
-            <a href="https://pubmed.ncbi.nlm.nih.gov/{pmid}/" target="_blank"
+            <a href="https://jungyo.github.io/uro-daily-pick/" target="_blank"
                class="paper-title" style="color:#1D1D1F;font-size:16px;font-weight:700;text-decoration:none;line-height:1.4;display:block;">
               {title}
             </a>
