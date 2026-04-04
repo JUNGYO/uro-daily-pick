@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect } from "react";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../App";
 import { Loader2, TrendingUp, BookOpen, Zap } from "lucide-react";
@@ -65,7 +65,7 @@ function HeatmapTable({ weeks, heatCells, heatMonths }) {
         }}>{m.label}</div>;
       })}
       {/* Rows 1-7: day labels + cells */}
-      {days.map(function(d, row) {
+      {days.flatMap(function(d, row) {
         var items = [];
         // Day label
         items.push(
