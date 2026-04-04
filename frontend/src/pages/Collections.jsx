@@ -63,8 +63,8 @@ export default function Collections() {
         <div className="grid grid-cols-2 lg:grid-cols-3 gap-3 mb-8">
           {cols.map(col => (
             <div key={col.id} onClick={() => select(col)}
-              className={`p-4 rounded-xl border cursor-pointer transition-colors
-                ${activeCol?.id === col.id ? "border-accent bg-[rgba(0,122,255,0.04)]" : "border-border bg-card hover:border-text3"}`}>
+              className={`p-4 rounded-xl border cursor-pointer transition-all duration-200
+                ${activeCol?.id === col.id ? "border-accent bg-[rgba(0,122,255,0.04)] shadow-sm" : "border-border bg-card hover:border-text3 hover:shadow-md hover:-translate-y-0.5"}`}>
               <div className="flex items-center justify-between mb-2">
                 <div className="w-3 h-3 rounded-full" style={{ background: col.color }} />
                 <button onClick={e => { e.stopPropagation(); remove(col.id); }} className="text-text3 hover:text-danger transition-colors">

@@ -90,7 +90,7 @@ function Layout({ children }) {
             <circle cx="8" cy="58" r="4" fill="none" stroke="#007AFF" strokeWidth="2"/>
             <circle cx="72" cy="58" r="4" fill="none" stroke="#007AFF" strokeWidth="2"/>
           </svg>
-          <span className="text-[0.889rem] md:text-[1.222rem] font-bold tracking-tight">Uro Daily Pick</span>
+          <span className="text-[0.778rem] md:text-[1.111rem] font-bold tracking-tight">Uro Daily Pick</span>
         </div>
         {/* Desktop nav */}
         <nav className="hidden md:flex items-center gap-1">
@@ -106,8 +106,8 @@ function Layout({ children }) {
         </nav>
         <div className="flex items-center gap-2 md:gap-4">
           <span className="text-[0.778rem] text-text3 hidden md:inline">{profile?.name || user?.email}</span>
-          <button onClick={logout} className="w-9 h-9 rounded-lg flex items-center justify-center text-text3 hover:bg-hover transition-colors" aria-label="Logout">
-            <LogOut size={18} />
+          <button onClick={logout} className="h-8 px-3 rounded-lg flex items-center gap-1.5 text-text3 hover:bg-hover transition-colors text-[0.722rem]" aria-label="Logout">
+            <LogOut size={15} /><span className="hidden sm:inline">Logout</span>
           </button>
         </div>
       </header>

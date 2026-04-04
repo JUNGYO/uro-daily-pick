@@ -209,7 +209,7 @@ function Detail({ rec, onFeedback, onPrev, onNext, hasPrev, hasNext, likeAnim })
       <div ref={detailRef} className="flex-1 overflow-y-auto p-4 md:p-5 xl:p-6">
         <div className={`bg-card rounded-xl border border-border overflow-hidden transition-opacity duration-200 ${fadeIn ? "opacity-100" : "opacity-0"}`}
           style={{ boxShadow: "0 2px 12px rgba(0,0,0,0.06), 0 1px 3px rgba(0,0,0,0.04)" }}>
-          <div className="p-5 md:p-6 xl:p-8">
+          <div className="p-4 md:p-5 xl:p-6">
 
           {/* Meta row */}
           <div className="flex items-center gap-2 flex-wrap mb-4">

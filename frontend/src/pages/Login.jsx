@@ -62,7 +62,7 @@ export default function Login() {
           <p className="text-[0.889rem] text-text3 mt-1">Personalized urology paper recommendations</p>
         </div>
 
-        <div className="bg-card rounded-xl border border-border p-8" style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
+        <div className="bg-card rounded-xl border border-border p-8" style={{ boxShadow: "0 4px 24px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.04)" }}>
           {mode !== "forgot" && (
             <div className="flex rounded-lg border border-border overflow-hidden mb-8">
               {["Sign in", "Sign up"].map((label, i) => (
