@@ -16,9 +16,10 @@ body {
 
 * { box-sizing: border-box; }
 
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: #E5E5EA; border-radius: 3px; }
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: #F2F2F7; }
+::-webkit-scrollbar-thumb { background: #C7C7CC; border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: #A1A1A6; }
 
 .line-clamp-2 {
   display: -webkit-box;
