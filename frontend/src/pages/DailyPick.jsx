@@ -122,25 +122,17 @@ function ListItem({ rec, index, selected, onClick }) {
 
   return (
     <button onClick={onClick}
-      className={`w-full text-left transition-all duration-200 rounded-lg mb-0.5
+      className={`w-full text-left transition-all duration-200 rounded-lg
         ${selected ? "bg-card shadow-sm ring-1 ring-accent/20" : fb === "like" ? "bg-[rgba(52,199,89,0.03)]" : "hover:bg-hover"}
         ${fb === "dislike" ? "opacity-35" : ""}`}
-      style={{ padding: "10px 12px", borderLeft: selected ? "3px solid #007AFF" : fb === "like" ? "3px solid #34C759" : "3px solid transparent" }}>
-      <div className="flex gap-2.5 items-start">
-        <span className="text-[0.722rem] font-bold text-text3 w-4 shrink-0 text-right mt-0.5">{index + 1}</span>
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-1.5 mb-1">
-            <TypeBadge type={st} />
-            {rec.paper?.clinical_relevance >= 4 && <span className="text-[0.611rem] font-bold text-danger">★</span>}
-            {fb === "like" && <Heart size={11} className="text-success fill-success" />}
-          </div>
-          <p className="text-[0.833rem] line-clamp-2 font-semibold text-text1 leading-snug">{rec.paper?.title}</p>
-          <p className="text-[0.722rem] text-text3 mt-0.5">{rec.paper?.journal} · {rec.paper?.pub_date}</p>
-          {/* Korean summary preview */}
-          {rec.paper?.summary_ko && (
-            <p className="text-[0.722rem] text-text2 leading-relaxed mt-1 line-clamp-2">{rec.paper.summary_ko}</p>
-          )}
-        </div>
+      style={{ padding: "8px 12px", borderLeft: selected ? "3px solid #007AFF" : fb === "like" ? "3px solid #34C759" : "3px solid transparent" }}>
+      <div className="flex gap-2 items-center">
+        <span className="text-[0.722rem] font-bold text-text3 w-4 shrink-0 text-right">{index + 1}</span>
+        <TypeBadge type={st} />
+        {rec.paper?.clinical_relevance >= 4 && <span className="text-[0.611rem] font-bold text-danger">★</span>}
+        {fb === "like" && <Heart size={11} className="text-success fill-success shrink-0" />}
+        {fb === "dislike" && <X size={11} className="text-text3 shrink-0" />}
+        <p className="text-[0.778rem] font-medium text-text1 leading-snug line-clamp-2 flex-1 min-w-0">{rec.paper?.title}</p>
       </div>
     </button>
   );
@@ -807,8 +799,8 @@ export default function DailyPick() {
             </div>
           </div>
 
-          {/* Paper list */}
-          <div className="flex-1 overflow-y-auto px-2 pb-2">
+          {/* Paper list — no scroll, 5 items fit */}
+          <div className="flex-1 flex flex-col px-2 pb-2">
             {recs.map((r, i) => (
               <ListItem key={r.id} rec={r} index={i} selected={i === cur}
                 onClick={() => { selectPaper(i); openMobile(); }} />
