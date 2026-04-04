@@ -160,37 +160,43 @@ export default function Insights() {
               <span className="text-[0.667rem] text-text3">More</span>
             </div>
           </div>
-          <div>
-            {/* Month labels */}
-            <div style={{display:"flex",gap:0,marginLeft:20,marginBottom:2}}>
-              {heatMonths.map(function(m,i){
-                return <div key={i} className="text-text3" style={{fontSize:10,width:m.span*(14+2),flexShrink:0}}>{m.label}</div>;
-              })}
-            </div>
-            {/* Day labels + heatmap grid */}
-            <div style={{display:"grid",gridTemplateColumns:"18px 1fr",gap:0}}>
-              {/* Day labels column — same grid layout as cells */}
-              <div style={{display:"grid",gridTemplateRows:"repeat(7,14px)",gap:2}}>
-                {[
-                  {label:"M",color:"#86868B"},
-                  {label:"T",color:"#86868B"},
-                  {label:"W",color:"#86868B"},
-                  {label:"T",color:"#86868B"},
-                  {label:"F",color:"#86868B"},
-                  {label:"S",color:"#007AFF"},
-                  {label:"S",color:"#FF3B30"},
-                ].map(function(d,i){
-                  return <div key={i} style={{fontSize:10,lineHeight:"14px",color:d.color,fontWeight:600,textAlign:"right",paddingRight:4}}>{d.label}</div>;
-                })}
+          {(() => {
+            var cellPx = 14, gapPx = 2, colW = cellPx + gapPx, labelW = 18;
+            return (
+              <div>
+                <table style={{borderCollapse:"separate",borderSpacing:gapPx+"px"}}>
+                  {/* Month header row */}
+                  <thead>
+                    <tr>
+                      <th style={{width:labelW}} />
+                      {heatMonths.map(function(m,i){
+                        return <th key={i} colSpan={m.span} className="text-text3" style={{fontSize:10,fontWeight:400,textAlign:"left",paddingBottom:2}}>{m.label}</th>;
+                      })}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[0,1,2,3,4,5,6].map(function(row){
+                      var dayInfo = [
+                        {label:"M",color:"#86868B"},{label:"T",color:"#86868B"},{label:"W",color:"#86868B"},
+                        {label:"T",color:"#86868B"},{label:"F",color:"#86868B"},{label:"S",color:"#007AFF"},{label:"S",color:"#FF3B30"}
+                      ][row];
+                      return (
+                        <tr key={row}>
+                          <td style={{fontSize:10,fontWeight:600,color:dayInfo.color,textAlign:"right",paddingRight:3,width:labelW}}>{dayInfo.label}</td>
+                          {Array.from({length:weeks}).map(function(_,col){
+                            var cell = heatCells[col*7+row];
+                            return <td key={col} title={cell?cell.date+": "+cell.count+" papers":""}
+                              className="rounded-sm hover:ring-2 hover:ring-accent hover:ring-offset-1"
+                              style={{width:cellPx,height:cellPx,background:cell?HEAT[Math.min(5,cell.count)]:"#F5F5F7",cursor:"pointer",padding:0}} />;
+                          })}
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
-              {/* Cells */}
-              <div style={{display:"grid",gridTemplateRows:"repeat(7,14px)",gridAutoFlow:"column",gap:2}}>
-                {heatCells.map(function(c,i) {
-                  return <div key={i} title={c.date+": "+c.count+" papers"} className="rounded-sm hover:ring-2 hover:ring-accent hover:ring-offset-1" style={{width:14,height:14,background:HEAT[Math.min(5,c.count)],cursor:"pointer"}} />;
-                })}
-              </div>
-            </div>
-          </div>
+            );
+          })()}
         </div>
 
         <div className="bg-card rounded-xl border border-border p-4 mb-4" style={{boxShadow:"0 1px 3px rgba(0,0,0,0.03)"}}>
