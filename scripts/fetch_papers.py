@@ -279,7 +279,7 @@ def main():
             if new_pmids:
                 time.sleep(0.4)  # NCBI rate limit
                 details = fetch_details(new_pmids)
-                valid = [d for d in details if d["pmid"] and d["title"]]
+                valid = [d for d in details if d["pmid"] and d["title"] and d.get("abstract") and d.get("paper_type") not in ("letter", "editorial")]
                 all_new_papers.extend(valid)
                 existing.update(d["pmid"] for d in valid)
                 print(f"  [{short}...] {len(pmids)} found, {len(valid)} new")
