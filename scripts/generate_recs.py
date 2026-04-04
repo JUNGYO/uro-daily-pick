@@ -314,7 +314,7 @@ def main():
                 continue
             # Skip by title pattern
             t = paper.get("title", "").lower()
-            if any(s in t for s in ["reply to", "letter to the editor", "re:", "comment on", "erratum", "corrigendum", "retraction", "editorial"]):
+            if any(s in t for s in ["reply to", "letter to the editor", "research letter", "letter:", "re:", "comment on", "erratum", "corrigendum", "retraction", "editorial", "correspondence"]):
                 continue
             # Skip short papers without abstract (likely editorials/comments)
             if not paper.get("abstract") or len(paper.get("abstract", "")) < 100:

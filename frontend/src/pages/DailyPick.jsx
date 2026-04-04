@@ -604,7 +604,7 @@ export default function DailyPick() {
       }
 
       // Skip letters
-      if (title.includes("reply to") || title.includes("letter to") || title.includes("re:") || title.includes("erratum")) continue;
+      if (["reply to", "letter to", "research letter", "letter:", "re:", "erratum", "editorial", "comment on", "correspondence"].some(s => title.includes(s))) continue;
 
       if (score > 0) scored.push({ paper: p, score: Math.round(score * 100) / 100 });
     }
