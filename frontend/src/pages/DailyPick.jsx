@@ -361,7 +361,7 @@ function MobileDetail({ rec, onFeedback, onBack, likeAnim }) {
   if (!paper) return null;
 
   return (
-    <div className="fixed inset-0 z-40 bg-bg overflow-y-auto">
+    <div className="fixed inset-0 z-[60] bg-bg overflow-y-auto">
       <div className="sticky top-0 z-10 bg-bg/95 backdrop-blur border-b border-border px-4 py-2.5 flex items-center gap-3">
         <button onClick={onBack} className="w-9 h-9 rounded-lg flex items-center justify-center text-accent hover:bg-hover">
           <ChevronLeft size={22} />
@@ -406,7 +406,7 @@ function MobileDetail({ rec, onFeedback, onBack, likeAnim }) {
         {(paper.structured_data || paper.qa_data) && <DetailAccordion paper={paper} />}
         {paper.abstract && <p className="text-[0.889rem] leading-[1.7] text-text2 mb-6">{hl(paper.abstract, matched)}</p>}
       </div>
-      <div className="fixed bottom-0 left-0 right-0 z-50 bg-card/95 backdrop-blur border-t border-border px-5 py-3 flex items-center justify-between" style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom))" }}>
+      <div className="fixed bottom-0 left-0 right-0 z-[61] bg-card/95 backdrop-blur border-t border-border px-5 py-3 flex items-center justify-between" style={{ paddingBottom: "max(12px, env(safe-area-inset-bottom))" }}>
         <div className="flex items-center gap-3">
           <button onClick={() => onFeedback("dislike")} className="w-12 h-12 rounded-xl flex items-center justify-center transition-all"
             style={{ background: fb === "dislike" ? "rgba(255,59,48,0.08)" : "#F2F2F7", color: fb === "dislike" ? "#FF3B30" : "#C7C7CC" }}>
