@@ -9,7 +9,10 @@ import Onboarding from "./pages/Onboarding";
 import ResetPassword from "./pages/ResetPassword";
 import Landing from "./pages/Landing";
 import Insights from "./pages/Insights";
-import { Newspaper, FolderOpen, Settings as SettingsIcon, LogOut, Network } from "lucide-react";
+import Admin from "./pages/Admin";
+import { Newspaper, FolderOpen, Settings as SettingsIcon, LogOut, Network, BarChart3 } from "lucide-react";
+
+const ADMIN_EMAILS = ["crazyslime@gmail.com"];
 
 const AuthContext = createContext(null);
 export const useAuth = () => useContext(AuthContext);
@@ -68,11 +71,13 @@ function Layout({ children }) {
     navigate("/login");
   };
 
+  const isAdmin = ADMIN_EMAILS.includes(user?.email);
   const links = [
     { to: "/", icon: Newspaper, label: "Daily Pick" },
     { to: "/insights", icon: Network, label: "Insights" },
     { to: "/collections", icon: FolderOpen, label: "Collections" },
     { to: "/settings", icon: SettingsIcon, label: "Settings" },
+    ...(isAdmin ? [{ to: "/admin", icon: BarChart3, label: "Admin" }] : []),
   ];
 
   return (
@@ -168,6 +173,7 @@ export default function App() {
                 <Route path="/insights" element={<Insights />} />
                 <Route path="/collections" element={<Collections />} />
                 <Route path="/settings" element={<Settings />} />
+                <Route path="/admin" element={<Admin />} />
               </Routes>
             </Layout></ProtectedRoute>
           } />
