@@ -7,11 +7,22 @@ import os
 import json
 import time
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from xml.etree import ElementTree as ET
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 PUBMED_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+
+# ── HTTP session with retry/backoff (handles Supabase cold start & transient errors) ──
+_session = requests.Session()
+_session.mount("https://", HTTPAdapter(max_retries=Retry(
+    total=5,
+    backoff_factor=2,              # 2s → 4s → 8s → 16s → 32s
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET", "POST", "PATCH"],
+)))
 
 # ── MeSH → study_type mapping ──
 MESH_STUDY_TYPE = {
@@ -187,7 +198,7 @@ def classify(mesh_terms, pub_types, title, abstract):
 def sb_get(path, params):
     url = f"{SUPABASE_URL}/rest/v1/{path}"
     headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-    return requests.get(url, headers=headers, params=params, timeout=30).json()
+    return _session.get(url, headers=headers, params=params, timeout=60).json()
 
 
 def sb_patch(paper_id, data):
@@ -196,16 +207,43 @@ def sb_patch(paper_id, data):
         "apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
         "Content-Type": "application/json", "Prefer": "return=minimal",
     }
-    return requests.patch(url, headers=headers, json=data, timeout=30)
+    return _session.patch(url, headers=headers, json=data, timeout=60)
+
+
+def fetch_unclassified_papers(page_size=200, max_total=2000):
+    """
+    Fetch rows that still need classification, paginated.
+
+    Uses server-side filter (study_type is null OR study_type = 'other')
+    so we don't waste egress pulling already-classified rows.
+    """
+    papers = []
+    offset = 0
+    while offset < max_total:
+        batch = sb_get("papers", {
+            "select": "id,pmid,title,abstract,mesh_terms,study_type",
+            "or": "(study_type.is.null,study_type.eq.other)",
+            "order": "fetched_at.desc",
+            "limit": str(page_size),
+            "offset": str(offset),
+        })
+        if not batch:
+            break
+        papers.extend(batch)
+        print(f"  ...fetched {len(papers)} rows so far")
+        if len(batch) < page_size:
+            break
+        offset += page_size
+    return papers
 
 
 def fetch_pubmed_metadata(pmids):
     """Fetch MeSH + PublicationType from PubMed for given PMIDs."""
     if not pmids:
         return {}
-    r = requests.get(f"{PUBMED_BASE}/efetch.fcgi", params={
+    r = _session.get(f"{PUBMED_BASE}/efetch.fcgi", params={
         "db": "pubmed", "id": ",".join(pmids), "retmode": "xml", "email": "uro-daily-pick@example.com",
-    }, timeout=30)
+    }, timeout=60)
     r.raise_for_status()
     root = ET.fromstring(r.content)
 
@@ -223,16 +261,10 @@ def main():
         print("ERROR: SUPABASE_SERVICE_KEY required")
         return
 
-    # Get all papers
-    papers = sb_get("papers", {
-        "select": "id,pmid,title,abstract,mesh_terms,study_type",
-        "order": "fetched_at.desc",
-        "limit": "1000",
-    })
-
-    # Filter unclassified
-    to_classify = [p for p in papers if not p.get("study_type") or p["study_type"] == "other"]
-    print(f"=== Classifying {len(to_classify)} / {len(papers)} papers ===")
+    # Server-side filter + paginated fetch (avoids cold-start timeout & huge payloads)
+    print("=== Fetching unclassified papers ===")
+    to_classify = fetch_unclassified_papers(page_size=200, max_total=2000)
+    print(f"=== Classifying {len(to_classify)} papers ===")
 
     if not to_classify:
         print("All papers already classified.")
@@ -241,13 +273,18 @@ def main():
     # Fetch fresh MeSH from PubMed (in batches of 50)
     from collections import Counter
     type_counts = Counter()
+    failed = 0
 
     for i in range(0, len(to_classify), 50):
         batch = to_classify[i:i+50]
         pmids = [p["pmid"] for p in batch]
 
         print(f"\n  Fetching PubMed metadata for batch {i//50 + 1}...")
-        meta = fetch_pubmed_metadata(pmids)
+        try:
+            meta = fetch_pubmed_metadata(pmids)
+        except Exception as e:
+            print(f"  PubMed fetch failed for batch {i//50 + 1}: {e}")
+            meta = {}
         time.sleep(0.5)
 
         for paper in batch:
@@ -258,18 +295,23 @@ def main():
 
             study_type, tags = classify(mesh, ptypes, paper.get("title"), paper.get("abstract"))
 
-            sb_patch(paper["id"], {
-                "study_type": study_type,
-                "pub_types": json.dumps(tags),
-                "mesh_terms": json.dumps(mesh),
-            })
-
-            type_counts[study_type] += 1
-            print(f"    {pmid} -> {study_type:20s} | {tags}")
+            try:
+                sb_patch(paper["id"], {
+                    "study_type": study_type,
+                    "pub_types": json.dumps(tags),
+                    "mesh_terms": json.dumps(mesh),
+                })
+                type_counts[study_type] += 1
+                print(f"    {pmid} -> {study_type:20s} | {tags}")
+            except Exception as e:
+                failed += 1
+                print(f"    {pmid} -> UPDATE FAILED: {e}")
 
     print(f"\n=== Summary ===")
     for st, c in type_counts.most_common():
         print(f"  {c:3d}x {st}")
+    if failed:
+        print(f"  {failed} paper(s) failed to update")
     print("Done.")
 
 
