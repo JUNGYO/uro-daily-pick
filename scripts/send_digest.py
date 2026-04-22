@@ -8,17 +8,28 @@ import json
 from datetime import datetime, timezone, timedelta
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
 FROM_EMAIL = os.environ.get("FROM_EMAIL", "Uro Daily Pick <onboarding@resend.dev>")
 
+# ── HTTP session with retry/backoff (handles Supabase cold start & transient errors) ──
+_session = requests.Session()
+_session.mount("https://", HTTPAdapter(max_retries=Retry(
+    total=5,
+    backoff_factor=2,              # 2s → 4s → 8s → 16s → 32s
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET", "POST"],
+)))
+
 
 def sb_get(path, params=None):
     url = f"{SUPABASE_URL}/rest/v1/{path}"
     headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-    return requests.get(url, headers=headers, params=params, timeout=30).json()
+    return _session.get(url, headers=headers, params=params, timeout=60).json()
 
 
 def get_digest_users():
@@ -30,9 +41,12 @@ def get_user_email(uid):
     """Get email from Supabase Auth."""
     url = f"{SUPABASE_URL}/auth/v1/admin/users/{uid}"
     headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-    r = requests.get(url, headers=headers, timeout=15)
-    if r.status_code == 200:
-        return r.json().get("email")
+    try:
+        r = _session.get(url, headers=headers, timeout=30)
+        if r.status_code == 200:
+            return r.json().get("email")
+    except requests.exceptions.RequestException as e:
+        print(f"  get_user_email failed for {uid}: {e}")
     return None
 
 
@@ -148,15 +162,19 @@ def send_email(to_email, subject, html):
         print(f"  [DRY RUN] Would send to {to_email}: {subject}")
         return True
 
-    r = requests.post("https://api.resend.com/emails", headers={
-        "Authorization": f"Bearer {RESEND_API_KEY}",
-        "Content-Type": "application/json",
-    }, json={
-        "from": FROM_EMAIL,
-        "to": [to_email],
-        "subject": subject,
-        "html": html,
-    }, timeout=15)
+    try:
+        r = _session.post("https://api.resend.com/emails", headers={
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json",
+        }, json={
+            "from": FROM_EMAIL,
+            "to": [to_email],
+            "subject": subject,
+            "html": html,
+        }, timeout=30)
+    except requests.exceptions.RequestException as e:
+        print(f"  Resend request failed: {e}")
+        return False
 
     if r.status_code == 200:
         return True
@@ -173,33 +191,51 @@ def main():
     today_str = datetime.now(timezone(timedelta(hours=9))).strftime("%B %d")
     print(f"=== Sending digests for {today_str} ===")
 
-    users = get_digest_users()
+    try:
+        users = get_digest_users()
+    except requests.exceptions.RequestException as e:
+        print(f"FATAL: Could not fetch digest users: {e}")
+        return
+
     print(f"Digest users: {len(users)}")
 
     sent = 0
+    failed = 0
     for user in users:
         uid = user["id"]
         name = user.get("name", "")
-        email = get_user_email(uid)
-        if not email:
-            print(f"  [{name}] No email found, skipping")
+
+        # Isolate per-user failures so one bad user doesn't kill the whole run
+        try:
+            email = get_user_email(uid)
+            if not email:
+                print(f"  [{name}] No email found, skipping")
+                continue
+
+            recs = get_today_recs(uid)
+            if not recs:
+                print(f"  [{name}] No recommendations, skipping")
+                continue
+
+            html = build_html(name, recs)
+            subject = f"Your Uro Daily Pick - {today_str}"
+
+            if send_email(email, subject, html):
+                sent += 1
+                print(f"  [{name}] Sent to {email} ({len(recs)} papers)")
+            else:
+                failed += 1
+                print(f"  [{name}] Failed to send")
+        except requests.exceptions.RequestException as e:
+            failed += 1
+            print(f"  [{name}] Network error, skipping: {e}")
+            continue
+        except Exception as e:
+            failed += 1
+            print(f"  [{name}] Unexpected error, skipping: {e}")
             continue
 
-        recs = get_today_recs(uid)
-        if not recs:
-            print(f"  [{name}] No recommendations, skipping")
-            continue
-
-        html = build_html(name, recs)
-        subject = f"Your Uro Daily Pick - {today_str}"
-
-        if send_email(email, subject, html):
-            sent += 1
-            print(f"  [{name}] Sent to {email} ({len(recs)} papers)")
-        else:
-            print(f"  [{name}] Failed to send")
-
-    print(f"Done. Sent {sent}/{len(users)} emails.")
+    print(f"Done. Sent {sent}/{len(users)} emails ({failed} failed).")
 
 
 if __name__ == "__main__":
