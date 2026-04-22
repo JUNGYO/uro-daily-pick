@@ -3,9 +3,10 @@ Uro Daily Pick - Paper Classification
 Uses PubMed MeSH terms + PublicationType + title/abstract patterns.
 
 Performance notes:
-- Supabase Free tier PostgREST is slow at returning large payloads.
-- We therefore do NOT fetch `abstract` from Supabase.
-- Abstract is fetched fresh from PubMed in the same XML call as MeSH.
+- Supabase Free tier PostgREST has issues with reused connections.
+  We force `Connection: close` on every request.
+- Without abstract column, 100s of rows fit in <100KB — no pagination needed.
+- Abstract is fetched fresh from PubMed (XML already contains it).
 """
 import os
 import json
@@ -23,10 +24,19 @@ PUBMED_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 _session = requests.Session()
 _session.mount("https://", HTTPAdapter(max_retries=Retry(
     total=5,
-    backoff_factor=2,              # 2s → 4s → 8s → 16s → 32s
+    backoff_factor=2,
     status_forcelist=[429, 500, 502, 503, 504],
     allowed_methods=["GET", "POST", "PATCH"],
 )))
+
+# Force a fresh TCP connection on every request; prevents Supabase Free tier
+# PostgREST from hanging when we reuse a kept-alive connection.
+BASE_HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Connection": "close",
+}
+
 
 # ── MeSH → study_type mapping ──
 MESH_STUDY_TYPE = {
@@ -142,7 +152,6 @@ TITLE_PATTERNS = {
 
 
 def classify(mesh_terms, pub_types, title, abstract):
-    """Classify a paper using MeSH + PubType + text patterns."""
     mesh_lower = [m.lower() for m in (mesh_terms or [])]
     pub_lower = [p.lower() for p in (pub_types or [])]
     text = f"{(title or '').lower()} {(abstract or '').lower()}"
@@ -177,45 +186,35 @@ def classify(mesh_terms, pub_types, title, abstract):
 
 
 def sb_get(path, params):
+    """GET with Connection: close to avoid Free tier PostgREST reuse issues."""
     url = f"{SUPABASE_URL}/rest/v1/{path}"
-    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-    return _session.get(url, headers=headers, params=params, timeout=90).json()
+    return _session.get(url, headers=BASE_HEADERS, params=params, timeout=90).json()
 
 
 def sb_patch(paper_id, data):
     url = f"{SUPABASE_URL}/rest/v1/papers?id=eq.{paper_id}"
     headers = {
-        "apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json", "Prefer": "return=minimal",
+        **BASE_HEADERS,
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
     }
     return _session.patch(url, headers=headers, json=data, timeout=60)
 
 
-def fetch_unclassified_papers(page_size=50, max_total=2000):
-    """Fetch rows that still need classification, paginated.
-
-    IMPORTANT: do NOT select `abstract` — on Supabase Free tier
-    PostgREST is slow at serializing large text columns. We get
-    abstract fresh from PubMed in fetch_pubmed_metadata().
+def fetch_unclassified_papers():
     """
-    papers = []
-    offset = 0
-    while offset < max_total:
-        batch = sb_get("papers", {
-            "select": "id,pmid,title,mesh_terms,study_type",
-            "or": "(study_type.is.null,study_type.eq.other)",
-            "order": "fetched_at.desc",
-            "limit": str(page_size),
-            "offset": str(offset),
-        })
-        if not batch:
-            break
-        papers.extend(batch)
-        print(f"  ...fetched {len(papers)} rows so far")
-        if len(batch) < page_size:
-            break
-        offset += page_size
-    return papers
+    Fetch all unclassified papers in a SINGLE request.
+
+    Without the abstract column, even 1000 rows is <100 KB — small enough
+    to get in one shot. Avoids pagination entirely, which was triggering
+    the Free tier connection-reuse hang on the 2nd page.
+    """
+    return sb_get("papers", {
+        "select": "id,pmid,title,mesh_terms,study_type",
+        "or": "(study_type.is.null,study_type.eq.other)",
+        "order": "fetched_at.desc",
+        "limit": "2000",
+    })
 
 
 def fetch_pubmed_metadata(pmids):
@@ -223,7 +222,8 @@ def fetch_pubmed_metadata(pmids):
     if not pmids:
         return {}
     r = _session.get(f"{PUBMED_BASE}/efetch.fcgi", params={
-        "db": "pubmed", "id": ",".join(pmids), "retmode": "xml", "email": "uro-daily-pick@example.com",
+        "db": "pubmed", "id": ",".join(pmids), "retmode": "xml",
+        "email": "uro-daily-pick@example.com",
     }, timeout=60)
     r.raise_for_status()
     root = ET.fromstring(r.content)
@@ -248,16 +248,13 @@ def main():
         print("ERROR: SUPABASE_SERVICE_KEY required")
         return
 
-    # Warm-up: free-tier PostgREST often has slow first response
-    print("=== Warming up Supabase connection ===")
+    print("=== Fetching unclassified papers (single request, no abstract) ===")
     try:
-        sb_get("papers", {"select": "id", "limit": "1"})
-        print("  Warm-up OK")
+        to_classify = fetch_unclassified_papers()
     except Exception as e:
-        print(f"  Warm-up failed (continuing anyway): {e}")
+        print(f"FATAL: Could not fetch papers: {e}")
+        return
 
-    print("\n=== Fetching unclassified papers (no abstract) ===")
-    to_classify = fetch_unclassified_papers(page_size=50, max_total=2000)
     print(f"=== Classifying {len(to_classify)} papers ===")
 
     if not to_classify:
@@ -285,7 +282,7 @@ def main():
             pm = meta.get(pmid, {})
             mesh = pm.get("mesh_terms") or paper.get("mesh_terms") or []
             ptypes = pm.get("pub_types", [])
-            abstract = pm.get("abstract", "")   # from PubMed, not Supabase
+            abstract = pm.get("abstract", "")
 
             study_type, tags = classify(mesh, ptypes, paper.get("title"), abstract)
 
@@ -300,6 +297,8 @@ def main():
             except Exception as e:
                 failed += 1
                 print(f"    {pmid} -> UPDATE FAILED: {e}")
+            # small delay between PATCH requests to give PostgREST breathing room
+            time.sleep(0.1)
 
     print(f"\n=== Summary ===")
     for st, c in type_counts.most_common():
