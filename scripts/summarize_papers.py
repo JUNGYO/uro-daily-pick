@@ -6,11 +6,29 @@ import os
 import json
 import time
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
 GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-pro:generateContent"
+
+_session = requests.Session()
+_session.mount("https://", HTTPAdapter(max_retries=Retry(
+    total=5,
+    backoff_factor=2,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET", "POST", "PATCH"],
+)))
+
+# Force a fresh TCP connection on every request; prevents Supabase Free tier
+# PostgREST from hanging when we reuse a kept-alive connection.
+BASE_HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Connection": "close",
+}
 
 PROMPT = """You are a medical research summarizer for Korean urologists.
 
@@ -55,17 +73,30 @@ Abstract: {abstract}
 JSON response:"""
 
 
-def sb_get(path, params):
+def sb_get(path, params, max_attempts=4):
+    """GET with retry on empty body / 5xx (Free tier PostgREST glitch)."""
     url = f"{SUPABASE_URL}/rest/v1/{path}"
-    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-    return requests.get(url, headers=headers, params=params, timeout=30).json()
+    last_err = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            r = _session.get(url, headers=BASE_HEADERS, params=params, timeout=90)
+            if r.status_code != 200:
+                last_err = f"HTTP {r.status_code}: {r.text[:200]}"
+            elif not r.text.strip():
+                last_err = "empty response body"
+            else:
+                return r.json()
+        except (requests.RequestException, ValueError) as e:
+            last_err = f"{type(e).__name__}: {e}"
+        print(f"  sb_get {path} retry {attempt}/{max_attempts} ({last_err})")
+        time.sleep(2 ** attempt)
+    raise RuntimeError(f"sb_get {path} failed after {max_attempts} attempts: {last_err}")
 
 
 def sb_patch(paper_id, data):
     url = f"{SUPABASE_URL}/rest/v1/papers?id=eq.{paper_id}"
-    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}",
-               "Content-Type": "application/json", "Prefer": "return=minimal"}
-    return requests.patch(url, headers=headers, json=data, timeout=30)
+    headers = {**BASE_HEADERS, "Content-Type": "application/json", "Prefer": "return=minimal"}
+    return _session.patch(url, headers=headers, json=data, timeout=60)
 
 
 def summarize(title, abstract):
