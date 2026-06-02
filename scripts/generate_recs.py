@@ -78,14 +78,26 @@ def get_all_profiles():
     return sb("GET", "profiles", {"select": "*"})
 
 
-def get_recent_papers(days=30):
+def get_recent_papers(days=30, page_size=50, max_pages=10):
+    """Paginate to avoid Cloudflare 522 — a single 500-row query with the
+    abstract column was too heavy for Supabase Free tier to return in time."""
     cutoff = (datetime.now(timezone(timedelta(hours=9))) - timedelta(days=days)).strftime("%Y-%m-%d")
-    return sb("GET", "papers", {
-        "select": "id,pmid,title,abstract,authors,journal,pub_date,mesh_terms,keywords,paper_type,study_type",
-        "fetched_at": f"gte.{cutoff}",
-        "order": "pub_date.desc",
-        "limit": "500",
-    })
+    rows = []
+    for page in range(max_pages):
+        chunk = sb("GET", "papers", {
+            "select": "id,pmid,title,abstract,authors,journal,pub_date,mesh_terms,keywords,paper_type,study_type",
+            "fetched_at": f"gte.{cutoff}",
+            "order": "pub_date.desc",
+            "limit": str(page_size),
+            "offset": str(page * page_size),
+        })
+        if not chunk:
+            break
+        rows.extend(chunk)
+        if len(chunk) < page_size:
+            break
+        time.sleep(0.3)
+    return rows
 
 
 def get_user_feedbacks(user_id):

@@ -139,16 +139,6 @@ def main():
         print("ERROR: SUPABASE_SERVICE_KEY and GEMINI_API_KEY required")
         return
 
-    # Get papers with abstract — re-summarize if missing qa_data or summary
-    papers = sb_get("papers", {
-        "select": "id,pmid,title,abstract,summary_ko,qa_data,clinical_relevance",
-        "abstract": "neq.",
-        "order": "fetched_at.desc",
-        "limit": "200",
-    })
-
-    done = 0
-    failed = 0
     def needs_update(p):
         s = p.get("summary_ko")
         if not s:
@@ -163,8 +153,47 @@ def main():
             return True
         return False
 
-    papers = [p for p in papers if needs_update(p)]
-    print(f"=== Summarizing {len(papers)} papers ===")
+    # Phase 1: lightweight metadata fetch (no abstract column) to find candidates.
+    # The previous single-shot query that included abstract was hitting Cloudflare 522
+    # because Supabase Free tier couldn't return ~400KB in time.
+    metadata = []
+    page_size = 100
+    for page in range(10):
+        chunk = sb_get("papers", {
+            "select": "id,pmid,title,summary_ko,qa_data,clinical_relevance",
+            "order": "fetched_at.desc",
+            "limit": str(page_size),
+            "offset": str(page * page_size),
+        })
+        if not chunk:
+            break
+        metadata.extend(chunk)
+        if len(chunk) < page_size:
+            break
+        time.sleep(0.3)
+
+    candidates = [p for p in metadata if needs_update(p)]
+    print(f"=== {len(candidates)} of {len(metadata)} papers need summary ===")
+
+    # Phase 2: fetch abstracts only for candidates, in small batches.
+    abstract_map = {}
+    batch = 20
+    for i in range(0, len(candidates), batch):
+        ids = [str(p["id"]) for p in candidates[i:i+batch]]
+        rows = sb_get("papers", {
+            "select": "id,abstract",
+            "id": f"in.({','.join(ids)})",
+        })
+        for r in rows:
+            abstract_map[r["id"]] = r.get("abstract") or ""
+        time.sleep(0.2)
+
+    papers = [{**p, "abstract": abstract_map.get(p["id"], "")} for p in candidates]
+    papers = [p for p in papers if p.get("abstract")]
+    print(f"=== Summarizing {len(papers)} papers (skipping {len(candidates) - len(papers)} without abstract) ===")
+
+    done = 0
+    failed = 0
 
     for i, p in enumerate(papers):
         if not p.get("abstract"):
