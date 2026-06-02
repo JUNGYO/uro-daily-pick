@@ -185,10 +185,29 @@ def classify(mesh_terms, pub_types, title, abstract):
     return study_type, sorted(tags)
 
 
-def sb_get(path, params):
-    """GET with Connection: close to avoid Free tier PostgREST reuse issues."""
+def sb_get(path, params, max_attempts=4):
+    """GET with Connection: close to avoid Free tier PostgREST reuse issues.
+
+    PostgREST on the Free tier occasionally returns 200 with an empty body
+    when the response is large or under load. urllib3's retry only fires on
+    5xx, so we add an outer loop that retries on empty / non-JSON bodies too.
+    """
     url = f"{SUPABASE_URL}/rest/v1/{path}"
-    return _session.get(url, headers=BASE_HEADERS, params=params, timeout=90).json()
+    last_err = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            r = _session.get(url, headers=BASE_HEADERS, params=params, timeout=90)
+            if r.status_code != 200:
+                last_err = f"HTTP {r.status_code}: {r.text[:200]}"
+            elif not r.text.strip():
+                last_err = "empty response body"
+            else:
+                return r.json()
+        except (requests.RequestException, ValueError) as e:
+            last_err = f"{type(e).__name__}: {e}"
+        print(f"  sb_get {path} retry {attempt}/{max_attempts} ({last_err})")
+        time.sleep(2 ** attempt)
+    raise RuntimeError(f"sb_get {path} failed after {max_attempts} attempts: {last_err}")
 
 
 def sb_patch(paper_id, data):
@@ -201,20 +220,30 @@ def sb_patch(paper_id, data):
     return _session.patch(url, headers=headers, json=data, timeout=60)
 
 
-def fetch_unclassified_papers():
+def fetch_unclassified_papers(page_size=300, max_pages=10):
     """
-    Fetch all unclassified papers in a SINGLE request.
+    Fetch all unclassified papers in paginated requests.
 
-    Without the abstract column, even 1000 rows is <100 KB — small enough
-    to get in one shot. Avoids pagination entirely, which was triggering
-    the Free tier connection-reuse hang on the 2nd page.
+    A single 2000-row request was returning empty bodies from Free tier
+    PostgREST. `Connection: close` (in BASE_HEADERS) prevents the
+    connection-reuse hang on subsequent pages, so paginating is safe again.
     """
-    return sb_get("papers", {
-        "select": "id,pmid,title,mesh_terms,study_type",
-        "or": "(study_type.is.null,study_type.eq.other)",
-        "order": "fetched_at.desc",
-        "limit": "2000",
-    })
+    rows = []
+    for page in range(max_pages):
+        chunk = sb_get("papers", {
+            "select": "id,pmid,title,mesh_terms,study_type",
+            "or": "(study_type.is.null,study_type.eq.other)",
+            "order": "fetched_at.desc",
+            "limit": str(page_size),
+            "offset": str(page * page_size),
+        })
+        if not chunk:
+            break
+        rows.extend(chunk)
+        if len(chunk) < page_size:
+            break
+        time.sleep(0.3)
+    return rows
 
 
 def fetch_pubmed_metadata(pmids):

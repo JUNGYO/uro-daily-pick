@@ -6,13 +6,32 @@ Run daily via GitHub Actions after fetch_papers.py.
 import os
 import json
 import math
+import time
 from datetime import datetime, timedelta, timezone
 from collections import Counter
 
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
+
+_session = requests.Session()
+_session.mount("https://", HTTPAdapter(max_retries=Retry(
+    total=5,
+    backoff_factor=2,
+    status_forcelist=[429, 500, 502, 503, 504],
+    allowed_methods=["GET", "POST", "PATCH", "DELETE"],
+)))
+
+# Force a fresh TCP connection on every request; prevents Supabase Free tier
+# PostgREST from hanging when we reuse a kept-alive connection.
+BASE_HEADERS = {
+    "apikey": SUPABASE_KEY,
+    "Authorization": f"Bearer {SUPABASE_KEY}",
+    "Connection": "close",
+}
 
 # Scoring weights
 W_CONTENT = 0.30
@@ -21,33 +40,38 @@ W_COLLABORATIVE = 0.25
 W_TEMPORAL = 0.20
 
 
-def sb(method, path, data=None, params=None):
+def sb(method, path, data=None, params=None, max_attempts=4):
     url = f"{SUPABASE_URL}/rest/v1/{path}"
-    headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json",
-    }
+    headers = {**BASE_HEADERS, "Content-Type": "application/json"}
     if method == "GET":
-        return requests.get(url, headers=headers, params=params or data, timeout=30).json()
+        last_err = None
+        for attempt in range(1, max_attempts + 1):
+            try:
+                r = _session.get(url, headers=headers, params=params or data, timeout=60)
+                if r.status_code != 200:
+                    last_err = f"HTTP {r.status_code}: {r.text[:200]}"
+                elif not r.text.strip():
+                    last_err = "empty response body"
+                else:
+                    return r.json()
+            except (requests.RequestException, ValueError) as e:
+                last_err = f"{type(e).__name__}: {e}"
+            print(f"  sb GET {path} retry {attempt}/{max_attempts} ({last_err})")
+            time.sleep(2 ** attempt)
+        raise RuntimeError(f"sb GET {path} failed after {max_attempts} attempts: {last_err}")
     elif method == "POST":
         headers["Prefer"] = "return=minimal"
-        return requests.post(url, headers=headers, json=data, timeout=30)
+        return _session.post(url, headers=headers, json=data, timeout=60)
     elif method == "DELETE":
-        return requests.delete(url, headers=headers, params=params, timeout=30)
+        return _session.delete(url, headers=headers, params=params, timeout=60)
     return None
 
 
 def sb_patch(table, row_id, data):
     """Update a row by id."""
     url = f"{SUPABASE_URL}/rest/v1/{table}?id=eq.{row_id}"
-    headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
-        "Content-Type": "application/json",
-        "Prefer": "return=minimal",
-    }
-    return requests.patch(url, headers=headers, json=data, timeout=30)
+    headers = {**BASE_HEADERS, "Content-Type": "application/json", "Prefer": "return=minimal"}
+    return _session.patch(url, headers=headers, json=data, timeout=60)
 
 
 def get_all_profiles():
