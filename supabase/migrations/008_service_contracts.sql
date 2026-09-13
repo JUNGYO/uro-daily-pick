@@ -85,10 +85,15 @@ ALTER TABLE public.papers ADD COLUMN fulltext_available boolean NOT NULL DEFAULT
 -- Repair historic double-encoded JSON without interpreting invalid text as valid content.
 CREATE FUNCTION app_private.normalize_json(value jsonb, expected text) RETURNS jsonb
 LANGUAGE plpgsql SET search_path = '' AS $$
+DECLARE decoding_depth integer := 0;
 BEGIN
-  IF jsonb_typeof(value) = 'string' THEN
+  WHILE jsonb_typeof(value) = 'string' LOOP
+    decoding_depth := decoding_depth + 1;
+    IF decoding_depth > 32 THEN
+      RAISE EXCEPTION 'JSON encoding exceeds recovery limit' USING ERRCODE = '22023';
+    END IF;
     BEGIN value := (value #>> '{}')::jsonb; EXCEPTION WHEN invalid_text_representation THEN value := NULL; END;
-  END IF;
+  END LOOP;
   IF jsonb_typeof(value) IS DISTINCT FROM expected THEN
     RETURN CASE expected WHEN 'array' THEN '[]'::jsonb ELSE '{}'::jsonb END;
   END IF;

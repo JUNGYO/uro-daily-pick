@@ -40,7 +40,17 @@ try {
     GRANT USAGE ON SCHEMA auth TO anon, authenticated;
   `);
   for (const file of (await readdir(migrations)).filter((f) => f.endsWith(".sql")).sort()) {
+    if (file.startsWith("008_")) {
+      let encoded = ["Prostatic Neoplasms", "Randomized Controlled Trial"];
+      for (let depth = 0; depth < 21; depth++) encoded = JSON.stringify(encoded);
+      await db.query("INSERT INTO public.papers(id,pmid,title,mesh_terms) VALUES(9000,'9000','Legacy encoding fixture',$1::jsonb)", [JSON.stringify(encoded)]);
+    }
     await db.exec((await readFile(path.join(migrations, file), "utf8")).replace(/^\uFEFF/, ""));
+    if (file.startsWith("008_")) {
+      assert.deepEqual((await db.query("SELECT mesh_terms FROM public.papers WHERE id=9000")).rows[0].mesh_terms,
+        ["Prostatic Neoplasms", "Randomized Controlled Trial"]);
+      await db.exec("DELETE FROM public.papers WHERE id=9000");
+    }
   }
   await db.exec(`
     GRANT USAGE ON SCHEMA public TO anon, authenticated;
