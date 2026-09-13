@@ -84,6 +84,21 @@ const db = {
   collection_papers: [{ collection_id: 1, paper_id: 2 }],
   alerts: [{ id: 1, user_id: "reader", alert_type: "keyword", value: "bladder", is_active: true }],
 };
+if (scenario === "ai-regression") {
+  Object.assign(papers[0], {
+    title: "DNA mismatch repair in Veterans Affairs",
+    abstract: "The role of DNA mismatch repair (MMR) remains incompletely defined. Available findings require further trials.",
+    keywords: [], mesh_terms: [],
+  });
+  Object.assign(papers[1], {
+    title: "AI-assisted diagnosis",
+    abstract: "An AI tool was evaluated. Its role in repair remains uncertain.",
+    keywords: [], mesh_terms: [],
+  });
+  for (const rec of db.recommendations) {
+    rec.reasons = { matched_terms: ["AI"], reasons: [{ type: "keyword", label: "ai" }] };
+  }
+}
 function query(table) {
   let action = "select",
     payload,

@@ -78,3 +78,18 @@ test("collection creation and removal persist in the simulated API", async ({ pa
   await page.getByRole("button", { name: "Delete collection", exact: true }).click();
   await expect(page.getByRole("button", { name: "Upcoming journal club", exact: true })).toHaveCount(0);
 });
+
+for (const width of [1440, 390]) {
+  test(`historical AI false matches are removed from paper bodies at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.goto("/uro-daily-pick/?scenario=ai-regression");
+    await page.getByRole("button", { name: /DNA mismatch repair in Veterans Affairs/ }).click();
+    await expect(page.getByText(/The role of DNA mismatch repair/).filter({ visible: true })).toBeVisible();
+    expect(await page.locator("mark").allTextContents()).not.toContain("ai");
+    if (width === 390) await page.getByRole("button", { name: "Back to picks" }).click();
+    await page.getByRole("button", { name: /AI-assisted diagnosis/ }).click();
+    const marks = await page.locator("mark").allTextContents();
+    expect(marks.length).toBeGreaterThan(0);
+    expect(marks.every((text) => text === "AI")).toBe(true);
+  });
+}

@@ -14,6 +14,7 @@ on:
           - fetch-and-recommend
           - digest-only
           - fulltext-only
+          - repair-keywords
           - all
       fulltext_pmid:
         description: 'Catalog PMID for fulltext-only; empty imports a bounded OA batch'
@@ -95,12 +96,19 @@ jobs:
         run: python scripts/summarize_papers.py
 
       - name: Generate recommendations
-        if: contains(fromJSON('["recommend-only","fetch-and-recommend","all"]'), github.event.inputs.task)
+        if: contains(fromJSON('["recommend-only","fetch-and-recommend","repair-keywords","all"]'), github.event.inputs.task)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           NCBI_EMAIL: ${{ vars.NCBI_EMAIL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python scripts/generate_recs.py
+
+      - name: Repair historical keyword explanations
+        if: github.event.inputs.task == 'repair-keywords'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python scripts/repair_keyword_reasons.py
 
       - name: Send email digests
         if: contains(fromJSON('["digest-only","all"]'), github.event.inputs.task)

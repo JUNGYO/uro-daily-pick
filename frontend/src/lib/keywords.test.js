@@ -22,7 +22,7 @@ it("matches whole literal keywords without highlighting Affairs as AI", () => {
 
 it("removes stale keyword explanations while preserving metadata and study-type reasons", () => {
   const rec = normalizeRec({
-    paper: { title: "Veterans Affairs", keywords: ["urology"] },
+    paper: { title: "Veterans Affairs", keywords: ["urology"], study_type: "retrospective" },
     reasons: {
       matched_terms: ["AI", "urology"],
       reasons: [
@@ -34,4 +34,22 @@ it("removes stale keyword explanations while preserving metadata and study-type 
   });
   expect(rec.reasons.matched_terms).toEqual(["urology"]);
   expect(rec.reasons.reasons.map((r) => r.label)).toEqual(["urology", "Retrospective"]);
+});
+
+it("rejects historical AI reasons from repair/remains, including absent terms and mixed casing", () => {
+  for (const matched_terms of [[], ["AI"], ["ai"]]) {
+    const rec = normalizeRec({
+      paper: { abstract: "DNA mismatch repair (MMR) genes. Their relevance remains incompletely defined." },
+      reasons: {
+        matched_terms,
+        reasons: [
+          { type: "keyword", label: "AI" },
+          { type: "keyword", label: "ai" },
+          { type: "alert", label: "Alert: AI" },
+        ],
+      },
+    });
+    expect(rec.reasons.matched_terms).toEqual([]);
+    expect(rec.reasons.reasons).toEqual([]);
+  }
 });
