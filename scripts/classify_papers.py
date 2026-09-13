@@ -1,62 +1,33 @@
 """
 Uro Daily Pick - Paper Classification
 Uses PubMed MeSH terms + PublicationType + title/abstract patterns.
-
-Performance notes:
-- Supabase Free tier PostgREST has issues with reused connections.
-  We force `Connection: close` on every request.
-- Without abstract column, 100s of rows fit in <100KB — no pagination needed.
-- Abstract is fetched fresh from PubMed (XML already contains it).
+No LLM needed — MeSH terms are curated by NLM experts.
 """
 import os
 import json
+import re
 import time
 import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+from common import supabase_headers
+from common import get_json, paginate
 from xml.etree import ElementTree as ET
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 PUBMED_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 
-# ── HTTP session with retry/backoff ──
-_session = requests.Session()
-_session.mount("https://", HTTPAdapter(max_retries=Retry(
-    total=5,
-    backoff_factor=2,
-    status_forcelist=[429, 500, 502, 503, 504],
-    allowed_methods=["GET", "POST", "PATCH"],
-)))
-
-# Force a fresh TCP connection on every request; prevents Supabase Free tier
-# PostgREST from hanging when we reuse a kept-alive connection.
-BASE_HEADERS = {
-    "apikey": SUPABASE_KEY,
-    "Authorization": f"Bearer {SUPABASE_KEY}",
-    "Connection": "close",
-}
-
-
 # ── MeSH → study_type mapping ──
 MESH_STUDY_TYPE = {
+    # RCT / Clinical trials
     "randomized controlled trial": "rct",
-    "randomized controlled trials as topic": "rct",
-    "clinical trial, phase ii": "rct",
-    "clinical trial, phase iii": "rct",
-    "clinical trial, phase iv": "rct",
-    "controlled clinical trial": "rct",
+    # Retrospective
     "retrospective studies": "retrospective",
-    "cohort studies": "retrospective",
-    "medical records": "retrospective",
-    "registries": "retrospective",
+    # Prospective
     "prospective studies": "prospective",
-    "follow-up studies": "prospective",
-    "longitudinal studies": "prospective",
+    # Meta / Systematic review
     "meta-analysis": "meta_analysis",
-    "meta-analysis as topic": "meta_analysis",
     "systematic review": "meta_analysis",
-    "systematic reviews as topic": "meta_analysis",
+    # Basic research
     "animals": "basic_research",
     "mice": "basic_research",
     "rats": "basic_research",
@@ -68,6 +39,7 @@ MESH_STUDY_TYPE = {
     "gene expression regulation, neoplastic": "basic_research",
     "apoptosis": "basic_research",
     "cell proliferation": "basic_research",
+    # Biomarker
     "biomarkers, tumor": "biomarker",
     "biomarkers": "biomarker",
     "prognosis": "biomarker",
@@ -78,32 +50,40 @@ MESH_STUDY_TYPE = {
     "genomics": "biomarker",
     "proteomics": "biomarker",
     "transcriptome": "biomarker",
+    # AI/ML
     "machine learning": "ai_ml",
     "deep learning": "ai_ml",
     "artificial intelligence": "ai_ml",
     "neural networks, computer": "ai_ml",
+    # Surgical
     "robotic surgical procedures": "surgical",
     "laparoscopy": "surgical",
     "minimally invasive surgical procedures": "surgical",
     "nephrectomy": "surgical",
     "prostatectomy": "surgical",
     "cystectomy": "surgical",
+    # Imaging
     "magnetic resonance imaging": "imaging",
     "tomography, x-ray computed": "imaging",
     "ultrasonography": "imaging",
     "positron-emission tomography": "imaging",
     "radiomics": "imaging",
+    # Epidemiology
     "incidence": "epidemiology",
     "prevalence": "epidemiology",
     "risk factors": "epidemiology",
     "health disparities": "epidemiology",
     "survival rate": "epidemiology",
+    # Review / Guideline
     "practice guideline": "guideline",
     "guideline": "guideline",
+    # Case report
     "case reports": "case_report",
 }
 
+# ── MeSH → tags mapping ──
 MESH_TAGS = {
+    # Organ
     "prostatic neoplasms": "prostate", "prostate": "prostate", "prostatectomy": "prostate",
     "prostate-specific antigen": "prostate", "prostatic hyperplasia": "bph",
     "urinary bladder neoplasms": "bladder", "cystectomy": "bladder", "urinary bladder": "bladder",
@@ -114,12 +94,14 @@ MESH_TAGS = {
     "urinary incontinence": "incontinence",
     "kidney transplantation": "transplant",
     "erectile dysfunction": "andrology", "infertility, male": "andrology",
+    # Treatment
     "immunotherapy": "immunotherapy", "immune checkpoint inhibitors": "immunotherapy",
     "molecular targeted therapy": "targeted_therapy",
     "radiotherapy": "radiation", "brachytherapy": "radiation",
     "drug therapy": "chemotherapy", "antineoplastic agents": "chemotherapy",
     "robotic surgical procedures": "robotic",
     "laparoscopy": "laparoscopic",
+    # Study focus
     "survival analysis": "survival", "survival rate": "survival",
     "quality of life": "quality_of_life",
     "mass screening": "screening", "early detection of cancer": "screening",
@@ -127,6 +109,7 @@ MESH_TAGS = {
     "cost-benefit analysis": "cost_effectiveness",
 }
 
+# Priority order for study_type (first match wins)
 STUDY_TYPE_PRIORITY = [
     "rct", "meta_analysis", "guideline", "case_report",
     "ai_ml", "imaging", "biomarker", "surgical",
@@ -134,8 +117,9 @@ STUDY_TYPE_PRIORITY = [
     "epidemiology", "review",
 ]
 
+# Title/abstract fallback patterns
 TITLE_PATTERNS = {
-    "rct": ["randomized", "randomised", "phase ii", "phase iii", "phase 2 ", "phase 3 ", "double-blind", "placebo-controlled"],
+    "rct": ["randomized trial", "randomised trial", "randomly assigned", "randomly allocated", "randomized controlled", "randomised controlled"],
     "meta_analysis": ["systematic review", "meta-analysis", "meta analysis", "prisma"],
     "retrospective": ["retrospective", "chart review", "database analysis", "registry"],
     "prospective": ["prospective cohort", "prospective study", "prospectively"],
@@ -152,26 +136,33 @@ TITLE_PATTERNS = {
 
 
 def classify(mesh_terms, pub_types, title, abstract):
+    """Classify a paper using MeSH + PubType + text patterns."""
     mesh_lower = [m.lower() for m in (mesh_terms or [])]
     pub_lower = [p.lower() for p in (pub_types or [])]
     text = f"{(title or '').lower()} {(abstract or '').lower()}"
 
+    text = re.sub(r"\bnon[- ]?randomi[sz]ed\b", "nonrandom", text)
+
+    # 1. Collect all possible study_types from MeSH + PubType
     candidates = set()
     for term in mesh_lower + pub_lower:
         if term in MESH_STUDY_TYPE:
             candidates.add(MESH_STUDY_TYPE[term])
 
+    # 2. Text pattern fallback
     if not candidates:
         for stype, patterns in TITLE_PATTERNS.items():
             if any(p in text for p in patterns):
                 candidates.add(stype)
 
+    # 3. Pick by priority
     study_type = "other"
     for st in STUDY_TYPE_PRIORITY:
         if st in candidates:
             study_type = st
             break
 
+    # 4. Extract tags from MeSH
     tags = set()
     for term in mesh_lower:
         for mesh_key, tag in MESH_TAGS.items():
@@ -179,81 +170,37 @@ def classify(mesh_terms, pub_types, title, abstract):
                 tags.add(tag)
                 break
 
+    # 5. Check review from PubType (if not already classified higher)
     if study_type == "other" and "review" in pub_lower:
         study_type = "review"
 
     return study_type, sorted(tags)
 
 
-def sb_get(path, params, max_attempts=4):
-    """GET with Connection: close to avoid Free tier PostgREST reuse issues.
-
-    PostgREST on the Free tier occasionally returns 200 with an empty body
-    when the response is large or under load. urllib3's retry only fires on
-    5xx, so we add an outer loop that retries on empty / non-JSON bodies too.
-    """
+def sb_get(path, params):
     url = f"{SUPABASE_URL}/rest/v1/{path}"
-    last_err = None
-    for attempt in range(1, max_attempts + 1):
-        try:
-            r = _session.get(url, headers=BASE_HEADERS, params=params, timeout=90)
-            if r.status_code != 200:
-                last_err = f"HTTP {r.status_code}: {r.text[:200]}"
-            elif not r.text.strip():
-                last_err = "empty response body"
-            else:
-                return r.json()
-        except (requests.RequestException, ValueError) as e:
-            last_err = f"{type(e).__name__}: {e}"
-        print(f"  sb_get {path} retry {attempt}/{max_attempts} ({last_err})")
-        time.sleep(2 ** attempt)
-    raise RuntimeError(f"sb_get {path} failed after {max_attempts} attempts: {last_err}")
+    headers = {**supabase_headers(SUPABASE_KEY)}
+    return get_json(url, headers=headers, params=params)
 
 
 def sb_patch(paper_id, data):
     url = f"{SUPABASE_URL}/rest/v1/papers?id=eq.{paper_id}"
     headers = {
-        **BASE_HEADERS,
-        "Content-Type": "application/json",
-        "Prefer": "return=minimal",
+        **supabase_headers(SUPABASE_KEY),
+        "Content-Type": "application/json", "Prefer": "return=minimal",
     }
-    return _session.patch(url, headers=headers, json=data, timeout=60)
-
-
-def fetch_unclassified_papers(page_size=300, max_pages=10):
-    """
-    Fetch all unclassified papers in paginated requests.
-
-    A single 2000-row request was returning empty bodies from Free tier
-    PostgREST. `Connection: close` (in BASE_HEADERS) prevents the
-    connection-reuse hang on subsequent pages, so paginating is safe again.
-    """
-    rows = []
-    for page in range(max_pages):
-        chunk = sb_get("papers", {
-            "select": "id,pmid,title,mesh_terms,study_type",
-            "or": "(study_type.is.null,study_type.eq.other)",
-            "order": "fetched_at.desc",
-            "limit": str(page_size),
-            "offset": str(page * page_size),
-        })
-        if not chunk:
-            break
-        rows.extend(chunk)
-        if len(chunk) < page_size:
-            break
-        time.sleep(0.3)
-    return rows
+    response = requests.patch(url, headers=headers, json=data, timeout=30)
+    response.raise_for_status()
+    return response
 
 
 def fetch_pubmed_metadata(pmids):
-    """Fetch MeSH + PublicationType + Abstract from PubMed for given PMIDs."""
+    """Fetch MeSH + PublicationType from PubMed for given PMIDs."""
     if not pmids:
         return {}
-    r = _session.get(f"{PUBMED_BASE}/efetch.fcgi", params={
-        "db": "pubmed", "id": ",".join(pmids), "retmode": "xml",
-        "email": "uro-daily-pick@example.com",
-    }, timeout=60)
+    r = requests.get(f"{PUBMED_BASE}/efetch.fcgi", params={
+        "db": "pubmed", "id": ",".join(pmids), "retmode": "xml", "email": os.environ.get("NCBI_EMAIL", ""),
+    }, timeout=30)
     r.raise_for_status()
     root = ET.fromstring(r.content)
 
@@ -262,78 +209,65 @@ def fetch_pubmed_metadata(pmids):
         pmid = (art.findtext(".//PMID") or "").strip()
         mesh = [mh.findtext("DescriptorName", "") for mh in art.findall(".//MeshHeading")]
         ptypes = [pt.text for pt in art.findall(".//PublicationType") if pt.text]
-        abstract_parts = [at.text or "" for at in art.findall(".//Abstract/AbstractText")]
-        abstract = " ".join(p for p in abstract_parts if p).strip()
-        result[pmid] = {
-            "mesh_terms": mesh,
-            "pub_types": ptypes,
-            "abstract": abstract,
-        }
+        abstract = " ".join("".join(part.itertext()) for part in art.findall(".//Abstract/AbstractText"))
+        result[pmid] = {"mesh_terms": mesh, "pub_types": ptypes, "abstract": abstract}
     return result
 
 
 def main():
-    if not SUPABASE_KEY:
-        print("ERROR: SUPABASE_SERVICE_KEY required")
-        return
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise SystemExit("ERROR: SUPABASE_URL and SUPABASE_SERVICE_KEY required")
 
-    print("=== Fetching unclassified papers (single request, no abstract) ===")
-    try:
-        to_classify = fetch_unclassified_papers()
-    except Exception as e:
-        print(f"FATAL: Could not fetch papers: {e}")
-        return
+    # Get all papers
+    papers = paginate(sb_get, "papers", {
+        "select": "id,pmid,title,mesh_terms,study_type",
+        "order": "id",
+        **({} if os.environ.get("RECLASSIFY_ALL") == "true" else {"or": "(study_type.is.null,study_type.eq.other)"}),
+        "limit": "1000",
+    }, size=100)
 
-    print(f"=== Classifying {len(to_classify)} papers ===")
+    # Filter unclassified; operators may explicitly backfill historical classifications.
+    to_classify = [p for p in papers if os.environ.get("RECLASSIFY_ALL") == "true" or not p.get("study_type") or p["study_type"] == "other"]
+    print(f"=== Classifying {len(to_classify)} / {len(papers)} papers ===")
 
     if not to_classify:
         print("All papers already classified.")
         return
 
+    # Fetch fresh MeSH from PubMed (in batches of 50)
     from collections import Counter
     type_counts = Counter()
-    failed = 0
 
     for i in range(0, len(to_classify), 50):
         batch = to_classify[i:i+50]
         pmids = [p["pmid"] for p in batch]
 
         print(f"\n  Fetching PubMed metadata for batch {i//50 + 1}...")
-        try:
-            meta = fetch_pubmed_metadata(pmids)
-        except Exception as e:
-            print(f"  PubMed fetch failed for batch {i//50 + 1}: {e}")
-            meta = {}
+        meta = fetch_pubmed_metadata(pmids)
         time.sleep(0.5)
 
         for paper in batch:
             pmid = paper["pmid"]
-            pm = meta.get(pmid, {})
+            if pmid not in meta:
+                raise ValueError(f"Missing PubMed metadata for PMID {pmid}")
+            pm = meta[pmid]
             mesh = pm.get("mesh_terms") or paper.get("mesh_terms") or []
             ptypes = pm.get("pub_types", [])
-            abstract = pm.get("abstract", "")
 
-            study_type, tags = classify(mesh, ptypes, paper.get("title"), abstract)
+            study_type, tags = classify(mesh, ptypes, paper.get("title"), pm.get("abstract"))
 
-            try:
-                sb_patch(paper["id"], {
-                    "study_type": study_type,
-                    "pub_types": json.dumps(tags),
-                    "mesh_terms": json.dumps(mesh),
-                })
-                type_counts[study_type] += 1
-                print(f"    {pmid} -> {study_type:20s} | {tags}")
-            except Exception as e:
-                failed += 1
-                print(f"    {pmid} -> UPDATE FAILED: {e}")
-            # small delay between PATCH requests to give PostgREST breathing room
-            time.sleep(0.1)
+            sb_patch(paper["id"], {
+                "study_type": study_type,
+                "pub_types": ptypes,
+                "mesh_terms": mesh,
+            })
+
+            type_counts[study_type] += 1
+            print(f"    {pmid} -> {study_type:20s} | {tags}")
 
     print(f"\n=== Summary ===")
     for st, c in type_counts.most_common():
         print(f"  {c:3d}x {st}")
-    if failed:
-        print(f"  {failed} paper(s) failed to update")
     print("Done.")
 
 

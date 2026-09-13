@@ -1,61 +1,89 @@
-import { useState, useEffect } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
+import { useAuth } from "../lib/auth";
+import { ErrorNotice, Loading } from "../components/Status";
 
 export default function ResetPassword() {
+  const { user, loading: sessionLoading } = useAuth();
+  const navigate = useNavigate();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const navigate = useNavigate();
-
-  // Supabase sends the user here with a session after clicking the email link
+  const [busy, setBusy] = useState(false);
   useEffect(() => {
-    supabase.auth.onAuthStateChange((event) => {
-      if (event === "PASSWORD_RECOVERY") {
-        // User arrived from password reset email — ready to set new password
-      }
-    });
-  }, []);
-
-  const handleSubmit = async (e) => {
-    e.preventDefault(); setError("");
-    if (password.length < 6) { setError("Password must be at least 6 characters."); return; }
-    if (password !== confirm) { setError("Passwords don't match."); return; }
-
-    setLoading(true);
-    const { error } = await supabase.auth.updateUser({ password });
-    setLoading(false);
-
-    if (error) { setError(error.message); return; }
-    setSuccess(true);
-    setTimeout(() => navigate("/"), 2000);
-  };
-
-  const inputCls = "w-full h-12 bg-card border border-border rounded-lg px-4 text-[1rem] text-text1 outline-none focus:border-accent transition-colors";
-
+    if (!success) return;
+    const timer = setTimeout(() => navigate("/", { replace: true }), 2000);
+    return () => clearTimeout(timer);
+  }, [success, navigate]);
+  if (sessionLoading) return <Loading text="Checking your reset link…" />;
   return (
-    <div className="min-h-screen bg-bg flex items-center justify-center p-8">
-      <div className="w-full max-w-[400px]">
-        <div className="bg-card rounded-xl border border-border p-8" style={{ boxShadow: "0 1px 4px rgba(0,0,0,0.04)" }}>
-          <h2 className="text-[1.222rem] font-bold text-text1 mb-2">Set new password</h2>
-          {success ? (
-            <p className="text-[0.889rem] text-success">Password updated. Redirecting...</p>
-          ) : (
-            <form onSubmit={handleSubmit} className="flex flex-col gap-3 mt-4">
-              <input type="password" value={password} onChange={e => setPassword(e.target.value)}
-                placeholder="New password (min 6 chars)" required className={inputCls} />
-              <input type="password" value={confirm} onChange={e => setConfirm(e.target.value)}
-                placeholder="Confirm password" required className={inputCls} />
-              {error && <p className="text-[0.889rem] text-danger">{error}</p>}
-              <button type="submit" disabled={loading}
-                className="w-full h-11 rounded-lg bg-accent text-white text-[0.889rem] font-semibold hover:bg-[#0066D6] disabled:opacity-50 transition-colors mt-2">
-                {loading ? "..." : "Update password"}
-              </button>
-            </form>
-          )}
-        </div>
+    <div className="min-h-dvh grid place-items-center p-5">
+      <div className="panel w-full max-w-md">
+        <h1 className="page-title">Set new password</h1>
+        {!user ? (
+          <>
+            <ErrorNotice message="This reset link is missing or has expired." />
+            <Link className="text-accent underline" to="/login">
+              Request another reset link
+            </Link>
+          </>
+        ) : success ? (
+          <p role="status">Password updated. Redirecting…</p>
+        ) : (
+          <form
+            className="space-y-4"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              if (busy) return;
+              setError("");
+              if (password !== confirm) {
+                setError("Passwords do not match.");
+                return;
+              }
+              setBusy(true);
+              try {
+                const { error } = await supabase.auth.updateUser({ password });
+                if (error) throw error;
+                setSuccess(true);
+              } catch (err) {
+                setError(err.message || "Could not update password.");
+              } finally {
+                setBusy(false);
+              }
+            }}
+          >
+            <label className="field-label">
+              New password
+              <input
+                className="form-input mt-2"
+                type="password"
+                autoComplete="new-password"
+                minLength={8}
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+              />
+            </label>
+            <label className="field-label">
+              Confirm password
+              <input
+                className="form-input mt-2"
+                type="password"
+                autoComplete="new-password"
+                minLength={8}
+                required
+                value={confirm}
+                onChange={(e) => setConfirm(e.target.value)}
+              />
+            </label>
+            {error && <ErrorNotice message={error} />}
+            <button disabled={busy} className="btn-primary">
+              {busy ? "Updating…" : "Update password"}
+            </button>
+          </form>
+        )}
       </div>
     </div>
   );

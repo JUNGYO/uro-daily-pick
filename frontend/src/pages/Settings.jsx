@@ -1,380 +1,460 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
-import { useAuth } from "../App";
-import { Save, Plus, X, Bell, Check, Shield, Trash2, Mail } from "lucide-react";
+import { useAuth } from "../lib/auth";
+import { checked, appUrl } from "../lib/data";
+import { ErrorNotice } from "../components/Status";
 
-const inputCls = "h-12 bg-card border border-border rounded-lg px-4 text-[1rem] text-text1 outline-none focus:border-accent transition-colors";
-const sectionCls = "bg-card rounded-xl border border-border p-4 sm:p-6 mb-4 sm:mb-6";
+const types = [
+  "rct",
+  "basic_research",
+  "biomarker",
+  "retrospective",
+  "prospective",
+  "meta_analysis",
+  "ai_ml",
+  "surgical",
+  "imaging",
+  "epidemiology",
+  "guideline",
+  "review",
+];
 
-function TagField({ label, tags, onAdd, onRemove, placeholder }) {
+function Tags({ label, values, onChange }) {
   const [value, setValue] = useState("");
-
-  const handleAdd = () => {
-    if (!value.trim()) return;
-    onAdd(value.trim());
+  const add = () => {
+    const next = value.trim();
+    if (next && !values.includes(next) && values.length < 30) onChange([...values, next]);
     setValue("");
   };
-
   return (
-    <div className="mb-5">
-      <label className="text-[0.889rem] font-semibold text-text1 block mb-2">{label}</label>
-      <div className="flex flex-wrap gap-2 mb-2">
-        {(tags || []).map(tag => (
-          <span key={tag} className="inline-flex items-center gap-1.5 h-8 px-3 rounded-lg bg-[rgba(0,122,255,0.06)] text-accent text-[0.889rem] font-medium border border-[rgba(0,122,255,0.12)]">
-            {tag}
-            <button onClick={() => onRemove(tag)} className="hover:text-danger transition-colors"><X size={14} /></button>
-          </span>
+    <div className="space-y-3">
+      <label className="field-label">
+        {label}
+        <input
+          aria-label={`Add ${label}`}
+          className="form-input mt-2"
+          value={value}
+          maxLength={100}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              add();
+            }
+          }}
+          placeholder="Type and press Enter"
+        />
+      </label>
+      <button type="button" className="btn-secondary" onClick={add}>
+        Add {label.toLowerCase()}
+      </button>
+      <div className="flex flex-wrap gap-2">
+        {values.map((item) => (
+          <button
+            type="button"
+            className="rounded-lg border border-border bg-hover px-3 py-2 text-sm break-all"
+            key={item}
+            aria-label={`Remove ${item}`}
+            onClick={() => onChange(values.filter((v) => v !== item))}
+          >
+            {item} ×
+          </button>
         ))}
       </div>
-      <div className="flex gap-2">
-        <input
-          value={value}
-          onChange={e => setValue(e.target.value)}
-          onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); handleAdd(); } }}
-          placeholder={placeholder || "Type and press Enter"}
-          className={`flex-1 ${inputCls}`}
-        />
-        <button onClick={handleAdd} className="h-11 px-3 bg-hover border border-border rounded-lg hover:bg-border transition-colors">
-          <Plus size={16} className="text-text3" />
-        </button>
-      </div>
-    </div>
-  );
-}
-
-function LearnedSection({ label, items, emptyMsg }) {
-  const tags = items || [];
-  return (
-    <div className="mb-5">
-      <div className="flex items-center gap-2 mb-2">
-        <label className="text-[0.889rem] font-semibold text-text1">{label}</label>
-        <span className="text-[0.778rem] text-text3 bg-hover px-2 py-0.5 rounded">Auto-learned</span>
-      </div>
-      {tags.length > 0 ? (
-        <div className="flex flex-wrap gap-2">
-          {tags.map(tag => (
-            <span key={tag} className="inline-flex items-center h-8 px-3 rounded-lg bg-hover text-text2 text-[0.889rem] font-medium border border-border">
-              {tag}
-            </span>
-          ))}
-        </div>
-      ) : (
-        <p className="text-[0.889rem] text-text3 italic">{emptyMsg}</p>
-      )}
     </div>
   );
 }
 
 export default function Settings() {
-  const { user, profile, loadProfile } = useAuth();
-  const [form, setForm] = useState(null);
+  const { user, profile, setProfile } = useAuth();
+  const [form, setForm] = useState(profile);
   const [alerts, setAlerts] = useState([]);
-  const [newAlertType, setNewAlertType] = useState("keyword");
-  const [newAlertValue, setNewAlertValue] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [saved, setSaved] = useState(false);
-  const [learned, setLearned] = useState({ authors: [], keywords: [], journals: [] });
-
+  const [newAlert, setNewAlert] = useState("");
+  const [alertType, setAlertType] = useState("keyword");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+  const [retry, setRetry] = useState(0);
   useEffect(() => {
-    if (profile) setForm({ ...profile });
-    if (user) {
-      supabase.from("alerts").select("*").eq("user_id", user.id).then(({ data }) => setAlerts(data || []));
-      // Load auto-learned data from liked papers
-      (async () => {
-        const { data: fbs } = await supabase.from("feedbacks").select("paper_id").eq("user_id", user.id).eq("action", "like");
-        if (!fbs?.length) return;
-        const ids = fbs.map(f => f.paper_id);
-        const { data: papers } = await supabase.from("papers").select("authors,keywords,journal").in("id", ids);
-        if (!papers?.length) return;
-        const ac = {}, kc = {}, jc = {};
-        papers.forEach(p => {
-          (p.authors || []).forEach(a => { ac[a] = (ac[a] || 0) + 1; });
-          (Array.isArray(p.keywords) ? p.keywords : []).forEach(k => { kc[k.toLowerCase()] = (kc[k.toLowerCase()] || 0) + 1; });
-          if (p.journal) jc[p.journal] = (jc[p.journal] || 0) + 1;
-        });
-        const top = (obj, n) => Object.entries(obj).sort((a, b) => b[1] - a[1]).slice(0, n).map(e => e[0]);
-        setLearned({ authors: top(ac, 5), keywords: top(kc, 8), journals: top(jc, 5) });
-      })();
-    }
-  }, [profile, user]);
-
-  if (!form) return <div className="flex items-center justify-center h-full text-text3">Loading...</div>;
-
-  const handleSave = async () => {
-    setSaving(true);
-    const { error } = await supabase.from("profiles").update({
-      name: form.name || "",
-      institution: form.institution || "",
-      keywords: form.keywords || [],
-      preferred_journals: form.preferred_journals || [],
-      preferred_study_types: form.preferred_study_types || [],
-      digest_email: form.digest_email ?? true,
-    }).eq("id", user.id);
-    if (error) { console.error("Save error:", error); setSaving(false); return; }
-    await loadProfile(user.id);
-    setSaved(true); setTimeout(() => setSaved(false), 2000);
-    setSaving(false);
-  };
-
-  const addTag = (field, val) => {
-    if (!form[field]?.includes(val)) {
-      setForm({ ...form, [field]: [...(form[field] || []), val] });
+    setForm(profile);
+  }, [profile]);
+  useEffect(() => {
+    let active = true;
+    checked(supabase.from("alerts").select("*").eq("user_id", user.id).order("id"))
+      .then((data) => {
+        if (active) setAlerts(data || []);
+      })
+      .catch(() => {
+        if (active) setError("Could not load your topic alerts.");
+      });
+    return () => {
+      active = false;
+    };
+  }, [user.id, retry]);
+  const run = async (action) => {
+    if (busy) return;
+    setBusy(true);
+    setError("");
+    setMessage("");
+    try {
+      await action();
+    } catch (err) {
+      setError(err.message || "Could not save changes. Please try again.");
+    } finally {
+      setBusy(false);
     }
   };
-  const removeTag = (field, val) => setForm({ ...form, [field]: (form[field] || []).filter(v => v !== val) });
-
-  const addAlert = async () => {
-    if (!newAlertValue.trim() || !user) return;
-    const { data } = await supabase.from("alerts").insert({ user_id: user.id, alert_type: newAlertType, value: newAlertValue.trim() }).select().single();
-    if (data) setAlerts(p => [...p, data]);
-    setNewAlertValue("");
+  const save = (e) => {
+    e.preventDefault();
+    run(async () => {
+      const data = await checked(
+        supabase
+          .from("profiles")
+          .update({
+            name: form.name.trim(),
+            institution: form.institution?.trim() || "",
+            keywords: form.keywords || [],
+            preferred_journals: form.preferred_journals || [],
+            preferred_study_types: form.preferred_study_types || [],
+            email_digest: !!form.email_digest,
+            digest_frequency: form.digest_frequency || "daily",
+          })
+          .eq("id", user.id)
+          .select()
+          .single(),
+      );
+      if (!data) throw new Error("No profile was saved.");
+      setProfile(data);
+      setMessage("Settings saved.");
+    });
   };
-  const removeAlert = async (id) => {
-    await supabase.from("alerts").delete().eq("id", id);
-    setAlerts(p => p.filter(a => a.id !== id));
-  };
-
+  if (!form) return <ErrorNotice message="Profile unavailable. Reload to try again." />;
   return (
     <div className="h-full overflow-y-auto">
-      <div className="max-w-[720px] mx-auto p-4 sm:p-6 lg:p-10">
-        <div className="flex items-center justify-between mb-6">
-          <h1 className="text-[1.333rem] font-bold text-text1">Settings</h1>
-          <button onClick={handleSave} disabled={saving}
-            className={`flex items-center gap-2 h-10 px-5 rounded-lg text-[0.889rem] font-medium transition-colors
-              ${saved ? "bg-success text-white" : "bg-accent text-white hover:bg-[#0066D6]"}`}>
-            {saved ? <><Check size={16} />Saved</> : <><Save size={16} />{saving ? "Saving..." : "Save"}</>}
-          </button>
-        </div>
-
-        {/* Profile */}
-        <div className={sectionCls}>
-          <h2 className="text-[1rem] font-semibold text-text1 mb-4">Profile</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-5">
-            <div>
-              <label className="text-[0.778rem] text-text3 block mb-1.5">Name</label>
-              <input value={form.name || ""} onChange={e => setForm({ ...form, name: e.target.value })} className={`w-full ${inputCls}`} />
-            </div>
-            <div>
-              <label className="text-[0.778rem] text-text3 block mb-1.5">Institution</label>
-              <input value={form.institution || ""} onChange={e => setForm({ ...form, institution: e.target.value })} className={`w-full ${inputCls}`} />
-            </div>
-          </div>
-
-          <TagField
-            label="Research Keywords"
-            tags={form.keywords}
-            onAdd={val => addTag("keywords", val)}
-            onRemove={val => removeTag("keywords", val)}
-            placeholder="e.g. prostate cancer, robotic surgery"
+      <div className="page-shell max-w-3xl">
+        <h1 className="page-title">Settings</h1>
+        {error && (
+          <ErrorNotice
+            message={error}
+            onRetry={() => {
+              setError("");
+              setRetry((v) => v + 1);
+            }}
           />
-          {/* Study types */}
-          <div className="mb-5">
-            <label className="text-[0.889rem] font-semibold text-text1 block mb-2">Preferred Study Types</label>
-            <div className="flex flex-wrap gap-2">
-              {["rct","basic_research","biomarker","retrospective","prospective","meta_analysis","ai_ml","surgical","imaging","epidemiology","guideline","review"].map(t => {
-                const active = (form.preferred_study_types || []).includes(t);
-                const label = t.replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase());
-                return (
-                  <button key={t} type="button" onClick={() => {
-                    const cur = form.preferred_study_types || [];
-                    setForm({ ...form, preferred_study_types: active ? cur.filter(x => x !== t) : [...cur, t] });
-                  }}
-                    className={`h-8 px-3 rounded-lg text-[0.778rem] font-medium border transition-colors
-                      ${active ? "bg-[rgba(0,122,255,0.08)] text-accent border-accent" : "bg-card text-text3 border-border hover:border-text3"}`}>
-                    {label}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* Journals — user editable */}
-          <TagField
-            label="Preferred Journals"
-            tags={form.preferred_journals}
-            onAdd={val => addTag("preferred_journals", val)}
-            onRemove={val => removeTag("preferred_journals", val)}
-            placeholder="e.g. European Urology, Journal of Urology"
-          />
-
-          {/* Auto-learned from likes */}
-          {(learned.keywords.length > 0 || learned.authors.length > 0 || learned.journals.length > 0) && (
-            <div className="pt-4 border-t border-border mb-5">
-              <LearnedSection label="Learned Keywords" items={learned.keywords} emptyMsg="Like papers to learn your interests." />
-              <LearnedSection label="Learned Authors" items={learned.authors} emptyMsg="Like papers to discover frequent authors." />
-              <LearnedSection label="Learned Journals" items={learned.journals} emptyMsg="Like papers to learn journal preferences." />
-            </div>
-          )}
-
-          <div className="pt-4 border-t border-border">
-            <p className="text-[0.889rem] font-semibold text-text1 mb-3">Daily Digest</p>
-            <label className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors
-              ${form.digest_email ? "border-accent bg-[rgba(0,122,255,0.04)]" : "border-border hover:bg-hover"}`}>
-              <input type="checkbox" checked={form.digest_email || false}
-                onChange={e => setForm({ ...form, digest_email: e.target.checked })}
-                className="accent-accent" />
-              <div>
-                <span className="text-[0.889rem] font-medium text-text1">Email</span>
-                <p className="text-[0.722rem] text-text3">Receive via email every morning</p>
-              </div>
+        )}
+        {message && (
+          <p role="status" className="mb-4 text-sm text-green-800">
+            {message}
+          </p>
+        )}
+        <form onSubmit={save} className="panel space-y-6">
+          <h2 className="section-title">Your research profile</h2>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <label className="field-label">
+              Name
+              <input
+                className="form-input mt-2"
+                autoComplete="name"
+                maxLength={100}
+                required
+                value={form.name || ""}
+                onChange={(e) => setForm({ ...form, name: e.target.value })}
+              />
+            </label>
+            <label className="field-label">
+              Institution
+              <input
+                className="form-input mt-2"
+                autoComplete="organization"
+                maxLength={200}
+                value={form.institution || ""}
+                onChange={(e) => setForm({ ...form, institution: e.target.value })}
+              />
             </label>
           </div>
-        </div>
-
-        {/* Alerts */}
-        <div className={sectionCls}>
-          <h2 className="text-[1rem] font-semibold text-text1 mb-1 flex items-center gap-2">
-            <Bell size={18} className="text-warning" />Keyword Alerts
-          </h2>
-          <p className="text-[0.778rem] text-text3 mb-4">Get notified when new papers match your criteria.</p>
-          <div className="flex flex-col sm:flex-row gap-2 mb-4">
-            <select value={newAlertType} onChange={e => setNewAlertType(e.target.value)}
-              className={`${inputCls} w-full sm:w-auto`}>
+          <Tags
+            label="Research keywords"
+            values={form.keywords || []}
+            onChange={(keywords) => setForm({ ...form, keywords })}
+          />
+          <fieldset>
+            <legend className="field-label mb-3">Preferred study types</legend>
+            <div className="flex flex-wrap gap-2">
+              {types.map((type) => (
+                <button
+                  type="button"
+                  key={type}
+                  aria-pressed={(form.preferred_study_types || []).includes(type)}
+                  className="choice-chip"
+                  onClick={() =>
+                    setForm({
+                      ...form,
+                      preferred_study_types: (form.preferred_study_types || []).includes(type)
+                        ? form.preferred_study_types.filter((t) => t !== type)
+                        : [...(form.preferred_study_types || []), type],
+                    })
+                  }
+                >
+                  {type.replaceAll("_", " ")}
+                </button>
+              ))}
+            </div>
+          </fieldset>
+          <Tags
+            label="Preferred journals"
+            values={form.preferred_journals || []}
+            onChange={(preferred_journals) => setForm({ ...form, preferred_journals })}
+          />
+          <fieldset className="border-t border-border pt-5 space-y-3">
+            <legend className="field-label">Email digest</legend>
+            <label className="flex items-center gap-3 text-sm">
+              <input
+                type="checkbox"
+                checked={!!form.email_digest}
+                onChange={(e) => setForm({ ...form, email_digest: e.target.checked })}
+              />
+              Send my paper recommendations by email
+            </label>
+            <label className="field-label">
+              Frequency
+              <select
+                className="form-input mt-2"
+                value={form.digest_frequency || "daily"}
+                onChange={(e) => setForm({ ...form, digest_frequency: e.target.value })}
+              >
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly · Monday</option>
+              </select>
+            </label>
+            <p className="help-text">Delivery follows the morning paper update, in Korea time.</p>
+          </fieldset>
+          <button className="btn-primary" disabled={busy}>
+            {busy ? "Saving…" : "Save settings"}
+          </button>
+        </form>
+        <section className="panel mt-5">
+          <h2 className="section-title">Topic alerts</h2>
+          <p className="help-text mb-4">Matching papers receive a boost in your daily picks and digest.</p>
+          <form
+            className="flex flex-wrap gap-2 mb-4"
+            onSubmit={(e) => {
+              e.preventDefault();
+              run(async () => {
+                const data = await checked(
+                  supabase
+                    .from("alerts")
+                    .insert({ user_id: user.id, alert_type: alertType, value: newAlert.trim() })
+                    .select()
+                    .single(),
+                );
+                setAlerts((previous) => [...previous, data]);
+                setNewAlert("");
+              });
+            }}
+          >
+            <select
+              aria-label="Alert type"
+              className="form-input sm:w-auto"
+              value={alertType}
+              onChange={(e) => setAlertType(e.target.value)}
+            >
               <option value="keyword">Keyword</option>
               <option value="author">Author</option>
               <option value="journal">Journal</option>
             </select>
-            <input value={newAlertValue} onChange={e => setNewAlertValue(e.target.value)}
-              onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); addAlert(); } }}
-              placeholder="Enter keyword, author, or journal"
-              className={`flex-1 min-w-0 ${inputCls}`} />
-            <button onClick={addAlert} className="h-11 px-4 bg-warning text-white rounded-lg text-[0.889rem] font-medium hover:opacity-90 transition-opacity">Add</button>
-          </div>
-          <div className="space-y-2">
-            {alerts.map(a => (
-              <div key={a.id} className="flex items-center gap-3 p-3 bg-hover rounded-lg">
-                <Bell size={14} className={a.is_active ? "text-warning" : "text-text3"} />
-                <span className="text-[0.778rem] text-text3 bg-card border border-border px-2 py-0.5 rounded font-medium">{a.alert_type}</span>
-                <span className="text-[0.889rem] text-text1 flex-1">{a.value}</span>
-                <button onClick={() => removeAlert(a.id)} className="text-text3 hover:text-danger transition-colors"><X size={16} /></button>
-              </div>
+            <input
+              aria-label="Alert value"
+              className="form-input flex-1 min-w-0"
+              maxLength={150}
+              required
+              value={newAlert}
+              onChange={(e) => setNewAlert(e.target.value)}
+              placeholder="Topic, author, or journal"
+            />
+            <button className="btn-secondary" disabled={busy || !newAlert.trim()}>
+              Add alert
+            </button>
+          </form>
+          <ul className="space-y-2">
+            {alerts.map((alert) => (
+              <li key={alert.id} className="flex items-center gap-3 rounded-lg bg-hover p-3 text-sm">
+                <span className="text-text3">{alert.alert_type}</span>
+                <span className="flex-1 break-words min-w-0">{alert.value}</span>
+                <button
+                  className="text-red-700 p-2"
+                  disabled={busy}
+                  aria-label={`Remove alert ${alert.value}`}
+                  onClick={() =>
+                    run(async () => {
+                      await checked(supabase.from("alerts").delete().eq("id", alert.id));
+                      setAlerts((previous) => previous.filter((a) => a.id !== alert.id));
+                    })
+                  }
+                >
+                  Remove
+                </button>
+              </li>
             ))}
-            {!alerts.length && <p className="text-[0.889rem] text-text3 text-center py-4">No alerts set</p>}
-          </div>
-        </div>
-
-        {/* Account */}
-        <AccountSection user={user} profile={form} />
+          </ul>
+          {!alerts.length && <p className="help-text">No topic alerts yet.</p>}
+        </section>
+        <AccountSection />
       </div>
     </div>
   );
 }
 
-function AccountSection({ user, profile }) {
-  const [newEmail, setNewEmail] = useState("");
-  const [newPassword, setNewPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [msg, setMsg] = useState("");
-  const [err, setErr] = useState("");
-  const [showDelete, setShowDelete] = useState(false);
+function AccountSection() {
+  const { user, profile, setProfile } = useAuth();
   const navigate = useNavigate();
-
-  const changeEmail = async () => {
-    if (!newEmail.trim()) return;
-    setErr(""); setMsg("");
-    // Save email to profile (for digest), don't change auth email (breaks session)
-    const { error } = await supabase.from("profiles").update({
-      digest_email_address: newEmail.trim(),
-    }).eq("id", user.id);
-    if (error) { setErr(error.message); return; }
-    setMsg("Email saved for digest delivery.");
-    setNewEmail("");
+  const [email, setEmail] = useState(user.email || "");
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [deletion, setDeletion] = useState("");
+  const [showDelete, setShowDelete] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
+  const run = async (action) => {
+    if (busy) return;
+    setBusy(true);
+    setMessage("");
+    setError("");
+    try {
+      await action();
+    } catch (err) {
+      setError(err.message || "Account update failed. Please retry.");
+    } finally {
+      setBusy(false);
+    }
   };
-
-  const changePassword = async () => {
-    setErr(""); setMsg("");
-    if (newPassword.length < 6) { setErr("Password must be at least 6 characters."); return; }
-    if (newPassword !== confirmPassword) { setErr("Passwords don't match."); return; }
-    const { error } = await supabase.auth.updateUser({ password: newPassword });
-    if (error) { setErr(error.message); return; }
-    setMsg("Password updated.");
-    setNewPassword(""); setConfirmPassword("");
-  };
-
-  const deleteAccount = async () => {
-    // Note: Supabase doesn't allow users to delete themselves via client SDK.
-    // We mark the profile and the admin can clean up, or use an Edge Function.
-    await supabase.from("profiles").update({ name: "[DELETED]", keywords: [], preferred_journals: [], email_digest: false }).eq("id", user.id);
-    await supabase.auth.signOut();
-    navigate("/login");
-  };
-
   return (
-    <div className={sectionCls}>
-      <h2 className="text-[1rem] font-semibold text-text1 mb-4 flex items-center gap-2">
-        <Shield size={18} className="text-accent" />Account
-      </h2>
-
-      <p className="text-[0.889rem] text-text3 mb-4">
-        Signed in as <span className="text-text1 font-medium break-all">{user?.email}</span>
-      </p>
-
-      {msg && <p className="text-[0.889rem] text-success mb-3">{msg}</p>}
-      {err && <p className="text-[0.889rem] text-danger mb-3">{err}</p>}
-
-      {/* Change email — for all users (email digest needs this) */}
-      <div className="mb-5">
-        <label className="text-[0.889rem] font-semibold text-text1 block mb-2 flex items-center gap-1.5">
-          <Mail size={14} />Email for digest
-        </label>
-        <div className="flex flex-col sm:flex-row gap-2">
-          <input value={newEmail} onChange={e => setNewEmail(e.target.value)}
-            placeholder={user?.email || "Enter email for digest"}
-            type="email"
-            className={`w-full sm:flex-1 ${inputCls}`} />
-          <button onClick={changeEmail}
-            className="h-12 px-4 bg-accent text-white rounded-lg text-[0.889rem] font-medium hover:bg-[#0066D6] transition-colors shrink-0">
-            Update
-          </button>
-        </div>
-        <p className="text-[0.722rem] text-text3 mt-1">Email digest will be sent to this address.</p>
-      </div>
-
-      {/* Change password — only for email users */}
-      {user?.app_metadata?.provider === "email" && (
-        <div className="mb-5">
-          <label className="text-[0.889rem] font-semibold text-text1 block mb-2 flex items-center gap-1.5">
-            <Shield size={14} />Change password
-          </label>
-          <div className="flex flex-col gap-2">
-            <input value={newPassword} onChange={e => setNewPassword(e.target.value)}
-              placeholder="New password (min 6 chars)" type="password"
-              className={`w-full ${inputCls}`} />
-            <input value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)}
-              placeholder="Confirm new password" type="password"
-              className={`w-full ${inputCls}`} />
-            <button onClick={changePassword}
-              className="h-12 px-4 bg-accent text-white rounded-lg text-[0.889rem] font-medium hover:bg-[#0066D6] transition-colors self-start">
-              Update password
-            </button>
-          </div>
-        </div>
+    <section className="panel mt-5 space-y-5">
+      <h2 className="section-title">Account</h2>
+      <p className="help-text break-all">Signed in as {user.email}</p>
+      {error && <ErrorNotice message={error} />}
+      {message && (
+        <p role="status" className="text-sm text-green-800">
+          {message}
+        </p>
       )}
-
-      {/* Delete account */}
-      <div className="pt-4 border-t border-border">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          run(async () => {
+            const { error } = await supabase.auth.updateUser(
+              { email: email.trim() },
+              { emailRedirectTo: appUrl("settings") },
+            );
+            if (error) throw error;
+            setMessage(
+              "Check your email to confirm the new address. Digests continue to use your verified account email until confirmation.",
+            );
+          });
+        }}
+        className="space-y-3"
+      >
+        <label className="field-label">
+          Account and digest email
+          <input
+            className="form-input mt-2"
+            type="email"
+            required
+            maxLength={254}
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+          />
+        </label>
+        <p className="help-text">
+          Used for sign-in and digests. Confirm a new address through email before it takes effect.
+        </p>
+        <button className="btn-secondary" disabled={busy || email.trim() === user.email}>
+          Change email address
+        </button>
+      </form>
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          run(async () => {
+            if (password !== confirm) throw new Error("Passwords do not match.");
+            const { error } = await supabase.auth.updateUser({ password });
+            if (error) throw error;
+            setPassword("");
+            setConfirm("");
+            setMessage("Password updated.");
+          });
+        }}
+        className="border-t border-border pt-5 space-y-3"
+      >
+        <label className="field-label">
+          New password
+          <input
+            className="form-input mt-2"
+            type="password"
+            autoComplete="new-password"
+            minLength={8}
+            required
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+          />
+        </label>
+        <label className="field-label">
+          Confirm new password
+          <input
+            className="form-input mt-2"
+            type="password"
+            autoComplete="new-password"
+            minLength={8}
+            required
+            value={confirm}
+            onChange={(e) => setConfirm(e.target.value)}
+          />
+        </label>
+        <button className="btn-secondary" disabled={busy}>
+          Update password
+        </button>
+      </form>
+      <div className="border-t border-border pt-5">
         {!showDelete ? (
-          <button onClick={() => setShowDelete(true)}
-            className="flex items-center gap-1.5 text-[0.889rem] text-danger hover:underline">
-            <Trash2 size={14} />Delete account
+          <button className="text-sm text-red-700 underline" onClick={() => setShowDelete(true)}>
+            Delete account
           </button>
         ) : (
-          <div className="bg-[rgba(255,59,48,0.04)] border border-[rgba(255,59,48,0.15)] rounded-lg p-4">
-            <p className="text-[0.889rem] text-text1 mb-3">Are you sure? This cannot be undone.</p>
-            <div className="flex gap-2">
-              <button onClick={deleteAccount}
-                className="h-10 px-5 bg-danger text-white rounded-lg text-[0.889rem] font-medium">
-                Yes, delete my account
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              run(async () => {
+                await checked(supabase.rpc("delete_own_account"));
+                await supabase.auth.signOut({ scope: "local" });
+                navigate("/welcome", { replace: true });
+              });
+            }}
+            className="space-y-3"
+          >
+            <p className="text-sm">
+              This permanently deletes your account, preferences, reading history, feedback, and collections.
+            </p>
+            <label className="field-label">
+              Type DELETE to confirm
+              <input
+                className="form-input mt-2"
+                value={deletion}
+                onChange={(e) => setDeletion(e.target.value)}
+                autoComplete="off"
+              />
+            </label>
+            <div className="flex gap-3">
+              <button className="btn-danger" disabled={busy || deletion !== "DELETE"}>
+                Permanently delete account
               </button>
-              <button onClick={() => setShowDelete(false)}
-                className="h-10 px-5 text-text3 text-[0.889rem]">
+              <button type="button" className="btn-secondary" onClick={() => setShowDelete(false)}>
                 Cancel
               </button>
             </div>
-          </div>
+          </form>
         )}
       </div>
-    </div>
+    </section>
   );
 }

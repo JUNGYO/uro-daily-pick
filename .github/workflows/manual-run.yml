@@ -15,9 +15,17 @@ on:
           - digest-only
           - all
 
+permissions:
+  contents: read
+
+concurrency:
+  group: uro-daily-pipeline
+  cancel-in-progress: false
+
 jobs:
   run:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -25,12 +33,13 @@ jobs:
         with:
           python-version: '3.12'
 
-      - run: pip install requests
+      - run: python -m pip install -r scripts/requirements.txt
 
       - name: Fetch papers
         if: contains(fromJSON('["fetch-only","fetch-and-recommend","all"]'), github.event.inputs.task)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          NCBI_EMAIL: ${{ vars.NCBI_EMAIL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python scripts/fetch_papers.py
 
@@ -38,6 +47,7 @@ jobs:
         if: contains(fromJSON('["recommend-only","fetch-and-recommend","all"]'), github.event.inputs.task)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          NCBI_EMAIL: ${{ vars.NCBI_EMAIL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python scripts/classify_papers.py
 
@@ -45,14 +55,19 @@ jobs:
         if: contains(fromJSON('["summarize-only","recommend-only","fetch-and-recommend","all"]'), github.event.inputs.task)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          NCBI_EMAIL: ${{ vars.NCBI_EMAIL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          SUMMARY_BATCH_SIZE: ${{ vars.SUMMARY_BATCH_SIZE }}
+          SUMMARIZE_FULLTEXT: ${{ vars.SUMMARIZE_FULLTEXT }}
         run: python scripts/summarize_papers.py
 
       - name: Generate recommendations
         if: contains(fromJSON('["recommend-only","fetch-and-recommend","all"]'), github.event.inputs.task)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          NCBI_EMAIL: ${{ vars.NCBI_EMAIL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python scripts/generate_recs.py
 
@@ -60,6 +75,9 @@ jobs:
         if: contains(fromJSON('["digest-only","all"]'), github.event.inputs.task)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          NCBI_EMAIL: ${{ vars.NCBI_EMAIL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          FROM_EMAIL: ${{ vars.FROM_EMAIL }}
+          APP_URL: ${{ vars.APP_URL }}
         run: python scripts/send_digest.py

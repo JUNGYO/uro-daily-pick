@@ -9,11 +9,14 @@ from datetime import datetime, timedelta
 from xml.etree import ElementTree as ET
 
 import requests
+from common import supabase_headers
+from classify_papers import classify
+from common import get_json
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 PUBMED_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
-PUBMED_EMAIL = "uro-daily-pick@example.com"
+PUBMED_EMAIL = os.environ.get("NCBI_EMAIL", "")
 
 # ── Major Journals ──
 # Urology
@@ -76,8 +79,7 @@ URO_QUERIES = build_journal_queries()
 def supabase_request(method, path, data=None):
     url = f"{SUPABASE_URL}/rest/v1/{path}"
     headers = {
-        "apikey": SUPABASE_KEY,
-        "Authorization": f"Bearer {SUPABASE_KEY}",
+        **supabase_headers(SUPABASE_KEY),
         "Content-Type": "application/json",
         "Prefer": "return=minimal",
     }
@@ -99,14 +101,34 @@ def search_pmids(query, max_results=100, days_back=7):
         "mindate": date_from, "maxdate": date_to,
         "retmode": "json", "email": PUBMED_EMAIL,
     }
-    r = requests.get(f"{PUBMED_BASE}/esearch.fcgi", params=params, timeout=15)
-    r.raise_for_status()
-    return r.json().get("esearchresult", {}).get("idlist", [])
+    pmids = []
+    while True:
+        params["retstart"] = len(pmids)
+        r = requests.get(f"{PUBMED_BASE}/esearch.fcgi", params=params, timeout=30)
+        r.raise_for_status()
+        result = r.json()["esearchresult"]
+        page = result.get("idlist", [])
+        total = int(result.get("count", len(page)))
+        if total > 9999:
+            raise ValueError("PubMed result exceeds 9,999; narrow the date window")
+        pmids.extend(page)
+        if len(pmids) >= total:
+            return pmids
+        if not page:
+            raise ValueError("Incomplete PubMed search response")
+        time.sleep(0.4)
+
 
 
 def fetch_details(pmids):
     if not pmids:
         return []
+    if len(pmids) > 100:
+        result = []
+        for start in range(0, len(pmids), 100):
+            result.extend(fetch_details(pmids[start:start + 100]))
+            time.sleep(0.4)
+        return result
     params = {
         "db": "pubmed", "id": ",".join(pmids),
         "retmode": "xml", "email": PUBMED_EMAIL,
@@ -118,55 +140,8 @@ def fetch_details(pmids):
 
 
 def classify_study_type(title, abstract, pub_types):
-    """
-    Classify paper into study types:
-    - rct: Randomized Controlled Trial
-    - prospective: Prospective cohort/observational
-    - retrospective: Retrospective study
-    - meta_analysis: Meta-analysis / Systematic review
-    - basic_research: In vitro, animal, molecular
-    - case_report: Case report / Case series
-    - guideline: Clinical guideline
-    - review: Narrative review
-    - ai_ml: AI/Machine learning study
-    - other: Unclassified
-    """
-    text = f"{title} {abstract}"
-
-    # Check PubMed publication types first (most reliable)
-    pt_str = " ".join(pub_types)
-    if "randomized controlled trial" in pt_str:
-        return "rct"
-    if "meta-analysis" in pt_str:
-        return "meta_analysis"
-    if "case reports" in pt_str:
-        return "case_report"
-    if "practice guideline" in pt_str or "guideline" in pt_str:
-        return "guideline"
-    if "review" in pt_str and "systematic" not in pt_str:
-        pass  # Don't return yet, check text below
-
-    # Text-based classification
-    if any(s in text for s in ["systematic review", "meta-analysis", "meta analysis", "prisma"]):
-        return "meta_analysis"
-    if any(s in text for s in ["randomized", "randomised", "rct", "phase ii", "phase iii", "phase 2", "phase 3", "double-blind", "placebo-controlled"]):
-        return "rct"
-    if any(s in text for s in ["guideline", "consensus statement", "recommendation statement"]):
-        return "guideline"
-    if any(s in text for s in ["machine learning", "deep learning", "artificial intelligence", "neural network", "convolutional", "transformer model", "large language model", "chatgpt"]):
-        return "ai_ml"
-    if any(s in text for s in ["prospective cohort", "prospective study", "prospective observational", "prospectively enrolled", "prospectively collected"]):
-        return "prospective"
-    if any(s in text for s in ["retrospective", "medical records review", "chart review", "database analysis", "registry data", "claims data"]):
-        return "retrospective"
-    if any(s in text for s in ["in vitro", "in vivo", "cell line", "mouse model", "xenograft", "knockout", "western blot", "pcr", "immunohistochemistry", "gene expression", "signaling pathway", "molecular mechanism"]):
-        return "basic_research"
-    if any(s in text for s in ["case report", "case series", "a rare case"]):
-        return "case_report"
-    if "review" in pt_str or any(s in title for s in ["a review", "narrative review", "current review", "update on"]):
-        return "review"
-
-    return "other"
+    """Use the same conservative classifier during ingestion and backfill."""
+    return classify([], pub_types, title, abstract)[0]
 
 
 def parse_article(article):
@@ -235,10 +210,16 @@ def parse_article(article):
 
 def get_existing_pmids():
     """Get all PMIDs already in DB."""
-    r = supabase_request("GET", "papers", {"select": "pmid"})
-    if r.status_code == 200:
-        return set(row["pmid"] for row in r.json())
-    return set()
+    found = set()
+    offset = 0
+    while True:
+        page = get_json(f"{SUPABASE_URL}/rest/v1/papers", headers={
+            **supabase_headers(SUPABASE_KEY)}, params={
+            "select": "pmid", "order": "id", "limit": "500", "offset": str(offset)})
+        found.update(row["pmid"] for row in page)
+        offset += len(page)
+        if len(page) < 500:
+            return found
 
 
 def insert_papers(papers):
@@ -250,6 +231,7 @@ def insert_papers(papers):
     for i in range(0, len(papers), 50):
         batch = papers[i:i+50]
         r = supabase_request("POST", "papers", batch)
+        r.raise_for_status()
         if r.status_code in (200, 201):
             count += len(batch)
         else:
@@ -258,9 +240,8 @@ def insert_papers(papers):
 
 
 def main():
-    if not SUPABASE_KEY:
-        print("ERROR: SUPABASE_SERVICE_KEY not set")
-        return
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise SystemExit("ERROR: SUPABASE_URL and SUPABASE_SERVICE_KEY required")
 
     print(f"=== Uro Daily Pick - Paper Fetch ===")
     print(f"Time: {datetime.now().isoformat()}")
@@ -270,6 +251,7 @@ def main():
 
     total_new = 0
     all_new_papers = []
+    failed_queries = 0
 
     for query in URO_QUERIES:
         short = query[:50]
@@ -287,6 +269,7 @@ def main():
                 print(f"  [{short}...] {len(pmids)} found, 0 new")
             time.sleep(0.4)
         except Exception as e:
+            failed_queries += 1
             print(f"  [{short}...] ERROR: {e}")
 
     if all_new_papers:
@@ -297,6 +280,8 @@ def main():
         print("\nNo new papers to insert")
 
     print(f"Total new: {total_new}")
+    if failed_queries:
+        raise SystemExit(f"ERROR: {failed_queries} PubMed queries failed; downstream steps must wait")
     print("Done.")
 
 
