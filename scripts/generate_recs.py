@@ -12,6 +12,7 @@ from collections import Counter
 import requests
 from common import supabase_headers
 from common import get_json, paginate, strings
+from keywords import keyword_matches, keyword_count
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
@@ -101,16 +102,18 @@ def text_match_score(paper, user_keywords):
     score = 0.0
     matched = []
     for kw in user_keywords:
-        kw_lower = kw.lower()
+        kw_lower = kw.strip().lower()
+        if not kw_lower:
+            continue
         if kw_lower in all_paper_terms:
             score += 3.0  # exact keyword/mesh match
             matched.append(kw)
-        elif kw_lower in title_lower:
+        elif keyword_matches(title_lower, kw_lower):
             score += 2.5  # in title — strong signal
             matched.append(kw)
-        elif kw_lower in abstract_lower:
+        elif keyword_matches(abstract_lower, kw_lower):
             # Count occurrences — single mention is weak
-            count = abstract_lower.count(kw_lower)
+            count = keyword_count(abstract_lower, kw_lower)
             if count >= 3:
                 score += 1.5  # mentioned multiple times — relevant
             else:
@@ -153,7 +156,7 @@ def behavioral_score(paper, liked_papers, disliked_kws, dwell_papers):
 
     # Dislike penalty
     for dk in disliked_kws:
-        if dk.lower() in paper_terms or dk.lower() in (paper.get("abstract") or "").lower():
+        if dk.strip() and (dk.strip().lower() in paper_terms or keyword_matches(paper.get("abstract"), dk)):
             score -= 0.4
 
     # Dwell-based signals
@@ -264,7 +267,8 @@ def score_paper(paper, profile, liked_papers, disliked_kws, dwell_papers, all_li
         kind, value = alert.get("alert_type"), (alert.get("value") or "").strip().lower()
         haystack = {"journal": paper.get("journal") or "", "author": " ".join(paper.get("authors") or []),
                     "keyword": f"{paper.get('title') or ''} {paper.get('abstract') or ''}"}.get(kind, "")
-        if value and value in haystack.lower():
+        matches = (keyword_matches(paper.get("title"), value) or keyword_matches(paper.get("abstract"), value)) if kind == "keyword" else value in haystack.lower()
+        if value and matches:
             content += 0.5
             reasons.insert(0, {"type": "alert", "label": f"Alert: {alert['value']}"})
             break

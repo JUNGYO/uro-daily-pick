@@ -59,6 +59,30 @@ beforeEach(() => {
   };
   mock.from.mockReturnValue(query({ data: [], error: null }));
 });
+it("highlights a standalone AI mention without splitting Affairs and keeps the summary visible", async () => {
+  const title =
+    "Active Surveillance Use for Favorable-Risk Prostate Cancer in a Veterans Affairs Population.";
+  mock.picks.mockResolvedValue([
+    {
+      id: 1,
+      paper_id: 1,
+      paper: {
+        id: 1,
+        title,
+        abstract: "An AI tool was evaluated.",
+        authors: [],
+        structured_data: {},
+        qa_data: [],
+      },
+      reasons: { reasons: [], matched_terms: ["AI"] },
+    },
+  ]);
+  const { container } = show(<DailyPick />);
+  await screen.findByRole("button", { name: "Like paper" });
+  expect([...container.querySelectorAll("mark")].map((el) => el.textContent)).toEqual(["AI"]);
+  expect(screen.getByRole("region", { name: "본문 기반 세 줄 요약" })).toBeVisible();
+  expect(screen.getByText("원문이 아직 확보되지 않아 본문 기반 요약을 제공할 수 없습니다.")).toBeVisible();
+});
 it("shows confirmation instructions when signup does not create a session", async () => {
   mock.signUp.mockResolvedValue({ data: { session: null }, error: null });
   show(<Login />);

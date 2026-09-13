@@ -60,7 +60,8 @@ class PipelineTests(unittest.TestCase):
             insert.assert_called_once_with([paper])
 
     def test_exhausted_summary_retries_stop_pipeline(self):
-        with patch.multiple(summary, SUPABASE_URL="https://example.test", SUPABASE_KEY="test", GEMINI_API_KEY="test"), \
+        with patch.dict(summary.os.environ, {"SUMMARY_SOURCE":"abstract"}), \
+             patch.multiple(summary, SUPABASE_URL="https://example.test", SUPABASE_KEY="test", GEMINI_API_KEY="test"), \
              patch.object(summary, "sb_get", return_value=[{"id": 1, "pmid": "1", "title": "Test", "abstract": "Abstract"}]), \
              patch.object(summary, "summarize", return_value=None), \
              patch.object(summary.time, "sleep"), contextlib.redirect_stdout(io.StringIO()):

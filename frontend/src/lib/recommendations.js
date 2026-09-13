@@ -1,5 +1,6 @@
 import { supabase } from "./supabase";
 import { checked, kstDate, normalizeRec, stringList, withTimeout, allRows } from "./data";
+import { keywordMatches, paperMatchesKeyword } from "./keywords";
 
 export async function getDailyPicks(userId, day) {
   const stored = await withTimeout(
@@ -92,8 +93,13 @@ export function rankPapers(papers, profile, seen = new Set(), alerts = []) {
         /^(re:|reply to|letter to|erratum|editorial|comment on)/i.test(title)
       )
         return [];
-      const terms = keywords.filter((k) => `${title} ${abstract}`.includes(k));
-      let score = terms.reduce((sum, term) => sum + (title.includes(term) ? 3 : 1), 0);
+      const terms = keywords.filter((k) =>
+        paperMatchesKeyword(
+          { ...paper, keywords: stringList(paper.keywords), mesh_terms: stringList(paper.mesh_terms) },
+          k,
+        ),
+      );
+      let score = terms.reduce((sum, term) => sum + (keywordMatches(title, term) ? 3 : 1), 0);
       const journal = (paper.journal || "").toLowerCase();
       if (
         journal &&
@@ -109,7 +115,11 @@ export function rankPapers(papers, profile, seen = new Set(), alerts = []) {
             author: stringList(paper.authors).join(" ").toLowerCase(),
             journal,
           }[alert.alert_type] || "";
-        if (value && haystack.includes(value)) {
+        const matches =
+          alert.alert_type === "keyword"
+            ? keywordMatches(title, value) || keywordMatches(abstract, value)
+            : haystack.includes(value);
+        if (value && matches) {
           score += 3;
           terms.unshift(`Alert: ${alert.value}`);
           break;

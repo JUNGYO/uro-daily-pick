@@ -3,6 +3,20 @@ const { from } = vi.hoisted(() => ({ from: vi.fn() }));
 vi.mock("./supabase", () => ({ supabase: { from } }));
 import { getDailyPicks, rankPapers } from "./recommendations";
 
+it("does not recommend Veterans Affairs for AI keywords or keyword alerts", () => {
+  const paper = {
+    id: 1,
+    title: "Active Surveillance Use for Favorable-Risk Prostate Cancer in a Veterans Affairs Population.",
+    abstract: "Available clinical findings. ".repeat(10),
+    pub_date: "2000-01-01",
+  };
+  expect(rankPapers([paper], { keywords: ["AI"] })).toEqual([]);
+  expect(rankPapers([paper], {}, new Set(), [{ alert_type: "keyword", value: "AI" }])).toEqual([]);
+  expect(rankPapers([{ ...paper, title: "AI-assisted diagnosis" }], { keywords: ["AI"] })[0].terms).toEqual([
+    "ai",
+  ]);
+});
+
 it("leaves a historical date empty instead of filling it with new papers", async () => {
   const query = {
     select() {

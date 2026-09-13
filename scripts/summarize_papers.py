@@ -42,13 +42,12 @@ def sb_patch(paper_id, data):
     return response
 
 
-def summarize(title, abstract, basis="abstract"):
-    # The second argument is the selected source, not necessarily an abstract.
+def summarize(title, source, basis="fulltext"):
     try:
         response = requests.post(GEMINI_URL, headers={"x-goog-api-key": GEMINI_API_KEY},
             json={"systemInstruction": {"parts": [{"text": PROMPT}]},
                   "contents": [{"role": "user", "parts": [{"text": json.dumps({
-                      "title": title, "source_type": basis, "source": abstract}, ensure_ascii=False)}]}],
+                      "title": title, "source_type": basis, "source": source}, ensure_ascii=False)}]}],
                   "generationConfig": {"maxOutputTokens": 8192, "temperature": 0.2,
                                        "responseMimeType": "application/json"}}, timeout=120)
         response.raise_for_status()
@@ -105,39 +104,49 @@ def validate_summary(raw):
     if not isinstance(qa, list) or not 1 <= len(qa) <= 3 or any(
         not isinstance(item, dict) or any(not isinstance(item.get(k), str) or not item[k].strip() or len(item[k]) > 2000 for k in ("q", "a")) for item in qa):
         raise ValueError("Invalid question/answer")
-    return {"summary_ko": summary.strip(), "structured_data": {k: structured[k] for k in keys},
+    return {"summary_ko": "\n".join(line.strip() for line in summary.splitlines() if line.strip()), "structured_data": {k: structured[k] for k in keys},
             "clinical_relevance": relevance, "qa_data": [{k: item[k] for k in ("q", "a")} for item in qa]}
 
 
 def main():
+    basis = os.environ.get("SUMMARY_SOURCE") or "fulltext"
+    if basis not in {"fulltext", "abstract"}:
+        raise SystemExit("SUMMARY_SOURCE must be fulltext or abstract")
     pmid = os.environ.get("SUMMARY_PMID")
     if pmid and not re.fullmatch(r"\d{1,12}", pmid):
         raise SystemExit("SUMMARY_PMID must be numeric")
     if not SUPABASE_URL or not SUPABASE_KEY or not GEMINI_API_KEY:
         raise SystemExit("ERROR: SUPABASE_URL, SUPABASE_SERVICE_KEY and GEMINI_API_KEY required")
-    papers = paginate(sb_get, "papers", {"select": "id,pmid,title,abstract,summary_ko,summary_source_hash,summary_model",
-        "abstract": "neq.", "order": "fetched_at.desc,id", **({"pmid": f"eq.{pmid}"} if pmid else {})}, size=100)
+    budget = int(os.environ.get("SUMMARY_BATCH_SIZE") or "20")
+    if not 1 <= budget <= 100:
+        raise SystemExit("SUMMARY_BATCH_SIZE must be between 1 and 100")
+    papers = paginate(sb_get, "papers", {"select": "id,pmid,title,abstract,summary_ko,summary_basis,summary_source_hash,summary_model",
+        "order": "fetched_at.desc,id", **({"pmid": f"eq.{pmid}"} if pmid else {})}, size=100)
     if pmid and not papers:
-        raise SystemExit("The requested PMID is not in the catalog with an abstract")
+        raise SystemExit("The requested PMID is not in the catalog")
     fulltexts = {}
-    if os.environ.get("SUMMARIZE_FULLTEXT") == "true":
+    if basis == "fulltext":
         fulltexts = {p["paper_id"]: p for p in paginate(sb_get, "paper_fulltexts", {
             "select": "paper_id,content_hash", "status": "eq.ready", "order": "paper_id"})}
-    failed, done = 0, 0
-    budget = int(os.environ.get("SUMMARY_BATCH_SIZE") or "100")
-    pending = 0
+    failed, done, pending, unavailable = 0, 0, 0, 0
     for paper in papers:
         fulltext = fulltexts.get(paper["id"])
-        if fulltext and done + failed >= budget:
-            pending += 1
+        if basis == "fulltext" and not fulltext:
+            unavailable += 1
+            if pmid:
+                raise SystemExit("The requested PMID has no ready full text; no abstract summary was generated")
             continue
         if fulltext:
             rows = sb_get("paper_fulltexts", {"select": "content_text", "paper_id": f"eq.{paper['id']}",
                                               "status": "eq.ready", "limit": "1"})
             fulltext = rows[0] if rows else None
-        basis = "fulltext" if fulltext else "abstract"
-        source = fulltext["content_text"] if fulltext else paper.get("abstract") or ""
-        if not source.strip():
+        source = (fulltext or {}).get("content_text", "") if basis == "fulltext" else paper.get("abstract") or ""
+        if not source.strip() or (basis == "fulltext" and len(source.strip()) < 500):
+            failed += 1
+            print(f"PMID {paper['pmid']}: selected source is missing or incomplete")
+            continue
+        # A legacy abstract run must never overwrite a full-text summary.
+        if basis == "abstract" and paper.get("summary_basis") == "fulltext":
             continue
         # Include the title and basis in the hash; changed inputs must invalidate the cache.
         source_hash = hashlib.sha256(f"{basis}\n{paper['title']}\n{source}".encode()).hexdigest()
@@ -163,7 +172,7 @@ def main():
         sb_patch(paper["id"], patch_data)
         done += 1
         time.sleep(1)
-    print(f"Summaries: {done} updated, {failed} failed, {pending} pending (batch budget)")
+    print(f"Summaries ({basis}): {done} updated, {failed} failed, {pending} pending (batch budget), {unavailable} awaiting full text")
     if failed:
         raise SystemExit(f"ERROR: {failed} summaries failed; downstream steps must wait")
 
