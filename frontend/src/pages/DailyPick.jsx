@@ -4,6 +4,8 @@ import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/auth";
 import { checked, jsonValue, kstDate, shiftDate, appUrl } from "../lib/data";
 import { getDailyPicks } from "../lib/recommendations";
+import { keywordPattern } from "../lib/keywords";
+import PaperSummary from "../components/PaperSummary";
 import {
   Heart,
   X,
@@ -56,9 +58,8 @@ const CHIP_MAP = {
 };
 
 function hl(text, terms) {
-  terms = (terms || []).filter((term) => typeof term === "string" && term.trim());
-  if (!text || !terms.length) return text;
-  const re = new RegExp(`(${terms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|")})`, "gi");
+  const re = keywordPattern(terms || []);
+  if (!text || !re) return text;
   return text.split(re).map((p, i) =>
     i % 2 === 1 ? (
       <mark key={i} className="bg-[rgba(0,122,255,0.08)] text-accent rounded px-0.5 font-semibold">
@@ -374,20 +375,7 @@ function Detail({ rec, onFeedback, onPrev, onNext, hasPrev, hasNext, likeAnim })
               </div>
             )}
 
-            {/* Korean summary */}
-            {paper.summary_ko && (
-              <div className="bg-[rgba(0,122,255,0.03)] border border-[rgba(0,122,255,0.08)] rounded-lg p-4 mb-4">
-                <p className="text-[0.667rem] font-semibold text-accent uppercase tracking-widest mb-1.5">
-                  AI summary · {paper.summary_basis === "fulltext" ? "Full text" : "Abstract"}
-                </p>
-                <p className="text-[0.833rem] leading-[1.7] text-text1" style={{ whiteSpace: "pre-line" }}>
-                  {paper.summary_ko}
-                </p>
-                <p className="text-xs text-text3 mt-2">
-                  연구 참고용 AI 요약입니다. 수치와 해석은 원문에서 확인하세요.
-                </p>
-              </div>
-            )}
+            <PaperSummary paper={paper} />
 
             {/* Details accordion (structured data + Q&A) */}
             {(paper.structured_data || paper.qa_data) && <DetailAccordion paper={paper} />}
@@ -584,20 +572,7 @@ function MobileDetail({ rec, onFeedback, onBack, likeAnim }) {
             })}
           </div>
         )}
-        {/* Korean summary */}
-        {paper.summary_ko && (
-          <div className="bg-[rgba(0,122,255,0.03)] border border-[rgba(0,122,255,0.08)] rounded-lg p-4 mb-4">
-            <p className="text-[0.667rem] font-semibold text-accent uppercase tracking-widest mb-1.5">
-              AI summary · {paper.summary_basis === "fulltext" ? "Full text" : "Abstract"}
-            </p>
-            <p className="text-[0.889rem] leading-[1.7] text-text1" style={{ whiteSpace: "pre-line" }}>
-              {paper.summary_ko}
-            </p>
-            <p className="text-xs text-text3 mt-2">
-              연구 참고용 AI 요약입니다. 수치와 해석은 원문에서 확인하세요.
-            </p>
-          </div>
-        )}
+        <PaperSummary paper={paper} />
         {/* Details & Q&A accordion */}
         {(paper.structured_data || paper.qa_data) && <DetailAccordion paper={paper} />}
         {paper.abstract && (

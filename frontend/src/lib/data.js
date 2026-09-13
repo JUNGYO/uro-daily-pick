@@ -1,3 +1,5 @@
+import { paperMatchesKeyword } from "./keywords";
+
 export async function checked(query) {
   const { data, error } = await withTimeout(query);
   if (error) throw error;
@@ -48,12 +50,21 @@ export function normalizePaper(paper) {
 
 export function normalizeRec(rec) {
   const reasons = jsonValue(rec.reasons, {});
+  const paper = normalizePaper(rec.paper);
+  const oldTerms = stringList(reasons.matched_terms);
+  const matched = oldTerms.filter((term) => paperMatchesKeyword(paper, term));
+  const rejected = new Set(oldTerms.filter((term) => !matched.includes(term)));
   return {
     ...rec,
-    paper: normalizePaper(rec.paper),
+    paper,
     reasons: {
-      reasons: jsonValue(reasons.reasons, []).filter((item) => item && typeof item.label === "string"),
-      matched_terms: stringList(reasons.matched_terms),
+      reasons: jsonValue(reasons.reasons, []).filter(
+        (item) =>
+          item &&
+          typeof item.label === "string" &&
+          !(item.type === "keyword" && rejected.has(item.label) && !item.label.startsWith("Alert: ")),
+      ),
+      matched_terms: matched,
     },
   };
 }

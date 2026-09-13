@@ -46,6 +46,6 @@ python scripts/fulltext.py --pmid YOUR_PMID --input "C:/Downloads/article.pdf" -
 python scripts/fulltext.py --pmid YOUR_PMID --provider elsevier --publish
 ```
 
-`SUMMARIZE_FULLTEXT=true`로 설정한 작업만 준비된 원문을 Gemini에 보냅니다. 기본값은 초록입니다. 원문 사용 범위와 모델 제공자 처리 조건을 확인한 후 활성화하세요.
+요약 작업은 `SUMMARY_SOURCE=fulltext`로 실행하며 비공개 테이블에서 준비된 본문만 Gemini에 보냅니다. 원문이 없는 논문은 대기 상태로 남고 초록으로 대체하지 않습니다. `SUMMARY_PMID`로 지정한 논문의 본문이 없으면 작업이 실패합니다. 화면은 검증된 본문 요약을 목적·설계, 결과, 한계의 세 줄로 표시하고, 기존 초록 요약은 출처를 구분해 접어서 보관합니다. 별도의 이전 방식 실행이 필요할 때만 `SUMMARY_SOURCE=abstract`를 명시하며, 이 모드는 기존 본문 요약을 덮어쓰지 않습니다.
 
 새 DB는 migration `001`부터 `009`까지, 기존 `005` 적용 DB는 `006`–`009`를 순서대로 한 번 적용합니다. GitHub Pages 배포는 CI 검증 후 진행됩니다. [운영 반영 안내](docs/service-readiness.md)와 [원문 접근 조사](docs/fulltext-assessment.md)에 설정·검증 범위·제한을 정리했습니다.

@@ -56,7 +56,7 @@ jobs:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
           SUMMARY_BATCH_SIZE: ${{ vars.SUMMARY_BATCH_SIZE }}
-          SUMMARIZE_FULLTEXT: ${{ vars.SUMMARIZE_FULLTEXT }}
+          SUMMARY_SOURCE: fulltext
         run: python scripts/summarize_papers.py
 
       - name: Generate recommendations

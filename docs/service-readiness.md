@@ -46,7 +46,7 @@
 | GitHub secrets | `GEMINI_API_KEY`, `RESEND_API_KEY` |
 | GitHub variables | `FROM_EMAIL` 필수. `APP_URL`은 기본 기존 Pages URL |
 | GitHub variables | `GEMINI_MODEL` 기본 `gemini-2.5-pro`, `SUMMARY_BATCH_SIZE` 기본 100 |
-| GitHub variables | `SUMMARIZE_FULLTEXT` 기본 false |
+| Summary source | workflow의 `SUMMARY_SOURCE=fulltext`; 준비된 본문만 요약, 초록 대체 없음 |
 | GitHub variables / Z8 | `NCBI_EMAIL` |
 | Z8 | `ELSEVIER_API_KEY`, 필요한 경우 `ELSEVIER_INST_TOKEN` |
 | 프론트엔드 staging | `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY` — 공개 키만 사용 |
