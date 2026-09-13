@@ -59,7 +59,24 @@ def summarize(title, abstract, basis="abstract"):
                        if "text" in p and not p.get("thought"))
     except requests.HTTPError as error:
         status = error.response.status_code if error.response is not None else "unknown"
-        print(f"    Model request failed: HTTP {status}")
+        reason = "REQUEST_REJECTED"
+        if error.response is not None:
+            try:
+                details = error.response.json().get("error", {})
+                message = str(details.get("message", "")).lower()
+                allowed = {"API_KEY_INVALID", "API_KEY_EXPIRED", "API_KEY_SERVICE_BLOCKED",
+                           "API_KEY_HTTP_REFERRER_BLOCKED", "API_KEY_IP_ADDRESS_BLOCKED"}
+                reason = next((d["reason"] for d in details.get("details", [])
+                               if isinstance(d, dict) and d.get("reason") in allowed), reason)
+                if "api key" in message:
+                    if "expired" in message: reason = "API_KEY_EXPIRED"
+                    elif "not valid" in message or "invalid" in message: reason = "API_KEY_INVALID"
+                    elif "leaked" in message: reason = "API_KEY_REPORTED_LEAKED"
+                elif "not found" in message or "no longer available" in message:
+                    reason = "MODEL_UNAVAILABLE"
+            except (ValueError, TypeError, AttributeError):
+                pass
+        print(f"    Model request failed: HTTP {status}, {reason}")
         return None
     except (requests.RequestException, ValueError, KeyError, IndexError):
         # Never print request URLs, keys, model payloads, or licensed source text.

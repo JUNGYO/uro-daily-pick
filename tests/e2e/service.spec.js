@@ -32,7 +32,7 @@ for (const viewport of [
     ]) {
       await page.goto(path ? `/uro-daily-pick/${path}` : "/uro-daily-pick/");
       await expect(page.locator("#root")).not.toBeEmpty();
-      await expect(page.locator("h1").first()).toBeVisible();
+      await expect(page.locator("h1").first(), `${path}: ${errors.join("; ")}`).toBeVisible();
       expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
       const results = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
       expect(
