@@ -1,13 +1,21 @@
-name: Daily PubMed Fetch
+name: Daily Paper Pipeline
 
 on:
   schedule:
     - cron: '0 21 * * *'   # 21:00 UTC = 06:00 KST
   workflow_dispatch:         # Manual trigger
 
+permissions:
+  contents: read
+
+concurrency:
+  group: uro-daily-pipeline
+  cancel-in-progress: false
+
 jobs:
   fetch:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -16,10 +24,59 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install requests
+        run: python -m pip install -r scripts/requirements.txt
 
       - name: Fetch papers from PubMed
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          NCBI_EMAIL: ${{ vars.NCBI_EMAIL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python scripts/fetch_papers.py
+
+      - name: Classify new papers
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          NCBI_EMAIL: ${{ vars.NCBI_EMAIL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python scripts/classify_papers.py
+
+      - name: Import open-access full texts
+        if: vars.FULLTEXT_IMPORT_ENABLED == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          FULLTEXT_BATCH_SIZE: ${{ vars.FULLTEXT_BATCH_SIZE }}
+        run: python scripts/import_fulltexts.py
+
+      - name: Generate Korean summaries
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          NCBI_EMAIL: ${{ vars.NCBI_EMAIL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          SUMMARY_BATCH_SIZE: ${{ vars.SUMMARY_BATCH_SIZE }}
+          SUMMARIZE_FULLTEXT: ${{ vars.SUMMARIZE_FULLTEXT }}
+        run: python scripts/summarize_papers.py
+
+      - name: Generate recommendations
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          NCBI_EMAIL: ${{ vars.NCBI_EMAIL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python scripts/generate_recs.py
+
+      - name: Send email digests
+        if: vars.EMAIL_DELIVERY_ENABLED == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          NCBI_EMAIL: ${{ vars.NCBI_EMAIL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          FROM_EMAIL: ${{ vars.FROM_EMAIL }}
+          APP_URL: ${{ vars.APP_URL }}
+        run: python scripts/send_digest.py
+
+      - name: Report email setup status
+        if: vars.EMAIL_DELIVERY_ENABLED != 'true'
+        run: echo 'Email delivery is paused until a verified sender is configured.' >> "$GITHUB_STEP_SUMMARY"

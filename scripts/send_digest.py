@@ -1,65 +1,71 @@
 """
 Uro Daily Pick - Daily Email Digest
 Sends personalized paper recommendations via Resend.
-Schedule: 21:30 UTC (= 06:30 KST)
+Runs after successful recommendations in the daily pipeline.
 """
 import os
 import json
+from html import escape
 from datetime import datetime, timezone, timedelta
 
 import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+from common import supabase_headers
+from urllib.parse import quote
+from common import get_json, paginate, strings, json_value
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 RESEND_API_KEY = os.environ.get("RESEND_API_KEY", "")
-FROM_EMAIL = os.environ.get("FROM_EMAIL", "Uro Daily Pick <onboarding@resend.dev>")
-
-# ── HTTP session with retry/backoff (handles Supabase cold start & transient errors) ──
-_session = requests.Session()
-_session.mount("https://", HTTPAdapter(max_retries=Retry(
-    total=5,
-    backoff_factor=2,              # 2s → 4s → 8s → 16s → 32s
-    status_forcelist=[429, 500, 502, 503, 504],
-    allowed_methods=["GET", "POST"],
-)))
+FROM_EMAIL = os.environ.get("FROM_EMAIL", "")
+APP_URL = (os.environ.get("APP_URL") or "https://jungyo.github.io/uro-daily-pick/").rstrip("/") + "/"
+KST = timezone(timedelta(hours=9))
 
 
 def sb_get(path, params=None):
     url = f"{SUPABASE_URL}/rest/v1/{path}"
-    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-    return _session.get(url, headers=headers, params=params, timeout=60).json()
+    headers = {**supabase_headers(SUPABASE_KEY)}
+    return get_json(url, headers=headers, params=params)
 
 
-def get_digest_users():
+def get_digest_users(now=None):
     """Users with email digest enabled."""
-    return sb_get("profiles", {"select": "id,name,digest_email", "digest_email": "eq.true"})
+    now = now or datetime.now(KST)
+    users = paginate(sb_get, "profiles", {
+        "select": "id,name,digest_frequency",
+        "email_digest": "eq.true", "onboarding_done": "eq.true", "order": "id",
+    })
+    # Weekly digests are delivered on Monday, in Korea time.
+    return [user for user in users if user.get("name") != "[DELETED]"
+            and (user.get("digest_frequency", "daily") == "daily"
+                 or now.astimezone(KST).weekday() == 0)]
 
 
 def get_user_email(uid):
     """Get email from Supabase Auth."""
     url = f"{SUPABASE_URL}/auth/v1/admin/users/{uid}"
-    headers = {"apikey": SUPABASE_KEY, "Authorization": f"Bearer {SUPABASE_KEY}"}
-    try:
-        r = _session.get(url, headers=headers, timeout=30)
-        if r.status_code == 200:
-            return r.json().get("email")
-    except requests.exceptions.RequestException as e:
-        print(f"  get_user_email failed for {uid}: {e}")
-    return None
+    headers = {**supabase_headers(SUPABASE_KEY)}
+    user = get_json(url, headers=headers)
+    return user.get("email") if user.get("email_confirmed_at") else None
 
 
-def get_today_recs(uid):
+def get_today_recs(uid, frequency="daily"):
+    now = datetime.now(KST)
     today = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
     recs = sb_get("recommendations", {
         "select": "score,reasons,paper:papers(title,journal,pub_date,pmid,authors)",
         "user_id": f"eq.{uid}",
-        "rec_date": f"eq.{today}",
+        "rec_date": f"gte.{(now - timedelta(days=6)).date()}" if frequency == "weekly" else f"eq.{today}",
         "order": "score.desc",
-        "limit": "5",
+        "limit": "35" if frequency == "weekly" else "5",
     })
-    return recs or []
+    seen = set()
+    unique = []
+    for rec in recs or []:
+        paper = rec.get("paper")
+        if paper and paper.get("pmid") not in seen:
+            seen.add(paper.get("pmid"))
+            unique.append(rec)
+    return unique[:5]
 
 
 def build_html(name, recs):
@@ -67,28 +73,21 @@ def build_html(name, recs):
 
     rows = ""
     for i, rec in enumerate(recs, 1):
-        paper = rec.get("paper", {})
-        title = paper.get("title", "Untitled")
-        journal = paper.get("journal", "")
-        pub_date = paper.get("pub_date", "")
-        pmid = paper.get("pmid", "")
-        authors = (paper.get("authors") or [])[:3]
-        author_str = ", ".join(authors)
-        if len(paper.get("authors") or []) > 3:
+        paper = rec.get("paper") or {}
+        title = escape(paper.get("title") or "Untitled")
+        journal = escape(paper.get("journal") or "")
+        pub_date = escape(paper.get("pub_date") or "")
+        pmid = quote(str(paper.get("pmid") or ""), safe="")
+        authors = strings(paper.get("authors"))[:3]
+        author_str = escape(", ".join(authors))
+        if len(strings(paper.get("authors"))) > 3:
             author_str += " et al."
         score = rec.get("score", 0)
 
-        # Parse reasons
-        reasons_raw = rec.get("reasons", "{}")
-        if isinstance(reasons_raw, str):
-            try:
-                reasons_data = json.loads(reasons_raw)
-            except json.JSONDecodeError:
-                reasons_data = {}
-        else:
-            reasons_data = reasons_raw
-        reason_labels = [r.get("label", "") for r in reasons_data.get("reasons", [])[:3]]
-        reason_str = " | ".join(reason_labels) if reason_labels else ""
+        reasons_data = json_value(rec.get("reasons"), {})
+        reason_labels = [r["label"] for r in reasons_data.get("reasons", [])[:3]
+                         if isinstance(r, dict) and isinstance(r.get("label"), str)] if isinstance(reasons_data.get("reasons", []), list) else []
+        reason_str = escape(" | ".join(reason_labels))
 
         rows += f"""
         <tr>
@@ -96,7 +95,7 @@ def build_html(name, recs):
             <div style="color:#007AFF;font-size:13px;font-weight:600;margin-bottom:6px;">
               {journal} &middot; {pub_date}
             </div>
-            <a href="https://jungyo.github.io/uro-daily-pick/" target="_blank"
+            <a href="https://pubmed.ncbi.nlm.nih.gov/{pmid}/" target="_blank"
                class="paper-title" style="color:#1D1D1F;font-size:16px;font-weight:700;text-decoration:none;line-height:1.4;display:block;">
               {title}
             </a>
@@ -137,105 +136,92 @@ def build_html(name, recs):
         </div>
         <div class="digest-card" style="background:#FFFFFF;border-radius:16px;padding:32px;box-shadow:0 1px 4px rgba(0,0,0,0.04);">
           <div style="font-size:15px;color:#48494B;margin-bottom:20px;">
-            Hi {name or "there"}, here are your top picks for today:
+            Hi {escape(name or "there")}, here are your latest top picks:
           </div>
           <table style="width:100%;border-collapse:collapse;">
             {rows}
           </table>
           <div style="text-align:center;margin-top:28px;">
-            <a href="https://jungyo.github.io/uro-daily-pick/"
+            <a href="{escape(APP_URL, quote=True)}"
                style="display:inline-block;background:#007AFF;color:#FFFFFF;padding:12px 32px;border-radius:8px;text-decoration:none;font-size:15px;font-weight:600;">
               View All Picks
             </a>
           </div>
         </div>
         <div style="text-align:center;margin-top:24px;font-size:12px;color:#86868B;">
-          You received this because you enabled email digests.
+          You received this because you enabled email digests.<br>
+          <a href="{escape(APP_URL + 'settings', quote=True)}">Manage frequency or turn off email digests</a>
         </div>
       </div>
     </body>
     </html>"""
 
 
-def send_email(to_email, subject, html):
-    if not RESEND_API_KEY:
-        print(f"  [DRY RUN] Would send to {to_email}: {subject}")
-        return True
+def delivery_write(method, data, params=None):
+    response = getattr(requests, method)(f"{SUPABASE_URL}/rest/v1/email_deliveries",
+        headers={**supabase_headers(SUPABASE_KEY),
+                 "Prefer": "resolution=ignore-duplicates,return=representation"},
+        json=data, params=params, timeout=30)
+    response.raise_for_status()
+    return response.json() if response.content else []
 
-    try:
-        r = _session.post("https://api.resend.com/emails", headers={
-            "Authorization": f"Bearer {RESEND_API_KEY}",
-            "Content-Type": "application/json",
-        }, json={
-            "from": FROM_EMAIL,
-            "to": [to_email],
-            "subject": subject,
-            "html": html,
-        }, timeout=30)
-    except requests.exceptions.RequestException as e:
-        print(f"  Resend request failed: {e}")
-        return False
 
-    if r.status_code == 200:
-        return True
-    else:
-        print(f"  Resend error: {r.status_code} {r.text[:200]}")
-        return False
+def prepare_delivery(user, email, subject, html, now=None):
+    now = now or datetime.now(KST)
+    frequency = user.get("digest_frequency") or "daily"
+    identity = {"user_id": user["id"], "delivery_date": str(now.date()), "frequency": frequency}
+    filters = {k: f"eq.{v}" for k, v in identity.items() if k != "frequency"}
+    rows = sb_get("email_deliveries", {**filters, "select": "*"})
+    if not rows:
+        delivery_write("post", {**identity, "payload": {"from": FROM_EMAIL, "to": [email], "subject": subject, "html": html}})
+        rows = sb_get("email_deliveries", {**filters, "select": "*"})
+    row = rows[0]
+    if row["status"] == "sent":
+        return None
+    created = datetime.fromisoformat(row["created_at"].replace("Z", "+00:00"))
+    if now - created > timedelta(hours=23):
+        raise ValueError("Uncertain delivery exceeds retry window; reconcile in Resend before retrying")
+    if row["payload"]["to"] != [email]:
+        raise ValueError("Recipient changed while delivery pending; reconcile the earlier delivery")
+    return row, filters, f"digest/{user['id']}/{now.date()}/{row['frequency']}"
+
+
+def send_email(payload, idempotency_key):
+    response = requests.post("https://api.resend.com/emails", headers={
+        "Authorization": f"Bearer {RESEND_API_KEY}", "Idempotency-Key": idempotency_key},
+        json=payload, timeout=30)
+    response.raise_for_status()
+    return response.json()["id"]
 
 
 def main():
-    if not SUPABASE_KEY:
-        print("ERROR: SUPABASE_SERVICE_KEY not set")
-        return
-
-    today_str = datetime.now(timezone(timedelta(hours=9))).strftime("%B %d")
-    print(f"=== Sending digests for {today_str} ===")
-
-    try:
-        users = get_digest_users()
-    except requests.exceptions.RequestException as e:
-        print(f"FATAL: Could not fetch digest users: {e}")
-        return
-
-    print(f"Digest users: {len(users)}")
-
-    sent = 0
-    failed = 0
+    if not SUPABASE_URL or not SUPABASE_KEY or not RESEND_API_KEY or not FROM_EMAIL:
+        raise SystemExit("ERROR: SUPABASE_URL, SUPABASE_SERVICE_KEY, RESEND_API_KEY and verified FROM_EMAIL required")
+    today = datetime.now(KST)
+    users = get_digest_users(today)
+    sent, failed = 0, 0
     for user in users:
-        uid = user["id"]
-        name = user.get("name", "")
-
-        # Isolate per-user failures so one bad user doesn't kill the whole run
         try:
-            email = get_user_email(uid)
+            email = get_user_email(user["id"])
             if not email:
-                print(f"  [{name}] No email found, skipping")
                 continue
-
-            recs = get_today_recs(uid)
+            recs = get_today_recs(user["id"], user.get("digest_frequency", "daily"))
             if not recs:
-                print(f"  [{name}] No recommendations, skipping")
                 continue
-
-            html = build_html(name, recs)
-            subject = f"Your Uro Daily Pick - {today_str}"
-
-            if send_email(email, subject, html):
-                sent += 1
-                print(f"  [{name}] Sent to {email} ({len(recs)} papers)")
-            else:
-                failed += 1
-                print(f"  [{name}] Failed to send")
-        except requests.exceptions.RequestException as e:
+            prepared = prepare_delivery(user, email, f"Your Uro Daily Pick - {today:%B %d}", build_html(user.get("name"), recs), today)
+            if prepared is None:
+                continue
+            row, filters, key = prepared
+            provider_id = send_email(row["payload"], key)
+            delivery_write("patch", {"status": "sent", "provider_id": provider_id,
+                           "sent_at": datetime.now(KST).isoformat()}, filters)
+            sent += 1
+        except (requests.RequestException, ValueError, KeyError, IndexError):
             failed += 1
-            print(f"  [{name}] Network error, skipping: {e}")
-            continue
-        except Exception as e:
-            failed += 1
-            print(f"  [{name}] Unexpected error, skipping: {e}")
-            continue
-
-    print(f"Done. Sent {sent}/{len(users)} emails ({failed} failed).")
+            print("Delivery failed; inspect the private pending-delivery ledger")
+    print(f"Digests: {sent} sent, {failed} failed, {len(users)} eligible users")
+    if failed:
+        raise SystemExit(f"ERROR: {failed} email deliveries failed")
 
 
 if __name__ == "__main__":

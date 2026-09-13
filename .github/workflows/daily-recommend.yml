@@ -1,13 +1,19 @@
 name: Daily Recommendation + Summarize
 
 on:
-  schedule:
-    - cron: '15 21 * * *'   # 21:15 UTC = 06:15 KST (after fetch)
   workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uro-daily-pipeline
+  cancel-in-progress: false
 
 jobs:
   recommend:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -16,23 +22,29 @@ jobs:
           python-version: '3.12'
 
       - name: Install dependencies
-        run: pip install requests
+        run: python -m pip install -r scripts/requirements.txt
 
       - name: Classify new papers
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          NCBI_EMAIL: ${{ vars.NCBI_EMAIL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python scripts/classify_papers.py
 
       - name: Generate Korean summaries
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          NCBI_EMAIL: ${{ vars.NCBI_EMAIL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          SUMMARY_BATCH_SIZE: ${{ vars.SUMMARY_BATCH_SIZE }}
+          SUMMARIZE_FULLTEXT: ${{ vars.SUMMARIZE_FULLTEXT }}
         run: python scripts/summarize_papers.py
 
       - name: Generate recommendations
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          NCBI_EMAIL: ${{ vars.NCBI_EMAIL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python scripts/generate_recs.py

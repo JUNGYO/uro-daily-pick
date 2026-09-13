@@ -6,32 +6,15 @@ Run daily via GitHub Actions after fetch_papers.py.
 import os
 import json
 import math
-import time
 from datetime import datetime, timedelta, timezone
 from collections import Counter
 
 import requests
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
+from common import supabase_headers
+from common import get_json, paginate, strings
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
-
-_session = requests.Session()
-_session.mount("https://", HTTPAdapter(max_retries=Retry(
-    total=5,
-    backoff_factor=2,
-    status_forcelist=[429, 500, 502, 503, 504],
-    allowed_methods=["GET", "POST", "PATCH", "DELETE"],
-)))
-
-# Force a fresh TCP connection on every request; prevents Supabase Free tier
-# PostgREST from hanging when we reuse a kept-alive connection.
-BASE_HEADERS = {
-    "apikey": SUPABASE_KEY,
-    "Authorization": f"Bearer {SUPABASE_KEY}",
-    "Connection": "close",
-}
 
 # Scoring weights
 W_CONTENT = 0.30
@@ -40,42 +23,41 @@ W_COLLABORATIVE = 0.25
 W_TEMPORAL = 0.20
 
 
-def sb(method, path, data=None, params=None, max_attempts=4):
+def sb(method, path, data=None, params=None):
     url = f"{SUPABASE_URL}/rest/v1/{path}"
-    headers = {**BASE_HEADERS, "Content-Type": "application/json"}
+    headers = {
+        **supabase_headers(SUPABASE_KEY),
+        "Content-Type": "application/json",
+    }
     if method == "GET":
-        last_err = None
-        for attempt in range(1, max_attempts + 1):
-            try:
-                r = _session.get(url, headers=headers, params=params or data, timeout=60)
-                if r.status_code != 200:
-                    last_err = f"HTTP {r.status_code}: {r.text[:200]}"
-                elif not r.text.strip():
-                    last_err = "empty response body"
-                else:
-                    return r.json()
-            except (requests.RequestException, ValueError) as e:
-                last_err = f"{type(e).__name__}: {e}"
-            print(f"  sb GET {path} retry {attempt}/{max_attempts} ({last_err})")
-            time.sleep(2 ** attempt)
-        raise RuntimeError(f"sb GET {path} failed after {max_attempts} attempts: {last_err}")
+        return get_json(url, headers=headers, params=params or data)
     elif method == "POST":
         headers["Prefer"] = "return=minimal"
-        return _session.post(url, headers=headers, json=data, timeout=60)
+        response = requests.post(url, headers=headers, json=data, timeout=30)
+        response.raise_for_status()
+        return response
     elif method == "DELETE":
-        return _session.delete(url, headers=headers, params=params, timeout=60)
+        response = requests.delete(url, headers=headers, params=params, timeout=30)
+        response.raise_for_status()
+        return response
     return None
 
 
 def sb_patch(table, row_id, data):
     """Update a row by id."""
     url = f"{SUPABASE_URL}/rest/v1/{table}?id=eq.{row_id}"
-    headers = {**BASE_HEADERS, "Content-Type": "application/json", "Prefer": "return=minimal"}
-    return _session.patch(url, headers=headers, json=data, timeout=60)
+    headers = {
+        **supabase_headers(SUPABASE_KEY),
+        "Content-Type": "application/json",
+        "Prefer": "return=minimal",
+    }
+    response = requests.patch(url, headers=headers, json=data, timeout=30)
+    response.raise_for_status()
+    return response
 
 
 def get_all_profiles():
-    return sb("GET", "profiles", {"select": "*"})
+    return paginate(lambda path, params: sb("GET", path, params), "profiles", {"select": "*", "onboarding_done": "eq.true", "name": "neq.[DELETED]", "order": "id"})
 
 
 def get_recent_papers(days=30):
@@ -89,7 +71,7 @@ def get_recent_papers(days=30):
 
 
 def get_user_feedbacks(user_id):
-    return sb("GET", "feedbacks", {"select": "paper_id,action", "user_id": f"eq.{user_id}"})
+    return paginate(lambda path, params: sb("GET", path, params), "feedbacks", {"select": "paper_id,action", "user_id": f"eq.{user_id}", "order": "id"})
 
 
 def get_user_reads(user_id):
@@ -103,7 +85,7 @@ def get_user_reads(user_id):
 
 def get_all_feedbacks_likes():
     """For collaborative filtering: all users' likes."""
-    return sb("GET", "feedbacks", {"select": "user_id,paper_id", "action": "eq.like"})
+    return paginate(lambda path, params: sb("GET", path, params), "feedbacks", {"select": "user_id,paper_id", "action": "eq.like", "order": "id"})
 
 
 def text_match_score(paper, user_keywords):
@@ -265,7 +247,7 @@ def score_paper(paper, profile, liked_papers, disliked_kws, dwell_papers, all_li
     paper_journal = paper.get("journal", "").lower()
     for pj in (profile.get("preferred_journals") or []):
         pj_lower = pj.lower()
-        if pj_lower in paper_journal or paper_journal in pj_lower:
+        if pj_lower and paper_journal and (pj_lower in paper_journal or paper_journal in pj_lower):
             content += 0.3
             reasons.append({"type": "journal", "label": paper["journal"]})
             break
@@ -277,6 +259,15 @@ def score_paper(paper, profile, liked_papers, disliked_kws, dwell_papers, all_li
     if pref_types and paper_study_type in pref_types:
         study_type_boost = 1.25
         reasons.append({"type": "keyword", "label": paper_study_type.replace("_", " ").title()})
+
+    for alert in profile.get("alerts", []):
+        kind, value = alert.get("alert_type"), (alert.get("value") or "").strip().lower()
+        haystack = {"journal": paper.get("journal") or "", "author": " ".join(paper.get("authors") or []),
+                    "keyword": f"{paper.get('title') or ''} {paper.get('abstract') or ''}"}.get(kind, "")
+        if value and value in haystack.lower():
+            content += 0.5
+            reasons.insert(0, {"type": "alert", "label": f"Alert: {alert['value']}"})
+            break
 
     final = (
         W_CONTENT * content +
@@ -292,21 +283,25 @@ def score_paper(paper, profile, liked_papers, disliked_kws, dwell_papers, all_li
 
 
 def main():
-    if not SUPABASE_KEY:
-        print("ERROR: SUPABASE_SERVICE_KEY not set")
-        return
+    if not SUPABASE_URL or not SUPABASE_KEY:
+        raise SystemExit("ERROR: SUPABASE_URL and SUPABASE_SERVICE_KEY required")
 
     today = datetime.now(timezone(timedelta(hours=9))).strftime("%Y-%m-%d")
     print(f"=== Generating recommendations for {today} ===")
 
     profiles = get_all_profiles()
     papers = get_recent_papers(days=30)
+    for paper in papers:
+        for field in ("authors", "keywords", "mesh_terms"):
+            paper[field] = strings(paper.get(field))
     all_likes = get_all_feedbacks_likes()
+    alerts = paginate(lambda path, params: sb("GET", path, params), "alerts", {"select": "user_id,alert_type,value", "is_active": "eq.true", "order": "id"})
 
     print(f"Users: {len(profiles)}, Papers pool: {len(papers)}, Total likes: {len(all_likes)}")
 
     for profile in profiles:
         uid = profile["id"]
+        profile["alerts"] = [a for a in alerts if a["user_id"] == uid]
         feedbacks = get_user_feedbacks(uid)
         reads = get_user_reads(uid)
 
@@ -350,25 +345,10 @@ def main():
         scored.sort(key=lambda x: x[1], reverse=True)
         top5 = scored[:5]
 
-        # Delete old recs for today
-        sb("DELETE", "recommendations", params={
-            "user_id": f"eq.{uid}",
-            "rec_date": f"eq.{today}",
-        })
+        recs = [{"paper_id": p["id"], "score": score, "reasons": reasons} for p, score, reasons in top5]
+        sb("POST", "rpc/replace_daily_recommendations", {"p_user_id": uid, "p_date": today, "p_recs": recs})
 
-        # Insert new recs
-        if top5:
-            recs = [{
-                "user_id": uid,
-                "paper_id": p["id"],
-                "score": s,
-                "reasons": json.dumps(r, ensure_ascii=False) if isinstance(r, dict) else r,
-                "rec_date": today,
-            } for p, s, r in top5]
-            sb("POST", "recommendations", recs)
-
-        name = profile.get("name", uid)
-        print(f"  [{name}] {len(top5)} recs")
+        print(f"  Generated {len(top5)} recommendations")
 
     print("Done.")
 

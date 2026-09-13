@@ -7,3 +7,10 @@ __pycache__/
 *.pyc
 files/
 .claude/
+
+.venv/
+.env.*
+!.env.example
+.fulltext-cache/
+frontend/test-results/
+frontend/playwright-report/

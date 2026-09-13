@@ -15,19 +15,39 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
   build:
+    needs: checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify production database before publishing
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          python -m pip install -r scripts/requirements.txt
+          python scripts/check_service.py
+
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '24'
 
       - name: Install and build
         working-directory: frontend
+        env:
+          VITE_EMAIL_AUTH_READY: ${{ vars.EMAIL_AUTH_READY == 'true' && 'true' || 'false' }}
+          VITE_EMAIL_DELIVERY_READY: ${{ vars.EMAIL_DELIVERY_ENABLED == 'true' && 'true' || 'false' }}
         run: |
-          npm install
+          npm ci
           npm run build
 
       - uses: actions/upload-pages-artifact@v3

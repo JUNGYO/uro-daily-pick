@@ -5,6 +5,7 @@
 @tailwind utilities;
 
 html { font-size: 18px; }
+@media (max-width: 767px) { html { font-size: 16px; } }
 
 body {
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
@@ -44,4 +45,25 @@ body {
 @keyframes fadeIn {
   from { opacity: 0; transform: translateY(-4px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+
+@layer components {
+  .page-shell { @apply mx-auto px-4 py-6 sm:px-6 sm:py-8; }
+  .page-title { @apply text-2xl font-bold tracking-tight text-text1 mb-6; }
+  .section-title { @apply text-lg font-semibold text-text1 mb-3; }
+  .panel { @apply rounded-xl border border-border bg-card p-4 sm:p-6 shadow-sm; }
+  .field-label { @apply block text-sm font-medium text-text2; }
+  .form-input { @apply w-full min-w-0 min-h-11 rounded-lg border border-border bg-card px-3 py-2 text-base text-text1; }
+  .btn-primary { @apply inline-flex min-h-11 items-center justify-center rounded-lg bg-accent px-5 py-2 text-sm font-semibold text-white hover:brightness-95 disabled:opacity-50; }
+  .btn-secondary { @apply inline-flex min-h-11 items-center justify-center rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-text2 hover:bg-hover disabled:opacity-50; }
+  .btn-danger { @apply inline-flex min-h-11 items-center justify-center rounded-lg bg-red-700 px-4 py-2 text-sm font-semibold text-white disabled:opacity-50; }
+  .help-text { @apply text-sm leading-relaxed text-text3; }
+  .choice-chip { @apply rounded-lg border border-border bg-card px-3 py-2 text-sm capitalize; }
+  .choice-chip[aria-pressed="true"] { @apply border-accent bg-blue-50 text-accent; }
+}
+:focus-visible { outline: 3px solid #007AFF; outline-offset: 3px; }
+button, input, select, textarea { font: inherit; }
+button:disabled { cursor: not-allowed; }
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
 }
