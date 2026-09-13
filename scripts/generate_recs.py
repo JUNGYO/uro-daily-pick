@@ -348,8 +348,7 @@ def main():
         recs = [{"paper_id": p["id"], "score": score, "reasons": reasons} for p, score, reasons in top5]
         sb("POST", "rpc/replace_daily_recommendations", {"p_user_id": uid, "p_date": today, "p_recs": recs})
 
-        name = profile.get("name", uid)
-        print(f"  [{name}] {len(top5)} recs")
+        print(f"  Generated {len(top5)} recommendations")
 
     print("Done.")
 

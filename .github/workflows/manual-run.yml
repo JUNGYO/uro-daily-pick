@@ -13,7 +13,12 @@ on:
           - recommend-only
           - fetch-and-recommend
           - digest-only
+          - fulltext-only
           - all
+      fulltext_pmid:
+        description: 'Catalog PMID for fulltext-only; empty imports a bounded OA batch'
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -50,6 +55,32 @@ jobs:
           NCBI_EMAIL: ${{ vars.NCBI_EMAIL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python scripts/classify_papers.py
+
+      - name: Import open-access full texts
+        if: github.event.inputs.task == 'fulltext-only' || (vars.FULLTEXT_IMPORT_ENABLED == 'true' && contains(fromJSON('["fetch-and-recommend","all"]'), github.event.inputs.task))
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          FULLTEXT_BATCH_SIZE: ${{ vars.FULLTEXT_BATCH_SIZE }}
+          IMPORT_PMID: ${{ inputs.fulltext_pmid }}
+        run: |
+          if [ -n "$IMPORT_PMID" ]; then
+            python scripts/fulltext.py --pmid "$IMPORT_PMID" --provider oa --publish
+          else
+            python scripts/import_fulltexts.py
+          fi
+
+      - name: Summarize imported full text
+        if: github.event.inputs.task == 'fulltext-only'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          SUMMARY_BATCH_SIZE: ${{ vars.SUMMARY_BATCH_SIZE }}
+          SUMMARY_PMID: ${{ inputs.fulltext_pmid }}
+          SUMMARIZE_FULLTEXT: 'true'
+        run: python scripts/summarize_papers.py
 
       - name: Summarize papers (Korean)
         if: contains(fromJSON('["summarize-only","recommend-only","fetch-and-recommend","all"]'), github.event.inputs.task)

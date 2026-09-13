@@ -107,6 +107,7 @@ class PipelineTests(unittest.TestCase):
         steps = workflows["daily-fetch.yml"]["jobs"]["fetch"]["steps"]
         self.assertEqual([step["run"] for step in steps if step.get("run", "").startswith("python scripts/")], [
             "python scripts/fetch_papers.py", "python scripts/classify_papers.py",
+            "python scripts/import_fulltexts.py",
             "python scripts/summarize_papers.py", "python scripts/generate_recs.py", "python scripts/send_digest.py",
         ])
         for name in ("daily-fetch.yml", "daily-recommend.yml", "daily-email.yml", "manual-run.yml"):

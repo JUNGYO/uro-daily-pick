@@ -43,6 +43,9 @@ jobs:
 
       - name: Install and build
         working-directory: frontend
+        env:
+          VITE_EMAIL_AUTH_READY: ${{ vars.EMAIL_AUTH_READY == 'true' && 'true' || 'false' }}
+          VITE_EMAIL_DELIVERY_READY: ${{ vars.EMAIL_DELIVERY_ENABLED == 'true' && 'true' || 'false' }}
         run: |
           npm ci
           npm run build

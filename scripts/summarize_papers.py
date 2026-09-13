@@ -57,6 +57,10 @@ def summarize(title, abstract, basis="abstract"):
             return None
         return "".join(p["text"] for p in candidate["content"]["parts"]
                        if "text" in p and not p.get("thought"))
+    except requests.HTTPError as error:
+        status = error.response.status_code if error.response is not None else "unknown"
+        print(f"    Model request failed: HTTP {status}")
+        return None
     except (requests.RequestException, ValueError, KeyError, IndexError):
         # Never print request URLs, keys, model payloads, or licensed source text.
         print("    Model request failed or returned an incomplete response")
@@ -89,10 +93,15 @@ def validate_summary(raw):
 
 
 def main():
+    pmid = os.environ.get("SUMMARY_PMID")
+    if pmid and not re.fullmatch(r"\d{1,12}", pmid):
+        raise SystemExit("SUMMARY_PMID must be numeric")
     if not SUPABASE_URL or not SUPABASE_KEY or not GEMINI_API_KEY:
         raise SystemExit("ERROR: SUPABASE_URL, SUPABASE_SERVICE_KEY and GEMINI_API_KEY required")
     papers = paginate(sb_get, "papers", {"select": "id,pmid,title,abstract,summary_ko,summary_source_hash,summary_model",
-        "abstract": "neq.", "order": "fetched_at.desc,id"}, size=100)
+        "abstract": "neq.", "order": "fetched_at.desc,id", **({"pmid": f"eq.{pmid}"} if pmid else {})}, size=100)
+    if pmid and not papers:
+        raise SystemExit("The requested PMID is not in the catalog with an abstract")
     fulltexts = {}
     if os.environ.get("SUMMARIZE_FULLTEXT") == "true":
         fulltexts = {p["paper_id"]: p for p in paginate(sb_get, "paper_fulltexts", {

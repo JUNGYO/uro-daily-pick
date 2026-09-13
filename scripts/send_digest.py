@@ -218,7 +218,7 @@ def main():
             sent += 1
         except (requests.RequestException, ValueError, KeyError, IndexError):
             failed += 1
-            print(f"Delivery failed for user {user['id']}; inspect pending delivery (personal payload omitted)")
+            print("Delivery failed; inspect the private pending-delivery ledger")
     print(f"Digests: {sent} sent, {failed} failed, {len(users)} eligible users")
     if failed:
         raise SystemExit(f"ERROR: {failed} email deliveries failed")

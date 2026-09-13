@@ -5,6 +5,7 @@ import { appUrl } from "../lib/data";
 import { Loader2 } from "lucide-react";
 
 export default function Login() {
+  const emailAuthReady = import.meta.env.VITE_EMAIL_AUTH_READY !== "false";
   const [mode, setMode] = useState("signin"); // signin | signup | forgot
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -23,6 +24,10 @@ export default function Login() {
     setMessage("");
     setLoading(true);
     try {
+      if (!emailAuthReady && mode !== "signin")
+        throw new Error(
+          "Account registration and email recovery are temporarily unavailable. Existing members can sign in.",
+        );
       if (mode === "forgot") {
         const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
           redirectTo: appUrl("reset-password"),
@@ -80,11 +85,16 @@ export default function Login() {
           className="bg-card rounded-xl border border-border p-8"
           style={{ boxShadow: "0 4px 24px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.04)" }}
         >
+          {!emailAuthReady && (
+            <p role="status" className="text-sm text-text2 mb-6">
+              Existing members can sign in. New registration and email recovery are coming soon.
+            </p>
+          )}
           {mode !== "forgot" && (
             <div className="flex rounded-lg border border-border overflow-hidden mb-8">
               {["Sign in", "Sign up"].map((label, i) => (
                 <button
-                  disabled={loading}
+                  disabled={loading || (i === 1 && !emailAuthReady)}
                   key={label}
                   onClick={() => {
                     setMode(i === 0 ? "signin" : "signup");
@@ -200,7 +210,7 @@ export default function Login() {
               </button>
             ) : (
               <button
-                disabled={loading}
+                disabled={loading || !emailAuthReady}
                 onClick={() => {
                   setMode("forgot");
                   setError("");

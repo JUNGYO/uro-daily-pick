@@ -25,6 +25,10 @@ MAX_BYTES = 20 * 1024 * 1024
 MAX_CHARS = 600_000
 
 
+class FulltextUnavailable(ValueError):
+    """The provider has no open-access document for this PMID."""
+
+
 class NoRedirect(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None  # Never forward publisher credentials to another location.
@@ -48,7 +52,7 @@ def fetch_oa(pmid):
     paper = next((p for p in papers if str(p.get("id")) == pmid and p.get("isOpenAccess") == "Y"), None)
     pmcid = paper.get("pmcid", "") if paper else ""
     if not re.fullmatch(r"PMC\d+", pmcid):
-        raise ValueError("No Europe PMC open-access full text; import your authorized local download")
+        raise FulltextUnavailable("No Europe PMC open-access full text; import your authorized local download")
     url = f"https://www.ebi.ac.uk/europepmc/webservices/rest/{pmcid}/fullTextXML"
     return download(url), url
 

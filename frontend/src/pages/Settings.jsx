@@ -208,6 +208,11 @@ export default function Settings() {
           />
           <fieldset className="border-t border-border pt-5 space-y-3">
             <legend className="field-label">Email digest</legend>
+            {import.meta.env.VITE_EMAIL_DELIVERY_READY === "false" && (
+              <p className="help-text" role="status">
+                Email digests are paused. Your preferences are saved for when delivery resumes.
+              </p>
+            )}
             <label className="flex items-center gap-3 text-sm">
               <input
                 type="checkbox"
