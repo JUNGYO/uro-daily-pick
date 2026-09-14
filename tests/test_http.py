@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from common import get_json, supabase_headers
+from common import get_json, patch_fields, supabase_headers
 
 
 def response(status=200, body=None):
@@ -49,6 +49,28 @@ class ReadRecoveryTests(unittest.TestCase):
                 get_json("https://example.test", headers={})
         self.assertEqual(get.call_count, 1)
         sleep.assert_not_called()
+
+
+class WriteRecoveryTests(unittest.TestCase):
+    @patch("common.time.sleep")
+    def test_gateway_after_commit_retries_the_identical_field_assignment(self, sleep):
+        data = {"summary_ko": "one\ntwo\nthree", "summary_source_hash": "unchanged"}
+        with patch("common.requests.patch", side_effect=[response(504), requests.Timeout(), response(204)]) as save:
+            patch_fields("https://example.test/papers", headers={}, params={"id": "eq.1257"}, data=data)
+        self.assertEqual(save.call_count, 3)
+        self.assertTrue(all(call.kwargs["json"] == data for call in save.call_args_list))
+        self.assertTrue(all(call.kwargs["params"] == {"id": "eq.1257"} for call in save.call_args_list))
+
+    @patch("common.time.sleep")
+    def test_permission_errors_are_not_retried_and_exhaustion_is_bounded(self, sleep):
+        with patch("common.requests.patch", return_value=response(403)) as save, self.assertRaises(requests.HTTPError):
+            patch_fields("https://example.test", headers={}, params={}, data={})
+        self.assertEqual(save.call_count, 1)
+        with patch("common.requests.patch", side_effect=requests.Timeout("private details")) as save:
+            with self.assertRaisesRegex(requests.RequestException, "write failed after 4 attempts") as error:
+                patch_fields("https://example.test", headers={}, params={}, data={})
+        self.assertNotIn("private", str(error.exception))
+        self.assertEqual(save.call_count, 4)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+import requests
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import summarize_papers as summary
@@ -86,6 +87,26 @@ class SourceTests(unittest.TestCase):
         self.assertIsNone(error)
         model.assert_not_called()
         save.assert_not_called()
+
+    def test_database_504_does_not_regenerate_a_successful_model_result(self):
+        responses = []
+        for status in (504, 204):
+            response = requests.Response()
+            response.status_code = status
+            response._content = b""
+            response._content_consumed = True
+            responses.append(response)
+        with patch.dict(summary.os.environ, {"SUMMARY_SOURCE": "fulltext", "SUMMARY_PMID": "", "SUMMARY_BATCH_SIZE": "0"}), \
+             patch.multiple(summary, SUPABASE_URL="https://example.test", SUPABASE_KEY="test", GEMINI_API_KEY="test"), \
+             patch.object(summary, "sb_get", side_effect=[[{"id": 1257, "pmid": "42303909", "title": "Study"}],
+                 [{"paper_id": 1257, "content_hash": "body"}], [{"content_text": BODY}]]), \
+             patch.object(summary, "summarize", return_value=VALID) as model, \
+             patch.object(summary.requests, "patch", side_effect=responses) as save, \
+             patch.object(summary.time, "sleep"):
+            summary.main()
+        model.assert_called_once()
+        self.assertEqual(save.call_count, 2)
+        self.assertEqual(save.call_args_list[0].kwargs["json"], save.call_args_list[1].kwargs["json"])
 
 
 if __name__ == "__main__":

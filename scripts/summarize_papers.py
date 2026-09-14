@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 import requests
 from common import supabase_headers
-from common import get_json, paginate
+from common import get_json, paginate, patch_fields
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
@@ -35,11 +35,9 @@ def sb_get(path, params):
 
 
 def sb_patch(paper_id, data):
-    response = requests.patch(f"{SUPABASE_URL}/rest/v1/papers", params={"id": f"eq.{paper_id}"},
+    return patch_fields(f"{SUPABASE_URL}/rest/v1/papers", params={"id": f"eq.{paper_id}"},
         headers={**supabase_headers(SUPABASE_KEY),
-                 "Prefer": "return=minimal"}, json=data, timeout=30)
-    response.raise_for_status()
-    return response
+                 "Prefer": "return=minimal"}, data=data)
 
 
 def summarize(title, source, basis="fulltext"):
