@@ -40,8 +40,11 @@ export default function Privacy() {
           <p>
             Publisher links may require your institution's subscription. Access to this app does not grant
             journal access. Original article files remain on the operator's Z8 workstation, and Spark receives
-            article text for inference. Supabase stores derived summaries and necessary metadata. Do not enter
-            patient information into your profile, keywords, alerts, or collection names.
+            article text for inference. Accounts explicitly authorized by the operator can read stored article
+            text in this app through an encrypted connection to Z8. The article server validates your Supabase
+            login and returns text without browser caching. Supabase stores derived summaries and necessary
+            metadata. Do not enter patient information into your profile, keywords, alerts, or collection
+            names.
           </p>
         </section>
         <Link to="/settings" className="inline-block text-accent underline">

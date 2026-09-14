@@ -3,7 +3,9 @@ import { createRequire } from "node:module";
 import { createServer } from "node:http";
 import { readFile, readdir } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-const require = createRequire(new URL("../frontend/package.json", import.meta.url));
+const require = createRequire(
+  new URL("../frontend/package.json", import.meta.url),
+);
 const { build } = require("esbuild");
 const root = fileURLToPath(new URL("../frontend/", import.meta.url));
 const result = await build({
@@ -16,6 +18,9 @@ const result = await build({
     "import.meta.env.BASE_URL": JSON.stringify("/uro-daily-pick/"),
     "import.meta.env.VITE_EMAIL_AUTH_READY": JSON.stringify("false"),
     "import.meta.env.VITE_EMAIL_DELIVERY_READY": JSON.stringify("false"),
+    "import.meta.env.VITE_FULLTEXT_ORIGIN": JSON.stringify(
+      "https://articles.example.test",
+    ),
     "process.env.NODE_ENV": JSON.stringify("production"),
   },
   plugins: [
@@ -23,15 +28,23 @@ const result = await build({
       name: "isolated-api",
       setup(build) {
         build.onResolve({ filter: /\/supabase(?:\.js)?$/ }, () => ({
-          path: fileURLToPath(new URL("./fixtures/browser_api.js", import.meta.url)),
+          path: fileURLToPath(
+            new URL("./fixtures/browser_api.js", import.meta.url),
+          ),
         }));
       },
     },
   ],
 });
 const js = result.outputFiles.find((f) => f.path.endsWith(".js")).contents;
-const cssFiles = (await readdir(root + "dist/assets")).filter((f) => f.endsWith(".css"));
-const css = (await Promise.all(cssFiles.map((f) => readFile(root + "dist/assets/" + f, "utf8")))).join("\n");
+const cssFiles = (await readdir(root + "dist/assets")).filter((f) =>
+  f.endsWith(".css"),
+);
+const css = (
+  await Promise.all(
+    cssFiles.map((f) => readFile(root + "dist/assets/" + f, "utf8")),
+  )
+).join("\n");
 const server = createServer((req, res) => {
   if (req.url === "/fixture.js") {
     res.setHeader("Content-Type", "text/javascript");
@@ -52,4 +65,5 @@ const server = createServer((req, res) => {
 server.listen(3101, "127.0.0.1", () =>
   console.log("Isolated application: http://127.0.0.1:3101/uro-daily-pick/"),
 );
-for (const signal of ["SIGINT", "SIGTERM"]) process.on(signal, () => server.close(() => process.exit(0)));
+for (const signal of ["SIGINT", "SIGTERM"])
+  process.on(signal, () => server.close(() => process.exit(0)));

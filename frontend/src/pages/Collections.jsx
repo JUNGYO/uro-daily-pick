@@ -3,6 +3,7 @@ import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/auth";
 import { checked, normalizePaper } from "../lib/data";
 import { ErrorNotice, Loading } from "../components/Status";
+import FullTextLink from "../components/FullTextLink";
 import { FolderOpen, Plus, Trash2, ExternalLink } from "lucide-react";
 
 export default function Collections() {
@@ -235,6 +236,9 @@ export default function Collections() {
                       <p className="help-text mt-2">
                         {p.journal} · {p.pub_date || "Date unavailable"}
                       </p>
+                      <div className="mt-3">
+                        <FullTextLink paper={p} />
+                      </div>
                     </div>
                     <button
                       className="text-sm text-red-700 p-2"
