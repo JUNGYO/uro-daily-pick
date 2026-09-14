@@ -41,6 +41,7 @@ export default function Admin() {
   const [journals, setJournals] = useState([]);
   const [users, setUsers] = useState([]);
   const [fulltexts, setFulltexts] = useState(null);
+  const [catalog, setCatalog] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
@@ -54,7 +55,7 @@ export default function Admin() {
     setError("");
     (async () => {
       try {
-        const [s, d, tp, kw, j, u, ft] = await withTimeout(
+        const [s, d, tp, kw, j, u, ft, cat] = await withTimeout(
           Promise.all([
             supabase.rpc("admin_stats"),
             supabase.rpc("admin_daily_activity"),
@@ -63,9 +64,10 @@ export default function Admin() {
             supabase.rpc("admin_journal_dist"),
             supabase.rpc("admin_user_engagement"),
             supabase.rpc("admin_fulltext_status"),
+            supabase.rpc("admin_catalog_status"),
           ]),
         );
-        if ([s, d, tp, kw, j, u, ft].some((result) => result.error)) {
+        if ([s, d, tp, kw, j, u, ft, cat].some((result) => result.error)) {
           throw new Error("Could not load admin analytics.");
         }
         if (!active) return;
@@ -76,6 +78,7 @@ export default function Admin() {
         setJournals(j.data || []);
         setUsers(u.data || []);
         setFulltexts(ft.data);
+        setCatalog(cat.data);
       } catch {
         if (active) setError("Could not load admin analytics. Please check your access and retry.");
       } finally {
@@ -156,6 +159,21 @@ export default function Admin() {
           <p className="text-sm text-text2">
             Z8 원문 {fulltexts?.local_bodies || 0}편 · 본문 요약 {fulltexts?.ready_summaries || 0}편
           </p>
+          <p className="text-sm text-text2 mt-2">
+            전체 목록 {catalog?.catalog_papers || 0}편 · Qwen 요약 {catalog?.qwen_summaries || 0}편 · Qwen
+            처리 대기 {catalog?.awaiting_qwen || 0}편
+          </p>
+          <p className="text-sm text-text2 mt-2">
+            수집된 발행 기간: {catalog?.oldest_publication || "확인 중"} ~{" "}
+            {catalog?.newest_publication || "확인 중"}
+          </p>
+          <p className="text-sm text-text2 mt-2">
+            전체 기간 문헌 조회 {catalog?.metadata_examined || 0}건 · 조회 재시도{" "}
+            {catalog?.metadata_unavailable || 0}건
+          </p>
+          {catalog?.shards?.error > 0 && (
+            <p className="text-sm text-text2 mt-2">일부 문헌 조회가 실패해 저장된 위치부터 재시도합니다.</p>
+          )}
           {(fulltexts?.workers || []).map((worker, index) => {
             const stale =
               !worker.last_seen_at || Date.now() - Date.parse(worker.last_seen_at) > 2 * 60 * 60 * 1000;

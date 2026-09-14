@@ -33,14 +33,16 @@ class RecommendationReadinessTests(unittest.TestCase):
 
     def test_catalog_query_crosses_old_fetch_dates_and_server_page_limits(self):
         first_page = [ready_paper(n) for n in range(500)]
-        with patch.object(recs, "sb", side_effect=[first_page, [ready_paper(500)]]) as get:
+        with patch.object(recs, "sb", side_effect=[first_page, [ready_paper(500)], [], []]) as get:
             papers = recs.get_catalog_papers()
         self.assertEqual(len(papers), 501)
-        self.assertEqual(get.call_args.kwargs["params"]["offset"], "500")
+        self.assertEqual(get.call_args_list[1].kwargs["params"]["offset"], "500")
         self.assertNotIn("fetched_at", get.call_args.kwargs["params"])
 
     def test_rebuild_uses_old_ready_bodies_preserving_feedback_and_history(self):
         papers = [ready_paper(n) for n in range(1, 8)]
+        papers[-1]["abstract"]=""
+        papers[-1]["pub_date"]="1937-11-01"
         papers.append({**ready_paper(99), "summary_basis": "abstract",
                        "pub_date": "2099-01-01", "title": "Prostate prostate prostate"})
         with patch.multiple(recs, SUPABASE_URL="https://example.test", SUPABASE_KEY="fixture"), \

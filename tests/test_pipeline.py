@@ -104,7 +104,7 @@ class PipelineTests(unittest.TestCase):
         workflows = {p.name: yaml.load(p.read_text(), Loader=yaml.BaseLoader)
                      for p in (ROOT / ".github/workflows").glob("*.yml")}
         scheduled = [name for name, data in workflows.items() if "schedule" in data["on"]]
-        self.assertEqual(sorted(scheduled), ["daily-fetch.yml", "fulltext-worker.yml"])
+        self.assertEqual(sorted(scheduled), ["catalog-backfill.yml", "daily-fetch.yml", "fulltext-worker.yml"])
         worker = workflows["fulltext-worker.yml"]["jobs"]["process"]["steps"]
         self.assertFalse(any("send_digest" in step.get("run", "") for step in worker))
         self.assertTrue(any(step.get("run") == "python scripts/check_fulltext_queue.py" for step in worker))
