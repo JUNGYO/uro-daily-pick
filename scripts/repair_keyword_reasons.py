@@ -23,8 +23,14 @@ def repair_reasons(paper, reasons):
             return False
         label = label.strip()
         if label.startswith("Alert: ") and item.get("type") in {"keyword", "alert"}:
+            value = label[7:].strip()
+            if item.get("alert_type") in {"journal", "author"}:
+                text = (paper.get("journal") or "") if item["alert_type"] == "journal" else " ".join(strings(paper.get("authors")))
+                return bool(value) and value.lower() in text.lower()
+            if item.get("alert_type") == "keyword":
+                return keyword_matches(paper.get("title"), value) or keyword_matches(paper.get("abstract"), value)
             values = [paper.get("title"), paper.get("abstract"), paper.get("journal"), *strings(paper.get("authors"))]
-            return any(keyword_matches(text, label[7:]) for text in values)
+            return any(keyword_matches(text, value) for text in values)
         return item.get("type") != "keyword" or label.lower() == study_label or paper_matches(paper, label)
     return {**reasons, "matched_terms": terms,
             "reasons": [item for item in reasons.get("reasons", []) if valid(item)]}

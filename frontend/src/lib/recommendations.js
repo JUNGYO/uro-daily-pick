@@ -64,7 +64,7 @@ export async function getDailyPicks(userId, day) {
   const seen = new Set([...(feedback || []), ...(reads || [])].map((row) => row.paper_id));
   return rankPapers(papers || [], profile || {}, seen, alerts || [])
     .slice(0, 5)
-    .map(({ paper, score, terms }) =>
+    .map(({ paper, score, terms, alert }) =>
       normalizeRec({
         id: `instant-${paper.id}`,
         paper_id: paper.id,
@@ -73,7 +73,15 @@ export async function getDailyPicks(userId, day) {
         score,
         rec_date: day,
         feedback_action: null,
-        reasons: { reasons: terms.map((label) => ({ type: "keyword", label })), matched_terms: terms },
+        reasons: {
+          reasons: [
+            ...(alert ? [alert] : []),
+            ...terms
+              .filter((label) => !label.startsWith("Alert: "))
+              .map((label) => ({ type: "keyword", label })),
+          ],
+          matched_terms: terms.filter((label) => !label.startsWith("Alert: ")),
+        },
       }),
     );
 }
@@ -107,6 +115,7 @@ export function rankPapers(papers, profile, seen = new Set(), alerts = []) {
       )
         score += 2;
       if (stringList(profile.preferred_study_types).includes(paper.study_type)) score += 1.5;
+      let matchedAlert = null;
       for (const alert of alerts) {
         const value = (alert.value || "").trim().toLowerCase();
         const haystack =
@@ -122,12 +131,13 @@ export function rankPapers(papers, profile, seen = new Set(), alerts = []) {
         if (value && matches) {
           score += 3;
           terms.unshift(`Alert: ${alert.value}`);
+          matchedAlert = { type: "alert", alert_type: alert.alert_type, label: `Alert: ${alert.value}` };
           break;
         }
       }
       const age = (Date.now() - Date.parse(paper.pub_date)) / 86400000;
       if (Number.isFinite(age)) score += Math.max(0, 1 - Math.max(0, age) / 30);
-      return score > 0 ? [{ paper, score, terms }] : [];
+      return score > 0 ? [{ paper, score, terms, alert: matchedAlert }] : [];
     })
     .sort((a, b) => b.score - a.score || b.paper.id - a.paper.id);
 }
