@@ -2,6 +2,10 @@
 
 Audit baseline on 2026-09-14: the production catalog contained 977 papers, all published in 2026, with dates from March 1 through September 13. There were 177 Gemini full-text summaries, 33 Qwen full-text summaries and 767 records without a model summary at the first snapshot. All ready summaries had structured details and Q&A.
 
+The 30 corrected queries were then checked against the official API with no date filters: 238,421 query matches in total, before PMID deduplication, with no zero-result queries or query warnings. See [the per-query inventory](catalog-search-inventory-2026-09-14.md). This source total is not an import or summary completion count.
+
+All original 977 PMIDs were also retrieved again successfully. Current PubMed metadata differed in 335 publication dates, 54 titles, 75 abstracts, 18 author lists, 469 MeSH lists and 268 publication-type lists. These include subsequent indexing and publisher corrections, not just parser defects. A durable snapshot audits every already-collected PMID, even outside the configured journal searches. Citation upserts update source metadata while preserving summary fields and user activity. Title corrections invalidate stale summary provenance through the database guard and enter the Qwen queue again. A matching DOI and closely matching corrected title allow reuse of the hash-verified Z8 original.
+
 ## Findings
 
 - Daily ingestion searched only the previous seven publication days. It had no all-time historical backfill.

@@ -3,7 +3,7 @@ import sys
 from pathlib import Path
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, MagicMock, patch
 from xml.etree import ElementTree as ET
 
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"scripts"))
@@ -18,7 +18,9 @@ class MemoryStore:
         self.fail_checkpoint=False
     def insert(self,table,rows,conflict):
         target=self.papers if table=="papers" else self.jobs
-        for row in rows:target.setdefault(row[conflict],copy.deepcopy(row))
+        for row in rows:
+            if table=="papers":target.setdefault(row[conflict],{}).update(copy.deepcopy(row))
+            else:target.setdefault(row[conflict],copy.deepcopy(row))
         return len(rows)
     def update(self,key,values):
         if self.fail_checkpoint and values.get("processed"):
@@ -28,6 +30,40 @@ class MemoryStore:
 
 
 class AllTimeTests(unittest.TestCase):
+    def test_existing_catalog_snapshot_is_paginated_once_and_is_resumable(self):
+        store=Mock()
+        store.read.side_effect=[[],[{"pmid":str(i)} for i in range(1,1001)],[{"pmid":"1001"}]]
+        backfill.seed_existing_catalog(store)
+        job=store.insert.call_args.args[1][0]
+        self.assertEqual(len(job["pmids"]),1001)
+        self.assertEqual(job["status"],"active")
+        self.assertEqual(store.read.call_args.args[1]["offset"],1000)
+        store.reset_mock()
+        store.read.side_effect=None
+        store.read.return_value=[{"job_key":job["job_key"]}]
+        backfill.seed_existing_catalog(store)
+        store.insert.assert_not_called()
+
+    def test_citation_refresh_preserves_summary_and_resumes_known_identifiers(self):
+        job={**backfill.job_for("Existing catalog citation audit v1"),"pmids":["1"],"processed":0}
+        store=MemoryStore(job)
+        store.papers["1"]={"pmid":"1","title":"Old title","summary_ko":"Verified body summary","summarized_at":"existing"}
+        backfill.process_job(store,job,time.monotonic()+10,lambda _:self.fail("Known PMID needs no search"),
+            lambda _:[{"pmid":"1","title":"Corrected title","abstract":"New abstract"}])
+        self.assertEqual(store.papers["1"]["title"],"Corrected title")
+        self.assertEqual(store.papers["1"]["summary_ko"],"Verified body summary")
+
+    def test_real_store_upserts_citations_but_never_overwrites_checkpoints(self):
+        with patch.dict(backfill.os.environ,{"SUPABASE_URL":"https://example.invalid","SUPABASE_SERVICE_KEY":"test"}), \
+             patch.object(backfill.requests,"post") as post:
+            post.return_value.__enter__.return_value.json.return_value=[{"pmid":"1"}]
+            store=backfill.Store()
+            store.insert("papers",[{"pmid":"1","title":"Corrected"}],"pmid")
+            self.assertIn("merge-duplicates",post.call_args.kwargs["headers"]["Prefer"])
+            self.assertNotIn("summary_ko",post.call_args.kwargs["json"][0])
+            store.insert("catalog_backfill_jobs",[backfill.job_for("test")],"job_key")
+            self.assertIn("ignore-duplicates",post.call_args.kwargs["headers"]["Prefer"])
+
     def test_queries_allow_pubmed_journal_mapping_and_previous_titles(self):
         queries=fetch.build_journal_queries()
         self.assertEqual(len(queries),30)
