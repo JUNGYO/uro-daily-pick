@@ -100,18 +100,21 @@ class PipelineTests(unittest.TestCase):
         self.assertIn("Reader &amp; Team", html)
         self.assertIn("A &lt; B", html)
 
-    def test_single_schedule_runs_stages_in_order(self):
+    def test_daily_pipeline_and_continuing_fulltext_worker(self):
         workflows = {p.name: yaml.load(p.read_text(), Loader=yaml.BaseLoader)
                      for p in (ROOT / ".github/workflows").glob("*.yml")}
         scheduled = [name for name, data in workflows.items() if "schedule" in data["on"]]
-        self.assertEqual(scheduled, ["daily-fetch.yml"])
+        self.assertEqual(sorted(scheduled), ["daily-fetch.yml", "fulltext-worker.yml"])
+        worker = workflows["fulltext-worker.yml"]["jobs"]["process"]["steps"]
+        self.assertFalse(any("send_digest" in step.get("run", "") for step in worker))
+        self.assertTrue(any(step.get("env", {}).get("SUMMARY_SOURCE") == "fulltext" for step in worker))
         steps = workflows["daily-fetch.yml"]["jobs"]["fetch"]["steps"]
         self.assertEqual([step["run"] for step in steps if step.get("run", "").startswith("python scripts/")], [
             "python scripts/fetch_papers.py", "python scripts/classify_papers.py",
             "python scripts/import_fulltexts.py",
             "python scripts/summarize_papers.py", "python scripts/generate_recs.py", "python scripts/send_digest.py",
         ])
-        for name in ("daily-fetch.yml", "daily-recommend.yml", "daily-email.yml", "manual-run.yml"):
+        for name in ("daily-fetch.yml", "daily-recommend.yml", "daily-email.yml", "manual-run.yml", "fulltext-worker.yml"):
             self.assertEqual(workflows[name]["concurrency"]["group"], "uro-daily-pipeline")
             self.assertEqual(workflows[name]["concurrency"]["cancel-in-progress"], "false")
 

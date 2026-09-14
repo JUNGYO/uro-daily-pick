@@ -1,4 +1,4 @@
-import { paperMatchesKeyword } from "./keywords";
+import { keywordMatches, paperMatchesKeyword } from "./keywords";
 
 export async function checked(query) {
   const { data, error } = await withTimeout(query);
@@ -53,17 +53,25 @@ export function normalizeRec(rec) {
   const paper = normalizePaper(rec.paper);
   const oldTerms = stringList(reasons.matched_terms);
   const matched = oldTerms.filter((term) => paperMatchesKeyword(paper, term));
-  const rejected = new Set(oldTerms.filter((term) => !matched.includes(term)));
+  const studyLabel = (paper.study_type || "").replaceAll("_", " ").toLowerCase();
+  const validReason = (item) => {
+    if (!item || typeof item.label !== "string") return false;
+    const label = item.label.trim();
+    if (label.startsWith("Alert: ") && ["keyword", "alert"].includes(item.type)) {
+      const value = label.slice(7).trim();
+      return [paper.title, paper.abstract, paper.journal, ...paper.authors].some((text) =>
+        keywordMatches(text, value),
+      );
+    }
+    if (item.type !== "keyword") return true;
+    // Historical reasons can omit matched_terms or use different casing.
+    return label.toLowerCase() === studyLabel || paperMatchesKeyword(paper, label);
+  };
   return {
     ...rec,
     paper,
     reasons: {
-      reasons: jsonValue(reasons.reasons, []).filter(
-        (item) =>
-          item &&
-          typeof item.label === "string" &&
-          !(item.type === "keyword" && rejected.has(item.label) && !item.label.startsWith("Alert: ")),
-      ),
+      reasons: jsonValue(reasons.reasons, []).filter(validReason),
       matched_terms: matched,
     },
   };

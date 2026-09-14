@@ -117,9 +117,11 @@ def main():
         raise SystemExit("SUMMARY_PMID must be numeric")
     if not SUPABASE_URL or not SUPABASE_KEY or not GEMINI_API_KEY:
         raise SystemExit("ERROR: SUPABASE_URL, SUPABASE_SERVICE_KEY and GEMINI_API_KEY required")
-    budget = int(os.environ.get("SUMMARY_BATCH_SIZE") or "20")
-    if not 1 <= budget <= 100:
-        raise SystemExit("SUMMARY_BATCH_SIZE must be between 1 and 100")
+    budget = int(os.environ.get("SUMMARY_BATCH_SIZE") or "0")
+    seconds = int(os.environ.get("SUMMARY_MAX_SECONDS") or "2700")
+    if not 0 <= budget <= 10000 or not 60 <= seconds <= 3600:
+        raise SystemExit("SUMMARY_BATCH_SIZE must be 0..10000 (0 drains queue); SUMMARY_MAX_SECONDS must be 60..3600")
+    deadline = time.monotonic() + seconds
     papers = paginate(sb_get, "papers", {"select": "id,pmid,title,abstract,summary_ko,summary_basis,summary_source_hash,summary_model",
         "order": "fetched_at.desc,id", **({"pmid": f"eq.{pmid}"} if pmid else {})}, size=100)
     if pmid and not papers:
@@ -135,6 +137,9 @@ def main():
             unavailable += 1
             if pmid:
                 raise SystemExit("The requested PMID has no ready full text; no abstract summary was generated")
+            continue
+        if time.monotonic() >= deadline:
+            pending += 1
             continue
         if fulltext:
             rows = sb_get("paper_fulltexts", {"select": "content_text", "paper_id": f"eq.{paper['id']}",
@@ -152,7 +157,7 @@ def main():
         source_hash = hashlib.sha256(f"{basis}\n{paper['title']}\n{source}".encode()).hexdigest()
         if paper.get("summary_source_hash") == source_hash and paper.get("summary_model") == GEMINI_MODEL:
             continue
-        if done + failed >= budget:
+        if (budget and done + failed >= budget) or time.monotonic() >= deadline:
             pending += 1
             continue
         patch_data = None
@@ -171,8 +176,9 @@ def main():
             summary_source_hash=source_hash, summarized_at=datetime.now(timezone.utc).isoformat())
         sb_patch(paper["id"], patch_data)
         done += 1
+        print(f"PMID {paper['pmid']}: full-text summary saved" if basis == "fulltext" else f"PMID {paper['pmid']}: abstract summary saved", flush=True)
         time.sleep(1)
-    print(f"Summaries ({basis}): {done} updated, {failed} failed, {pending} pending (batch budget), {unavailable} awaiting full text")
+    print(f"Summaries ({basis}): {done} updated, {failed} failed, {pending} pending (runtime/batch budget), {unavailable} awaiting full text")
     if failed:
         raise SystemExit(f"ERROR: {failed} summaries failed; downstream steps must wait")
 

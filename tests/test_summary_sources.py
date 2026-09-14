@@ -73,6 +73,20 @@ class SourceTests(unittest.TestCase):
         model.assert_called_once_with("Uncached", BODY, "fulltext")
         self.assertEqual(save.call_args.args[0], 2)
 
+    def test_queue_mode_processes_multiple_ready_papers(self):
+        papers = [{"id": n, "pmid": str(n), "title": f"Study {n}"} for n in range(1, 5)]
+        model, save, error = self.run_summary(papers, [1, 2, 3, 4], budget="0")
+        self.assertIsNone(error)
+        self.assertEqual(model.call_count, 4)
+        self.assertEqual(save.call_count, 4)
+
+    def test_runtime_yield_preserves_unprocessed_summary(self):
+        with patch.object(summary.time, "monotonic", side_effect=[0, 9999]):
+            model, save, error = self.run_summary([{"id": 1, "pmid": "1", "title": "Study"}], [1], budget="0")
+        self.assertIsNone(error)
+        model.assert_not_called()
+        save.assert_not_called()
+
 
 if __name__ == "__main__":
     unittest.main()

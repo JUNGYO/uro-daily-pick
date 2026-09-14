@@ -69,7 +69,7 @@ it("highlights a standalone AI mention without splitting Affairs and keeps the s
       paper: {
         id: 1,
         title,
-        abstract: "An AI tool was evaluated.",
+        abstract: "DNA mismatch repair remains available. An AI tool was evaluated in Veterans Affairs.",
         authors: [],
         structured_data: {},
         qa_data: [],

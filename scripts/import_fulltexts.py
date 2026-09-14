@@ -1,4 +1,4 @@
-"""Import a bounded batch of Europe PMC open-access articles into private storage."""
+"""Drain the catalog's OA import queue, checkpointing every attempted paper."""
 from datetime import datetime, timedelta, timezone
 import os
 import time
@@ -14,7 +14,11 @@ def select_candidates(papers, records, now, limit):
     recent = now - timedelta(days=7)
     skip = {r["paper_id"] for r in records if r["status"] == "ready"
             or datetime.fromisoformat(r["fetched_at"].replace("Z", "+00:00")) >= recent}
-    return [p for p in papers if p["id"] not in skip][:limit]
+    attempted = {r["paper_id"] for r in records}
+    # Finish the first pass before retrying old misses, even as new papers arrive.
+    candidates = sorted((p for p in papers if p["id"] not in skip),
+                        key=lambda p: p["id"] in attempted)
+    return candidates[:limit] if limit else candidates
 
 
 def record_unavailable(url, headers, paper_id, reason):
@@ -34,23 +38,28 @@ def main():
     url, key = os.environ.get("SUPABASE_URL"), os.environ.get("SUPABASE_SERVICE_KEY")
     if not url or not key:
         raise SystemExit("SUPABASE_URL and SUPABASE_SERVICE_KEY required")
-    limit = int(os.environ.get("FULLTEXT_BATCH_SIZE") or "20")
-    if not 1 <= limit <= 100:
-        raise SystemExit("FULLTEXT_BATCH_SIZE must be between 1 and 100")
+    limit = int(os.environ.get("FULLTEXT_BATCH_SIZE") or "0")
+    seconds = int(os.environ.get("FULLTEXT_MAX_SECONDS") or "900")
+    if not 0 <= limit <= 10000 or not 60 <= seconds <= 3600:
+        raise SystemExit("FULLTEXT_BATCH_SIZE must be 0..10000 (0 drains queue); FULLTEXT_MAX_SECONDS must be 60..3600")
+    deadline = time.monotonic() + seconds
     headers = supabase_headers(key)
     now = datetime.now(timezone.utc)
     get = lambda path, params: get_json(f"{url}/rest/v1/{path}", headers=headers, params=params)
-    papers = paginate(get, "papers", {"select": "id,pmid", "abstract": "neq.",
-        "fetched_at": f"gte.{(now - timedelta(days=30)).isoformat()}", "order": "fetched_at.desc,id"}, size=100)
+    papers = paginate(get, "papers", {"select": "id,pmid", "order": "fetched_at.desc,id"}, size=100)
     records = paginate(get, "paper_fulltexts", {"select": "paper_id,status,fetched_at", "order": "paper_id"}, size=100)
     candidates = select_candidates(papers, records, now, limit)
-    imported = unavailable = failed = 0
+    imported = unavailable = failed = attempted = 0
     for paper in candidates:
+        if time.monotonic() >= deadline:
+            break
+        attempted += 1
         try:
             content, source_url = fetch_oa(str(paper["pmid"]))
             parsed = parse_document(content)
             publish(str(paper["pmid"]), parsed, source_url, "europe_pmc_oa")
             imported += 1
+            print(f"PMID {paper['pmid']}: full text imported", flush=True)
         except FulltextUnavailable:
             record_unavailable(url, headers, paper["id"], "No Europe PMC open-access full text")
             unavailable += 1
@@ -65,8 +74,10 @@ def main():
             unavailable += 1
         except (OSError, requests.RequestException):
             failed += 1
+        if attempted % 25 == 0:
+            print(f"Import progress: {attempted}/{len(candidates)} attempted, {imported} imported", flush=True)
         time.sleep(0.5)
-    print(f"Full texts: {imported} imported, {unavailable} unavailable, {failed} failed, {len(candidates)} attempted")
+    print(f"Full texts: {imported} imported, {unavailable} unavailable, {failed} failed, {attempted} attempted, {len(candidates)-attempted} pending (runtime)")
     if failed:
         raise SystemExit("Full-text provider or database requests failed; inspect provider availability")
 

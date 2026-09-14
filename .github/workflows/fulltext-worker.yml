@@ -1,0 +1,51 @@
+name: Full-text queue
+
+on:
+  schedule:
+    - cron: '17 */2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: uro-daily-pipeline
+  cancel-in-progress: false
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - id: dependencies
+        run: python -m pip install -r scripts/requirements.txt
+      - name: Import available full texts across the catalog
+        if: vars.FULLTEXT_IMPORT_ENABLED == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          FULLTEXT_BATCH_SIZE: ${{ vars.FULLTEXT_BATCH_SIZE }}
+          FULLTEXT_MAX_SECONDS: '900'
+        run: python -u scripts/import_fulltexts.py
+      - name: Summarize all ready full texts within the runtime
+        id: summaries
+        if: ${{ !cancelled() && steps.dependencies.outcome == 'success' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
+          SUMMARY_BATCH_SIZE: ${{ vars.SUMMARY_BATCH_SIZE }}
+          SUMMARY_MAX_SECONDS: '2700'
+          SUMMARY_SOURCE: fulltext
+        run: python -u scripts/summarize_papers.py
+      - name: Refresh recommendations
+        if: ${{ !cancelled() && steps.summaries.outcome == 'success' }}
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python scripts/generate_recs.py
