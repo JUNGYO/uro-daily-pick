@@ -20,6 +20,13 @@ async function readArticle(context, job) {
   const doi = String(job.doi || '').trim();
   if (!/^10\.\d{4,9}\/[^\s<>"#?]+$/i.test(doi)) return {status:'unsupported', reason:'invalid_doi'};
   const page = await context.newPage();
+  const pages = new Set([page]);
+  let timedOut = false;
+  const budget = Number.isFinite(job.budget_ms) ? Math.max(1000, Math.min(240000, job.budget_ms)) : 240000;
+  const timer = setTimeout(() => {
+    timedOut = true;
+    for (const active of pages) void active.close().catch(() => {});
+  }, budget);
   try {
     await page.route('**/*', route => {
       const request = route.request();
@@ -78,24 +85,28 @@ async function readArticle(context, job) {
     // linked tables through the same ordinary browser session before parsing.
     let tableHtml='';
     for (const url of [...new Set(result.tables)].slice(0,10)) {
+      if (timedOut) return {status:'retryable_error',reason:'article_time_budget'};
       if (new URL(url).origin !== new URL(page.url()).origin) continue;
       const tablePage=await context.newPage();
+      pages.add(tablePage);
       try {
+        if (timedOut) throw new Error('article_time_budget');
         const response=await tablePage.goto(url,{waitUntil:'domcontentloaded',timeout:30000});
         if (!response || response.status() !== 200) throw new Error('table_unavailable');
         await tablePage.waitForSelector('table',{timeout:15000});
         tableHtml+=await tablePage.evaluate(()=>[...document.querySelectorAll('table')].map(t=>'<h2>'+document.title.replace(/[<>]/g,'')+'</h2>'+t.outerHTML).join(''));
       } catch {
         return {status:'retryable_error',reason:'article_table_unavailable',url:page.url()};
-      } finally { await tablePage.close(); }
+      } finally { pages.delete(tablePage); await tablePage.close().catch(() => {}); }
     }
     if (tableHtml) result.html=result.html.replace(/<\/[^>]+>\s*$/,end=>tableHtml+end);
     delete result.tables;
     delete result.loading;
+    if (timedOut) return {status:'retryable_error',reason:'article_time_budget'};
     return {status:'downloaded', url:page.url(), ...result};
   } catch (error) {
     return {status:'retryable_error', reason:error.name === 'TimeoutError' ? 'timeout' : 'navigation_error'};
-  } finally { await page.close(); }
+  } finally { clearTimeout(timer); await page.close().catch(() => {}); }
 }
 
 async function main() {
@@ -113,4 +124,4 @@ async function main() {
   } finally { await context.close(); }
 }
 if (require.main === module) main().catch(() => { console.error('Browser worker failed'); process.exitCode=1; });
-module.exports={allowedHost,selectorsFor};
+module.exports={allowedHost,selectorsFor,readArticle};

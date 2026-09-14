@@ -20,7 +20,7 @@ from urllib.parse import urlencode, urlsplit, urlunsplit
 from urllib.request import Request, build_opener, HTTPSHandler
 
 from fulltext import FulltextUnavailable, NoRedirect, fetch_oa, parse_document
-from local_summary import MODEL_LABEL, ensure_server, generate_summary, summary_payload
+from local_summary import MODEL_LABEL, SummaryBudgetExpired, ensure_server, generate_summary, summary_payload
 
 SERVICE_URL = "https://vwdcqzcoovczmtzdyzbc.supabase.co"
 PUBLIC_KEY = "sb_publishable_FwZC-M2lO2nvh3MFbqf6nA_K8jMXNdw"
@@ -130,8 +130,8 @@ class Browser:
             text=True, encoding="utf-8", env={**os.environ, "URO_BROWSER_PROFILE": str(directory / "browser-profile")},
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
-    def read(self, paper):
-        self.process.stdin.write(json.dumps({"pmid":paper["pmid"], "doi":paper["doi"]}) + "\n")
+    def read(self, paper, budget_ms=240000):
+        self.process.stdin.write(json.dumps({"pmid":paper["pmid"], "doi":paper["doi"], "budget_ms":budget_ms}) + "\n")
         self.process.stdin.flush()
         line = self.process.stdout.readline()
         if not line:
@@ -217,9 +217,11 @@ def archive_legacy_bodies(service, directory, deadline):
     print(f"Legacy archive: {count} bodies moved to Z8 with hashes verified",flush=True)
 
 
-def run(directory, node, seconds):
+def run(directory, node, seconds, phase="all"):
+    if phase not in ("all","collect","summarize"):
+        raise ValueError("Unknown worker phase")
     import msvcrt
-    lock = (directory / "worker.lock").open("a+b")
+    lock = (directory / ("worker.lock" if phase=="all" else phase+".lock")).open("a+b")
     if os.fstat(lock.fileno()).st_size == 0:
         lock.write(b"0"); lock.flush()
     lock.seek(0)
@@ -231,34 +233,41 @@ def run(directory, node, seconds):
         return
     browser = None
     service = Service(directory)
-    db = sqlite3.connect(directory / "queue.sqlite3")
+    db = sqlite3.connect(directory / "queue.sqlite3",timeout=20)
+    db.execute("PRAGMA journal_mode=WAL")
     db.execute("CREATE TABLE IF NOT EXISTS attempts(pmid TEXT PRIMARY KEY,status TEXT,next_retry REAL)")
+    attempt_table="collection_attempts" if phase=="collect" else "attempts"
+    if phase=="collect":
+        db.execute("CREATE TABLE IF NOT EXISTS collection_attempts(pmid TEXT PRIMARY KEY,status TEXT,next_retry REAL)")
+        db.execute("INSERT OR IGNORE INTO collection_attempts SELECT * FROM attempts WHERE status!='ready'")
+        db.commit()
     spool = directory / "documents"
     spool.mkdir(exist_ok=True)
     deadline = time.monotonic() + seconds
     done = failed = deferred = 0
     try:
         service.status("running")
-        ensure_server(directory)
-        archive_legacy_bodies(service,directory,deadline)
+        if phase!="collect":
+            ensure_server(directory)
+            archive_legacy_bodies(service,directory,deadline)
         papers = service.candidates()
         # Finish already acquired bodies before spending time on publisher access.
         cached={path.name.split(".")[0] for folder in (spool,directory/"cloud-archive",directory/"sources")
                 for path in folder.glob("*.json")}
-        papers.sort(key=lambda paper: str(paper["pmid"]) not in cached)
-        print(f"Institution queue: {len(papers)} papers awaiting bodies", flush=True)
+        papers.sort(key=lambda paper: (str(paper["pmid"]) in cached) if phase=="collect" else (str(paper["pmid"]) not in cached))
+        print(f"Institution {phase} queue: {len(papers)} papers", flush=True)
         for paper in papers:
             if time.monotonic() >= deadline:
                 break
             pmid = str(paper["pmid"])
             if not re.fullmatch(r"\d{1,12}", pmid):
                 continue
-            prior = db.execute("SELECT status,next_retry FROM attempts WHERE pmid=?", (pmid,)).fetchone()
+            prior = db.execute(f"SELECT status,next_retry FROM {attempt_table} WHERE pmid=?", (pmid,)).fetchone()
             if prior and prior[1] > time.time():
                 deferred += 1
                 continue
             document_path = spool / (pmid + ".json")
-            phase="collection"
+            operation="collection"
             try:
                 if document_path.exists():
                     saved = json.loads(document_path.read_text(encoding="utf-8"))
@@ -270,7 +279,12 @@ def run(directory, node, seconds):
                     archived = json.loads(archive_path.read_text(encoding="utf-8"))
                     if cached_paper_matches(archived["paper"],paper):
                         document = verify_cached_body(archived["document"])
-                        save_json(document_path,{"doi":paper["doi"],"title":paper["title"],"document":document})
+                        if phase!="summarize":
+                            save_json(document_path,{"doi":paper["doi"],"title":paper["title"],"document":document})
+                if phase=="summarize" and document is None:
+                    continue
+                if phase=="collect" and document is not None:
+                    continue
                 if document is None:
                     cached_source=directory/"sources"/(pmid+".browser.json")
                     result=None
@@ -286,12 +300,12 @@ def run(directory, node, seconds):
                             (spool/(pmid+".xml")).write_bytes(content)
                         except (FulltextUnavailable,HTTPError,URLError,TimeoutError,ValueError,IncompleteRead,ConnectionError,ssl.SSLError):
                             if browser is None: browser=Browser(node,directory)
-                            result=browser.read(paper)
+                            result=browser.read(paper,budget_ms=max(1000,min(240000,int((deadline-time.monotonic())*1000))))
                             document=parsed_result(paper,result)
                     if document is None:
                         status = result.get("status") if result.get("status") in STATES else "parse_failed"
                         service.status("running", pmid, status)
-                        db.execute("INSERT OR REPLACE INTO attempts VALUES(?,?,?)", (pmid,status,next_retry(status,time.time())))
+                        db.execute(f"INSERT OR REPLACE INTO {attempt_table} VALUES(?,?,?)", (pmid,status,next_retry(status,time.time())))
                         db.commit()
                         print(f"PMID {pmid}: {status}, {result.get('reason','validation')}", flush=True)
                         failed += 1
@@ -299,32 +313,45 @@ def run(directory, node, seconds):
                         continue
                     if result: (spool / (pmid + ".html")).write_text(result["html"], encoding="utf-8")
                     save_json(document_path,{"doi":paper["doi"],"title":paper["title"],"document":document})
-                phase="summary"
+                if phase=="collect":
+                    db.execute("INSERT OR REPLACE INTO collection_attempts VALUES(?,?,?)", (pmid,"ready",0))
+                    db.commit()
+                    done+=1
+                    print(f"PMID {pmid}: original stored locally; queued for Spark summary",flush=True)
+                    time.sleep(2)
+                    continue
+                operation="summary"
                 summary_path = spool / (pmid + ".summary.json")
                 expected_hash = hashlib.sha256(("fulltext\n"+paper["title"]+"\n"+document["content_text"]).encode()).hexdigest()
                 summary = json.loads(summary_path.read_text(encoding="utf-8")) if summary_path.exists() else None
                 if not summary or summary.get("summary_source_hash") != expected_hash or summary.get("summary_model") != MODEL_LABEL:
-                    summary = generate_summary(paper, document)
+                    summary = (generate_summary(paper,document,deadline=deadline,cache_path=spool/(pmid+".notes.json"))
+                               if phase=="summarize" else generate_summary(paper,document))
                     save_json(summary_path,summary)
-                phase="publication"
+                operation="publication"
                 service.rpc("publish_institution_summary", **summary_payload(paper, document, summary))
                 db.execute("INSERT OR REPLACE INTO attempts VALUES(?,?,?)", (pmid,"ready",0))
                 db.commit()
                 done += 1
                 print(f"PMID {pmid}: local body {len(document['content_text'])} characters; summary published", flush=True)
+            except SummaryBudgetExpired:
+                print(f"PMID {pmid}: summary time budget reached; original and evidence retained for next run",flush=True)
+                break
             except ValueError:
-                status="parse_failed" if phase=="collection" else "retryable_error"
+                status="parse_failed" if operation=="collection" else "retryable_error"
                 service.status("running",pmid,status)
-                db.execute("INSERT OR REPLACE INTO attempts VALUES(?,?,?)", (pmid,status,next_retry(status,time.time())))
+                db.execute(f"INSERT OR REPLACE INTO {attempt_table} VALUES(?,?,?)", (pmid,status,next_retry(status,time.time())))
                 db.commit()
                 failed += 1
-                print(f"PMID {pmid}: {phase} validation failed; retry scheduled", flush=True)
+                print(f"PMID {pmid}: {operation} validation failed; retry scheduled", flush=True)
             time.sleep(2)
-        service.status("idle")
-        print(f"Institution full texts: {done} ready, {failed} unavailable/invalid, {deferred} deferred", flush=True)
+        if phase=="all":
+            service.status("idle")
+        print(f"Institution {phase}: {done} completed, {failed} unavailable/invalid, {deferred} deferred", flush=True)
     except Exception:
-        try: service.status("error")
-        except Exception: pass
+        if phase=="all":
+            try: service.status("error")
+            except Exception: pass
         raise
     finally:
         if browser:
@@ -339,6 +366,7 @@ def main():
     parser.add_argument("--node", type=Path)
     parser.add_argument("--enroll", action="store_true")
     parser.add_argument("--max-seconds", type=int, default=3300)
+    parser.add_argument("--phase",choices=["all","collect","summarize"],default="all")
     args = parser.parse_args()
     if args.enroll:
         print(json.dumps(enroll(args.state_dir)))
@@ -346,7 +374,7 @@ def main():
     if not args.node or not 60 <= args.max_seconds <= 3600:
         parser.error("A Node executable and 60..3600 second runtime are required")
     try:
-        run(args.state_dir, args.node, args.max_seconds)
+        run(args.state_dir, args.node, args.max_seconds,args.phase)
     except Exception as error:
         print(f"Institution worker failed: {type(error).__name__}; pending documents are preserved", flush=True)
         raise SystemExit(1) from None

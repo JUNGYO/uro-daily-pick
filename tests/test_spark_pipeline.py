@@ -30,6 +30,62 @@ def derived(paper,document):
 
 
 class SparkPipelineTests(unittest.TestCase):
+    def test_collection_does_not_wait_for_spark_or_publish_originals(self):
+        papers=[{"pmid":str(n),"doi":"10.1000/study","title":"Synthetic study"} for n in (1,2)]
+        service=Mock(); service.candidates.return_value=papers
+        browser=Mock(); browser.read.return_value={"status":"downloaded","title":"Synthetic study","doi":"10.1000/study", "html":HTML,"url":"https://link.springer.com/article/10.1000/study"}
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.dict(sys.modules,{"msvcrt":SimpleNamespace(locking=lambda *a:None,LK_NBLCK=1)}), \
+             patch.object(worker,"Service",return_value=service), patch.object(worker,"Browser",return_value=browser), \
+             patch.object(worker,"fetch_oa",side_effect=worker.FulltextUnavailable()), \
+             patch.object(worker,"ensure_server") as readiness, patch.object(worker,"generate_summary") as summary, \
+             patch.object(worker.time,"sleep"), contextlib.redirect_stdout(io.StringIO()):
+            directory=Path(temporary)
+            worker.run(directory,Path("node.exe"),60,phase="collect")
+            self.assertEqual(len(list((directory/"documents").glob("[12].json"))),2)
+            readiness.assert_not_called(); summary.assert_not_called()
+            service.rpc.assert_not_called()
+
+    def test_summary_queue_uses_local_bodies_without_opening_a_publisher(self):
+        paper={"pmid":"1","doi":"10.1000/study","title":"Synthetic study"}
+        document={**worker.parse_document(HTML.encode()),"source_url":"https://link.springer.com/article/10.1000/study"}
+        service=Mock(); service.candidates.return_value=[paper,{**paper,"pmid":"2"}]; service.rpc.return_value=None
+        with tempfile.TemporaryDirectory() as temporary, \
+             patch.dict(sys.modules,{"msvcrt":SimpleNamespace(locking=lambda *a:None,LK_NBLCK=1)}), \
+             patch.object(worker,"Service",return_value=service), patch.object(worker,"Browser") as browser, \
+             patch.object(worker,"fetch_oa") as fetch, patch.object(worker,"ensure_server"), \
+             patch.object(worker,"generate_summary",return_value=derived(paper,document)) as summary, \
+             patch.object(worker.time,"sleep"), contextlib.redirect_stdout(io.StringIO()):
+            directory=Path(temporary); (directory/"documents").mkdir()
+            worker.save_json(directory/"documents/1.json",{**paper,"document":document})
+            worker.run(directory,Path("node.exe"),60,phase="summarize")
+            browser.assert_not_called(); fetch.assert_not_called()
+            self.assertEqual(summary.call_count,1)
+            self.assertIsNotNone(summary.call_args.kwargs["deadline"])
+            self.assertTrue((directory/"documents/1.summary.json").exists())
+
+    def test_expired_summary_budget_never_starts_another_model_request(self):
+        with patch.object(spark.time,"monotonic",return_value=10), patch.object(spark,"local_request") as call:
+            with self.assertRaises(spark.SummaryBudgetExpired):
+                spark.chat("summary",BODY,deadline=9)
+            call.assert_not_called()
+
+    def test_long_article_evidence_resumes_after_a_budget_interruption(self):
+        paper={"title":"Synthetic long article"}
+        document={"content_text":BODY*30}
+        chunks=(len(document["content_text"])+17999)//18000
+        with tempfile.TemporaryDirectory() as temporary:
+            cache=Path(temporary)/"evidence.json"
+            with patch.object(spark,"chat",side_effect=["Previously extracted facts.",spark.SummaryBudgetExpired()]):
+                with self.assertRaises(spark.SummaryBudgetExpired):
+                    spark.generate_summary(paper,document,cache_path=cache)
+            self.assertEqual(json.loads(cache.read_text())["notes"],["Previously extracted facts."])
+            with patch.object(spark,"chat",return_value="Source facts.") as chat, \
+                 patch.object(spark,"validate_summary",return_value=derived(paper,document)):
+                result=spark.generate_summary(paper,document,cache_path=cache)
+            self.assertEqual(chat.call_count,chunks)  # remaining chunks plus final summary
+            self.assertEqual(result["summary_source_hash"],derived(paper,document)["summary_source_hash"])
+
     @unittest.skipUnless(os.name=="nt","Windows byte-range lock")
     def test_overlapping_scheduled_run_exits_cleanly_before_service_access(self):
         import msvcrt
