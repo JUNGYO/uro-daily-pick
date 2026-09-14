@@ -200,8 +200,7 @@ def archive_legacy_bodies(service, directory, deadline):
 def run(directory, node, seconds):
     import msvcrt
     lock = (directory / "worker.lock").open("a+b")
-    lock.seek(0)
-    if lock.read(1) == b"":
+    if os.fstat(lock.fileno()).st_size == 0:
         lock.write(b"0"); lock.flush()
     lock.seek(0)
     try:
@@ -223,6 +222,10 @@ def run(directory, node, seconds):
         ensure_server(directory)
         archive_legacy_bodies(service,directory,deadline)
         papers = service.candidates()
+        # Finish already acquired bodies before spending time on publisher access.
+        papers.sort(key=lambda paper: not any(path.exists() for path in (
+            spool / (str(paper["pmid"]) + ".json"),
+            directory / "sources" / (str(paper["pmid"]) + ".browser.json"))))
         print(f"Institution queue: {len(papers)} papers awaiting bodies", flush=True)
         for paper in papers:
             if time.monotonic() >= deadline:

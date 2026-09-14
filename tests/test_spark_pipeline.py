@@ -5,6 +5,7 @@ import hashlib
 from http.client import IncompleteRead
 import io
 import json
+import os
 from pathlib import Path
 import sys
 import tempfile
@@ -29,6 +30,21 @@ def derived(paper,document):
 
 
 class SparkPipelineTests(unittest.TestCase):
+    @unittest.skipUnless(os.name=="nt","Windows byte-range lock")
+    def test_overlapping_scheduled_run_exits_cleanly_before_service_access(self):
+        import msvcrt
+        with tempfile.TemporaryDirectory() as temporary:
+            directory=Path(temporary)
+            with (directory/"worker.lock").open("w+b") as lock:
+                lock.write(b"0"); lock.flush(); lock.seek(0)
+                msvcrt.locking(lock.fileno(),msvcrt.LK_NBLCK,1)
+                try:
+                    with patch.object(worker,"Service") as service, contextlib.redirect_stdout(io.StringIO()):
+                        worker.run(directory,Path("node.exe"),60)
+                    service.assert_not_called()
+                finally:
+                    lock.seek(0); msvcrt.locking(lock.fileno(),msvcrt.LK_UNLCK,1)
+
     def test_interrupted_service_response_retries_without_losing_checkpoint(self):
         service=object.__new__(worker.Service)
         service.config={"url":"https://example.invalid","public_key":"test"}
