@@ -1,6 +1,6 @@
 """Z8 worker: import authorized local PDF/HTML/XML or download authorized API XML.
 
-No browser cookies, paywall workarounds, or scheduled subscription crawling.
+Institution-network browser collection is handled by institution_worker.py.
 Use --publish to persist a successfully parsed document to the private service table.
 """
 import argparse
@@ -93,7 +93,7 @@ def parse_document(content):
             # XHTML <body> alone is not an article XML body.
             if local(root) not in ("article", "full-text-retrieval-response"):
                 body = None
-            elif body is None:
+            elif body is None and not (local(root)=="article" and any(local(node) in {"h1","h2","h3"} for node in root.iter())):
                 raise ValueError("Article XML contains metadata or abstract only")
             if body is not None:
                 for child in body:
@@ -108,12 +108,19 @@ def parse_document(content):
             soup = BeautifulSoup(content, "html.parser")
             for node in soup.select("script, style, nav, header, footer, form, aside"):
                 node.decompose()
-            body = soup.select_one("article, #body, .article-body, main")
+            body = next((soup.select_one(selector) for selector in
+                ("#body", ".article-section__full", ".article__body", ".c-article-body", ".article-full-text", ".article-body", "article", "main")
+                if soup.select_one(selector) is not None), None)
             if body is None:
                 raise ValueError("No article body (login/challenge/metadata response)")
             title, paragraphs = "Body", []
-            for node in body.find_all(["h1", "h2", "h3", "p", "table"]):
+            for node in body.select("h1, h2, h3, p, table, div.para, div.section-paragraph, div.u-margin-s-bottom[id]"):
                 if node.find_parent("table"):
+                    continue
+                if node.find_parent("div", class_=["para", "section-paragraph"]):
+                    continue
+                if node.find_parent(lambda parent: parent.name == "div" and parent.get("id")
+                        and "u-margin-s-bottom" in parent.get("class", [])):
                     continue
                 if node.name.startswith("h"):
                     if paragraphs:

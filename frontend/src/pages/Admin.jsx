@@ -40,6 +40,7 @@ export default function Admin() {
   const [keywords, setKeywords] = useState([]);
   const [journals, setJournals] = useState([]);
   const [users, setUsers] = useState([]);
+  const [fulltexts, setFulltexts] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [retry, setRetry] = useState(0);
@@ -53,7 +54,7 @@ export default function Admin() {
     setError("");
     (async () => {
       try {
-        const [s, d, tp, kw, j, u] = await withTimeout(
+        const [s, d, tp, kw, j, u, ft] = await withTimeout(
           Promise.all([
             supabase.rpc("admin_stats"),
             supabase.rpc("admin_daily_activity"),
@@ -61,9 +62,10 @@ export default function Admin() {
             supabase.rpc("admin_popular_keywords"),
             supabase.rpc("admin_journal_dist"),
             supabase.rpc("admin_user_engagement"),
+            supabase.rpc("admin_fulltext_status"),
           ]),
         );
-        if ([s, d, tp, kw, j, u].some((result) => result.error)) {
+        if ([s, d, tp, kw, j, u, ft].some((result) => result.error)) {
           throw new Error("Could not load admin analytics.");
         }
         if (!active) return;
@@ -73,6 +75,7 @@ export default function Admin() {
         setKeywords(kw.data || []);
         setJournals(j.data || []);
         setUsers(u.data || []);
+        setFulltexts(ft.data);
       } catch {
         if (active) setError("Could not load admin analytics. Please check your access and retry.");
       } finally {
@@ -144,6 +147,44 @@ export default function Admin() {
             color="#965500"
           />
         </div>
+
+        <section
+          aria-label="원문 수집 상태"
+          className="bg-card rounded-xl border border-border p-4 sm:p-5 mb-6"
+        >
+          <h2 className="font-semibold text-text1 mb-3">원문 수집 · 본문 요약</h2>
+          <p className="text-sm text-text2">
+            Z8 원문 {fulltexts?.local_bodies || 0}편 · 본문 요약 {fulltexts?.ready_summaries || 0}편
+          </p>
+          {(fulltexts?.workers || []).map((worker, index) => {
+            const stale =
+              !worker.last_seen_at || Date.now() - Date.parse(worker.last_seen_at) > 2 * 60 * 60 * 1000;
+            const label = stale
+              ? "연결 확인 필요"
+              : {
+                  running: "수집 중",
+                  idle: "다음 수집 대기",
+                  error: "오류 · 다음 실행에서 재시도",
+                  registered: "등록됨",
+                }[worker.state] || worker.state;
+            return (
+              <p key={index} className="text-sm text-text2 mt-2">
+                {worker.name}: {label} · 최근 연결{" "}
+                {worker.last_seen_at ? new Date(worker.last_seen_at).toLocaleString() : "없음"}
+              </p>
+            );
+          })}
+          {!fulltexts?.workers?.length && (
+            <p className="text-sm text-text3 mt-2">등록된 원내망 수집기가 없습니다.</p>
+          )}
+          <p className="text-xs text-text3 mt-3">
+            Z8에 로그인한 동안 원문을 수집하고 Spark로 요약합니다. 원문은 Z8에 보관하며 요약과 필요한 정보만
+            서비스에 반영합니다.
+          </p>
+          <button type="button" onClick={() => setRetry((r) => r + 1)} className="text-sm text-accent mt-3">
+            상태 새로고침
+          </button>
+        </section>
 
         {/* Daily activity chart */}
         <div

@@ -19,12 +19,12 @@ def main():
         response.raise_for_status()
         paths = response.json().get("paths", {})
         required = ["/rpc/set_paper_feedback", "/rpc/delete_own_account", "/rpc/replace_daily_recommendations",
-                    "/rpc/store_paper_fulltext", "/paper_fulltexts", "/email_deliveries"]
+                    "/rpc/fulltext_queue_status", "/rpc/publish_institution_summary", "/email_deliveries"]
         missing = [path for path in required if path not in paths]
         if missing:
             raise SystemExit("Missing database contracts: " + ", ".join(missing))
         response = requests.get(f"{url}/rest/v1/papers", headers=headers, params={
-            "select":"fetched_at,summary_basis,summary_model", "order":"fetched_at.desc", "limit":"1"}, timeout=30)
+            "select":"fetched_at,summary_basis,summary_model,fulltext_storage", "order":"fetched_at.desc", "limit":"1"}, timeout=30)
         response.raise_for_status()
         rows = response.json()
         if not rows:

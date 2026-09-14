@@ -107,12 +107,18 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(sorted(scheduled), ["daily-fetch.yml", "fulltext-worker.yml"])
         worker = workflows["fulltext-worker.yml"]["jobs"]["process"]["steps"]
         self.assertFalse(any("send_digest" in step.get("run", "") for step in worker))
-        self.assertTrue(any(step.get("env", {}).get("SUMMARY_SOURCE") == "fulltext" for step in worker))
+        self.assertTrue(any(step.get("run") == "python scripts/check_fulltext_queue.py" for step in worker))
+        # Raw body collection and model requests belong to Z8/Spark, never a cloud job.
+        for workflow in workflows.values():
+            for job in workflow.get("jobs", {}).values():
+                for step in job.get("steps", []):
+                    self.assertNotIn("scripts/import_fulltexts.py", step.get("run", ""))
+                    self.assertNotIn("scripts/summarize_papers.py", step.get("run", ""))
+                    self.assertNotIn("--publish", step.get("run", ""))
         steps = workflows["daily-fetch.yml"]["jobs"]["fetch"]["steps"]
         self.assertEqual([step["run"] for step in steps if step.get("run", "").startswith("python scripts/")], [
             "python scripts/fetch_papers.py", "python scripts/classify_papers.py",
-            "python scripts/import_fulltexts.py",
-            "python scripts/summarize_papers.py", "python scripts/generate_recs.py", "python scripts/send_digest.py",
+            "python scripts/generate_recs.py", "python scripts/send_digest.py",
         ])
         for name in ("daily-fetch.yml", "daily-recommend.yml", "daily-email.yml", "manual-run.yml", "fulltext-worker.yml"):
             self.assertEqual(workflows[name]["concurrency"]["group"], "uro-daily-pipeline")

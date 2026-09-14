@@ -9,17 +9,12 @@ on:
         type: choice
         options:
           - fetch-only
-          - summarize-only
+          - check-fulltext-queue
           - recommend-only
           - fetch-and-recommend
           - digest-only
-          - fulltext-only
           - repair-keywords
           - all
-      fulltext_pmid:
-        description: 'Catalog PMID for fulltext-only; empty imports a bounded OA batch'
-        required: false
-        type: string
 
 permissions:
   contents: read
@@ -57,46 +52,15 @@ jobs:
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python scripts/classify_papers.py
 
-      - name: Import open-access full texts
-        if: github.event.inputs.task == 'fulltext-only' || (vars.FULLTEXT_IMPORT_ENABLED == 'true' && contains(fromJSON('["fetch-and-recommend","all"]'), github.event.inputs.task))
+      - name: Check Z8 collection and Spark summaries
+        if: github.event.inputs.task == 'check-fulltext-queue'
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          FULLTEXT_BATCH_SIZE: ${{ vars.FULLTEXT_BATCH_SIZE }}
-          IMPORT_PMID: ${{ inputs.fulltext_pmid }}
-        run: |
-          if [ -n "$IMPORT_PMID" ]; then
-            python scripts/fulltext.py --pmid "$IMPORT_PMID" --provider oa --publish
-          else
-            python scripts/import_fulltexts.py
-          fi
-
-      - name: Summarize imported paper
-        if: github.event.inputs.task == 'fulltext-only'
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
-          SUMMARY_BATCH_SIZE: ${{ vars.SUMMARY_BATCH_SIZE }}
-          SUMMARY_PMID: ${{ inputs.fulltext_pmid }}
-          SUMMARY_SOURCE: fulltext
-        run: python scripts/summarize_papers.py
-
-      - name: Summarize papers (Korean)
-        if: contains(fromJSON('["summarize-only","fetch-and-recommend","all"]'), github.event.inputs.task)
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          NCBI_EMAIL: ${{ vars.NCBI_EMAIL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
-          SUMMARY_BATCH_SIZE: ${{ vars.SUMMARY_BATCH_SIZE }}
-          SUMMARY_SOURCE: fulltext
-        run: python scripts/summarize_papers.py
+        run: python scripts/check_fulltext_queue.py
 
       - name: Generate recommendations
-        if: contains(fromJSON('["recommend-only","fetch-and-recommend","repair-keywords","all"]'), github.event.inputs.task)
+        if: contains(fromJSON('["recommend-only","check-fulltext-queue","fetch-and-recommend","repair-keywords","all"]'), github.event.inputs.task)
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           NCBI_EMAIL: ${{ vars.NCBI_EMAIL }}
