@@ -47,7 +47,7 @@ try {
   for (const file of (await readdir(migrations))
     .filter((f) => f.endsWith(".sql"))
     .sort()) {
-    if (file.startsWith("011_") || file.startsWith("012_")) continue; // Test upgrades in order below.
+    if (file.startsWith("011_") || file.startsWith("012_") || file.startsWith("013_")) continue; // Test upgrades in order below.
     if (file.startsWith("008_")) {
       let encoded = ["Prostatic Neoplasms", "Randomized Controlled Trial"];
       for (let depth = 0; depth < 21; depth++)
@@ -388,8 +388,19 @@ try {
   await asUser("authenticated",admin);
   assert.equal((await db.query("SELECT public.admin_catalog_status() AS status")).rows[0].status.shards.pending,1);
   await db.exec("RESET ROLE");
+  await db.exec(await readFile(path.join(migrations,"013_catalog_capacity.sql"),"utf8"));
+  await asUser("anon","");
+  await assert.rejects(db.query("SELECT public.catalog_storage_status()"),{code:"42501"});
+  await assert.rejects(db.query("SELECT * FROM app_private.catalog_capacity"),{code:"42501"});
+  await asUser("authenticated",unconfirmed);
+  await assert.rejects(db.query("SELECT public.admin_catalog_status()"),{code:"42501"});
+  await asUser("authenticated",admin);
+  const storage=(await db.query("SELECT public.admin_catalog_status() AS status")).rows[0].status.storage;
+  assert.equal(storage.budget_bytes,450*1024*1024);
+  assert.ok(storage.database_bytes>0);
+  await db.exec("RESET ROLE");
   console.log(
-    "PASS: all 12 migrations; private all-time backfill checkpoints, summary publication, verified Z8 archival, role isolation, provenance, feedback and account deletion",
+    "PASS: all 13 migrations; private catalog capacity/checkpoints, summary publication, verified Z8 archival, role isolation, provenance, feedback and account deletion",
   );
 } finally {
   await db.close();

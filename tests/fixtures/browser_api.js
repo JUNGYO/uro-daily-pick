@@ -348,6 +348,10 @@ export const supabase = {
           newest_publication: "2026-09-14",
           metadata_examined: 5,
           metadata_unavailable: 0,
+          storage: {
+            database_bytes: 450 * 1048576,
+            budget_bytes: 450 * 1048576,
+          },
         },
         error: null,
       };
