@@ -33,7 +33,7 @@ try {
   [Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($readerRandom)
   $readerPassword = [Convert]::ToBase64String($readerRandom) + '!aA1'
   $readerSecure = ConvertTo-SecureString $readerPassword -AsPlainText -Force
-  $readerUser = New-LocalUser -Name $readerName -Password $readerSecure -AccountNeverExpires -PasswordNeverExpires -UserMayNotChangePassword -Description 'Read-only Uro Daily Pick article server; no interactive application login'
+  $readerUser = New-LocalUser -Name $readerName -Password $readerSecure -AccountNeverExpires -PasswordNeverExpires -UserMayNotChangePassword -Description 'Read-only Uro Daily Pick article server'
   $readerSid = $readerUser.SID.Value
   # No administrator membership. Grant only the runtime and article/config directories.
   Add-LocalGroupMember -SID 'S-1-5-32-545' -Member $readerUser -ErrorAction SilentlyContinue
