@@ -1,6 +1,6 @@
 """
 Uro Daily Pick - Recommendation Generator
-Scores papers for each user and saves Top-10 daily recommendations.
+Scores papers with full-text summaries and saves up to five daily recommendations.
 Run daily via GitHub Actions after fetch_papers.py.
 """
 import os
@@ -61,14 +61,23 @@ def get_all_profiles():
     return paginate(lambda path, params: sb("GET", path, params), "profiles", {"select": "*", "onboarding_done": "eq.true", "name": "neq.[DELETED]", "order": "id"})
 
 
-def get_recent_papers(days=30):
-    cutoff = (datetime.now(timezone(timedelta(hours=9))) - timedelta(days=days)).strftime("%Y-%m-%d")
-    return sb("GET", "papers", {
-        "select": "id,pmid,title,abstract,authors,journal,pub_date,mesh_terms,keywords,paper_type,study_type",
-        "fetched_at": f"gte.{cutoff}",
-        "order": "pub_date.desc",
-        "limit": "500",
+def get_catalog_papers():
+    # Import time is not publication freshness. Backfilled bodies must become
+    # candidates, while unready papers still supply existing feedback signals.
+    return paginate(lambda path, params: sb("GET", path, params=params), "papers", {
+        "select": "id,pmid,title,abstract,authors,journal,pub_date,mesh_terms,keywords,paper_type,study_type,fulltext_available,summary_basis,summary_ko,summary_source_hash,summary_model,summarized_at",
+        "order": "pub_date.desc,id",
     })
+
+
+def has_fulltext_summary(paper):
+    """Same delivery contract as the frontend summary reader; no abstract fallback."""
+    return (paper.get("fulltext_available") is True
+            and paper.get("summary_basis") == "fulltext"
+            and all(isinstance(paper.get(field), str) and paper[field].strip()
+                    for field in ("summary_source_hash", "summary_model", "summarized_at"))
+            and isinstance(paper.get("summary_ko"), str)
+            and len([line for line in paper["summary_ko"].splitlines() if line.strip()]) == 3)
 
 
 def get_user_feedbacks(user_id):
@@ -294,7 +303,7 @@ def main():
     print(f"=== Generating recommendations for {today} ===")
 
     profiles = get_all_profiles()
-    papers = get_recent_papers(days=30)
+    papers = get_catalog_papers()
     for paper in papers:
         for field in ("authors", "keywords", "mesh_terms"):
             paper[field] = strings(paper.get(field))
@@ -302,6 +311,7 @@ def main():
     alerts = paginate(lambda path, params: sb("GET", path, params), "alerts", {"select": "user_id,alert_type,value", "is_active": "eq.true", "order": "id"})
 
     print(f"Users: {len(profiles)}, Papers pool: {len(papers)}, Total likes: {len(all_likes)}")
+    print(f"Full-text summary candidates: {sum(has_fulltext_summary(p) for p in papers)}")
 
     for profile in profiles:
         uid = profile["id"]
@@ -331,6 +341,8 @@ def main():
         skip_types = {"letter", "comment", "erratum", "editorial"}
         scored = []
         for paper in papers:
+            if not has_fulltext_summary(paper):
+                continue
             if paper["id"] in seen_ids:
                 continue
             if paper.get("paper_type", "").lower() in skip_types:
@@ -346,7 +358,7 @@ def main():
             if score > 0:
                 scored.append((paper, score, reasons))
 
-        scored.sort(key=lambda x: x[1], reverse=True)
+        scored.sort(key=lambda x: (x[1], x[0]["id"]), reverse=True)
         top5 = scored[:5]
 
         recs = [{"paper_id": p["id"], "score": score, "reasons": reasons} for p, score, reasons in top5]

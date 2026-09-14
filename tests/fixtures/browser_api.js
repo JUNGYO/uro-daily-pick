@@ -1,9 +1,14 @@
-const scenario = new URLSearchParams(location.search).get("scenario") || "reader";
+const scenario =
+  new URLSearchParams(location.search).get("scenario") || "reader";
 const today = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
 let user =
   scenario === "signed-out"
     ? null
-    : { id: "reader", email: scenario === "admin" ? "crazyslime@gmail.com" : "reader@example.test" };
+    : {
+        id: "reader",
+        email:
+          scenario === "admin" ? "crazyslime@gmail.com" : "reader@example.test",
+      };
 let listener = () => {};
 const papers = Array.from({ length: 5 }, (_, i) => ({
   id: i + 1,
@@ -24,7 +29,9 @@ const papers = Array.from({ length: 5 }, (_, i) => ({
   ][i],
   authors: ["Lee J", "Kim S", "Park H"],
   pub_date: today,
-  study_type: ["rct", "surgical", "biomarker", "prospective", "meta_analysis"][i],
+  study_type: ["rct", "surgical", "biomarker", "prospective", "meta_analysis"][
+    i
+  ],
   paper_type: "article",
   abstract:
     "This simulated research abstract is used only to verify the application interface. Participants were evaluated using prespecified clinical outcomes and patient-reported measures. The findings support further investigation, with interpretation limited by follow-up duration and the selected population. ".repeat(
@@ -33,7 +40,11 @@ const papers = Array.from({ length: 5 }, (_, i) => ({
   doi: "10.0000/test",
   keywords: ["prostate", "clinical outcomes"],
   mesh_terms: ["Prostatic Neoplasms"],
-  summary_basis: i === 0 ? "fulltext" : "abstract",
+  fulltext_available: true,
+  summary_basis: "fulltext",
+  summary_source_hash: "a".repeat(64),
+  summary_model: "fixture",
+  summarized_at: new Date().toISOString(),
   summary_ko:
     "이 내용은 화면 검증을 위한 가상 연구 요약입니다.\n연구 결과와 대상자 정보는 원문에서 확인할 수 있습니다.\n임상 적용에는 연구의 한계와 환자 상황을 함께 고려해야 합니다.",
   structured_data: {
@@ -43,7 +54,12 @@ const papers = Array.from({ length: 5 }, (_, i) => ({
     population: "Research participants",
   },
   clinical_relevance: 4,
-  qa_data: [{ q: "이 연구의 주요 한계는 무엇인가요?", a: "이 화면은 가상 데이터를 사용한 테스트입니다." }],
+  qa_data: [
+    {
+      q: "이 연구의 주요 한계는 무엇인가요?",
+      a: "이 화면은 가상 데이터를 사용한 테스트입니다.",
+    },
+  ],
 }));
 const db = {
   profiles: [
@@ -79,24 +95,52 @@ const db = {
           paper,
         })),
   feedbacks: [],
-  read_history: [{ id: 1, user_id: "reader", paper_id: 1, clicked_at: new Date().toISOString() }],
-  collections: [{ id: 1, user_id: "reader", name: "Journal club", created_at: new Date().toISOString() }],
+  read_history: [
+    {
+      id: 1,
+      user_id: "reader",
+      paper_id: 1,
+      clicked_at: new Date().toISOString(),
+    },
+  ],
+  collections: [
+    {
+      id: 1,
+      user_id: "reader",
+      name: "Journal club",
+      created_at: new Date().toISOString(),
+    },
+  ],
   collection_papers: [{ collection_id: 1, paper_id: 2 }],
-  alerts: [{ id: 1, user_id: "reader", alert_type: "keyword", value: "bladder", is_active: true }],
+  alerts: [
+    {
+      id: 1,
+      user_id: "reader",
+      alert_type: "keyword",
+      value: "bladder",
+      is_active: true,
+    },
+  ],
 };
 if (scenario === "ai-regression") {
   Object.assign(papers[0], {
     title: "DNA mismatch repair in Veterans Affairs",
-    abstract: "The role of DNA mismatch repair (MMR) remains incompletely defined. Available findings require further trials.",
-    keywords: [], mesh_terms: [],
+    abstract:
+      "The role of DNA mismatch repair (MMR) remains incompletely defined. Available findings require further trials.",
+    keywords: [],
+    mesh_terms: [],
   });
   Object.assign(papers[1], {
     title: "AI-assisted diagnosis",
     abstract: "An AI tool was evaluated. Its role in repair remains uncertain.",
-    keywords: [], mesh_terms: [],
+    keywords: [],
+    mesh_terms: [],
   });
   for (const rec of db.recommendations) {
-    rec.reasons = { matched_terms: ["AI"], reasons: [{ type: "keyword", label: "ai" }] };
+    rec.reasons = {
+      matched_terms: ["AI"],
+      reasons: [{ type: "keyword", label: "ai" }],
+    };
   }
 }
 if (scenario === "journal-alert") {
@@ -105,7 +149,42 @@ if (scenario === "journal-alert") {
   db.profiles[0].keywords = [];
   db.profiles[0].preferred_journals = [];
   db.profiles[0].preferred_study_types = [];
-  db.alerts = [{ id: 1, user_id: "reader", alert_type: "journal", value: "Urol", is_active: true }];
+  db.alerts = [
+    {
+      id: 1,
+      user_id: "reader",
+      alert_type: "journal",
+      value: "Urol",
+      is_active: true,
+    },
+  ];
+}
+if (scenario === "stale-picks") {
+  for (const paper of papers) {
+    paper.fetched_at = "2026-03-01";
+    paper.pub_date = "2026-03-01";
+  }
+  const pending = {
+    ...papers[0],
+    id: 99,
+    title: "Recent paper without a full text",
+    fulltext_available: false,
+    summary_basis: "abstract",
+  };
+  db.papers = [...papers, pending];
+  db.recommendations = [
+    db.recommendations[0],
+    {
+      id: 99,
+      user_id: "reader",
+      paper_id: 99,
+      paper: pending,
+      rec_date: today,
+      score: 99,
+    },
+  ];
+  db.read_history = [];
+  db.feedbacks = [{ user_id: "reader", paper_id: 1, action: "like" }];
 }
 function query(table) {
   let action = "select",
@@ -133,7 +212,9 @@ function query(table) {
       return q;
     },
     ilike(k, v) {
-      filters.push((row) => row[k]?.toLowerCase().includes(v.replaceAll("%", "").toLowerCase()));
+      filters.push((row) =>
+        row[k]?.toLowerCase().includes(v.replaceAll("%", "").toLowerCase()),
+      );
       return q;
     },
     order() {
@@ -169,18 +250,31 @@ function query(table) {
     then(resolve, reject) {
       return Promise.resolve()
         .then(() => {
-          if (scenario === "error") return { data: null, error: { message: "Simulated API outage" } };
-          let rows = (db[table] || []).filter((row) => filters.every((fn) => fn(row)));
+          if (scenario === "error")
+            return { data: null, error: { message: "Simulated API outage" } };
+          let rows = (db[table] || []).filter((row) =>
+            filters.every((fn) => fn(row)),
+          );
           if (action === "insert") {
-            rows = (Array.isArray(payload) ? payload : [payload]).map((row) => ({ id: Date.now(), ...row }));
+            rows = (Array.isArray(payload) ? payload : [payload]).map(
+              (row) => ({ id: Date.now(), ...row }),
+            );
             db[table].push(...rows);
           }
-          if (action === "update") rows.forEach((row) => Object.assign(row, payload));
-          if (action === "delete") db[table] = db[table].filter((row) => !rows.includes(row));
+          if (action === "update")
+            rows.forEach((row) => Object.assign(row, payload));
+          if (action === "delete")
+            db[table] = db[table].filter((row) => !rows.includes(row));
           if (table === "collection_papers")
-            rows = rows.map((row) => ({ ...row, paper: papers.find((p) => p.id === row.paper_id) }));
+            rows = rows.map((row) => ({
+              ...row,
+              paper: papers.find((p) => p.id === row.paper_id),
+            }));
           if (range) rows = rows.slice(...range);
-          return { data: single ? rows[0] || null : rows.map((row) => ({ ...row })), error: null };
+          return {
+            data: single ? rows[0] || null : rows.map((row) => ({ ...row })),
+            error: null,
+          };
         })
         .then(resolve, reject);
     },
@@ -215,17 +309,30 @@ export const supabase = {
   },
   async rpc(name, args) {
     if (name === "set_paper_feedback") {
-      if (scenario === "feedback-error") return { error: { message: "Simulated save failure" } };
+      if (scenario === "feedback-error")
+        return { error: { message: "Simulated save failure" } };
       db.feedbacks = db.feedbacks.filter((f) => f.paper_id !== args.p_paper_id);
       if (args.p_action !== "none")
-        db.feedbacks.push({ user_id: "reader", paper_id: args.p_paper_id, action: args.p_action });
+        db.feedbacks.push({
+          user_id: "reader",
+          paper_id: args.p_paper_id,
+          action: args.p_action,
+        });
     }
     if (name === "delete_own_account") {
       db.profiles = [];
       return {};
     }
     if (name === "admin_stats")
-      return { data: { total_users: 3, total_papers: 5, total_feedbacks: 0, total_reads: 1 }, error: null };
+      return {
+        data: {
+          total_users: 3,
+          total_papers: 5,
+          total_feedbacks: 0,
+          total_reads: 1,
+        },
+        error: null,
+      };
     return { data: name.startsWith("admin_") ? [] : null, error: null };
   },
 };
