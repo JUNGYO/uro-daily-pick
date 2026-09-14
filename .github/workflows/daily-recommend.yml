@@ -1,4 +1,4 @@
-name: Daily Recommendation + Summarize
+name: Refresh recommendations
 
 on:
   workflow_dispatch:
@@ -30,17 +30,6 @@ jobs:
           NCBI_EMAIL: ${{ vars.NCBI_EMAIL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python scripts/classify_papers.py
-
-      - name: Generate Korean summaries
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          NCBI_EMAIL: ${{ vars.NCBI_EMAIL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-          GEMINI_MODEL: ${{ vars.GEMINI_MODEL }}
-          SUMMARY_BATCH_SIZE: ${{ vars.SUMMARY_BATCH_SIZE }}
-          SUMMARY_SOURCE: fulltext
-        run: python scripts/summarize_papers.py
 
       - name: Generate recommendations
         env:

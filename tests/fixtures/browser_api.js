@@ -323,6 +323,21 @@ export const supabase = {
       db.profiles = [];
       return {};
     }
+    if (name === "admin_fulltext_status")
+      return {
+        data: {
+          ready_bodies: 5,
+          ready_summaries: 5,
+          workers: [
+            {
+              name: "Z8",
+              state: "idle",
+              last_seen_at: new Date().toISOString(),
+            },
+          ],
+        },
+        error: null,
+      };
     if (name === "admin_stats")
       return {
         data: {

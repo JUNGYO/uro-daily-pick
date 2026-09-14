@@ -150,7 +150,7 @@ def main():
     if not 0 <= budget <= 10000 or not 60 <= seconds <= 3600:
         raise SystemExit("SUMMARY_BATCH_SIZE must be 0..10000 (0 drains queue); SUMMARY_MAX_SECONDS must be 60..3600")
     deadline = time.monotonic() + seconds
-    papers = paginate(sb_get, "papers", {"select": "id,pmid,title,abstract,summary_ko,summary_basis,summary_source_hash,summary_model",
+    papers = paginate(sb_get, "papers", {"select": "id,pmid,title,abstract,summary_ko,summary_basis,summary_source_hash,summary_model,summarized_at",
         "order": "fetched_at.desc,id", **({"pmid": f"eq.{pmid}"} if pmid else {})}, size=100)
     if pmid and not papers:
         raise SystemExit("The requested PMID is not in the catalog")
@@ -166,6 +166,13 @@ def main():
             unavailable += 1
             if pmid:
                 raise SystemExit("The requested PMID has no ready full text; no abstract summary was generated")
+            continue
+        # Migration 010 clears provenance on every body/title change and rejects
+        # stale writes. Valid cached summaries need no private body download.
+        if (basis == "fulltext" and paper.get("summary_basis") == "fulltext"
+                and paper.get("summary_source_hash") and paper.get("summarized_at")
+                and paper.get("summary_model") == GEMINI_MODEL
+                and len([line for line in (paper.get("summary_ko") or "").splitlines() if line.strip()]) == 3):
             continue
         if time.monotonic() >= deadline:
             pending += 1
