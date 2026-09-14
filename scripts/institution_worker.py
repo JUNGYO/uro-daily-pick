@@ -114,10 +114,10 @@ class Service:
         rows = []
         while True:
             page = self.request("papers", params={"select":"pmid,doi,title,pub_date,paper_type",
-                "or":"(fulltext_available.eq.false,summary_source_hash.is.null,summarized_at.is.null)", "order":"pub_date.desc,id",
-                "offset":len(rows), "limit":100})
+                "or":f"(fulltext_available.eq.false,summary_source_hash.is.null,summarized_at.is.null,summary_model.is.null,summary_model.neq.{MODEL_LABEL},structured_data.is.null,qa_data.is.null)", "order":"pub_date.desc,id",
+                "offset":len(rows), "limit":1000})
             rows.extend(page)
-            if len(page) < 100:
+            if len(page) < 1000:
                 return rows
 
 
@@ -223,9 +223,9 @@ def run(directory, node, seconds):
         archive_legacy_bodies(service,directory,deadline)
         papers = service.candidates()
         # Finish already acquired bodies before spending time on publisher access.
-        papers.sort(key=lambda paper: not any(path.exists() for path in (
-            spool / (str(paper["pmid"]) + ".json"),
-            directory / "sources" / (str(paper["pmid"]) + ".browser.json"))))
+        cached={path.name.split(".")[0] for folder in (spool,directory/"cloud-archive",directory/"sources")
+                for path in folder.glob("*.json")}
+        papers.sort(key=lambda paper: str(paper["pmid"]) not in cached)
         print(f"Institution queue: {len(papers)} papers awaiting bodies", flush=True)
         for paper in papers:
             if time.monotonic() >= deadline:
@@ -245,6 +245,14 @@ def run(directory, node, seconds):
                     document = saved["document"] if saved.get("doi") == paper["doi"] and saved.get("title") == paper["title"] else None
                 else:
                     document = None
+                archive_path = directory / "cloud-archive" / (pmid + ".json")
+                if document is None and archive_path.exists():
+                    archived = json.loads(archive_path.read_text(encoding="utf-8"))
+                    if archived["paper"].get("title") == paper["title"] and archived["paper"].get("doi") == paper["doi"]:
+                        document = archived["document"]
+                        if hashlib.sha256(document["content_text"].encode()).hexdigest() != document["content_hash"]:
+                            raise ValueError("Archived body hash mismatch")
+                        save_json(document_path,{"doi":paper["doi"],"title":paper["title"],"document":document})
                 if document is None:
                     cached_source=directory/"sources"/(pmid+".browser.json")
                     result=None

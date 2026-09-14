@@ -15,6 +15,11 @@ const ready = {
 };
 beforeEach(() => from.mockReset());
 
+it("includes old full-text summaries even when PubMed has no abstract", () => {
+  const paper = { ...ready, id: 17, title: "Prostate outcomes", abstract: "", pub_date: "1937-11-01" };
+  expect(rankPapers([paper], { keywords: ["prostate"] }).map((r) => r.paper.id)).toEqual([17]);
+});
+
 it("does not recommend Veterans Affairs for AI keywords or keyword alerts", () => {
   const paper = {
     ...ready,

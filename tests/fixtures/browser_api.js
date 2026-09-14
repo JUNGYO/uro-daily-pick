@@ -338,6 +338,19 @@ export const supabase = {
         },
         error: null,
       };
+    if (name === "admin_catalog_status")
+      return {
+        data: {
+          catalog_papers: 5,
+          qwen_summaries: 5,
+          awaiting_qwen: 0,
+          oldest_publication: "1937-11-01",
+          newest_publication: "2026-09-14",
+          metadata_examined: 5,
+          metadata_unavailable: 0,
+        },
+        error: null,
+      };
     if (name === "admin_stats")
       return {
         data: {

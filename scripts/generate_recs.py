@@ -64,10 +64,19 @@ def get_all_profiles():
 def get_catalog_papers():
     # Import time is not publication freshness. Backfilled bodies must become
     # candidates, while unready papers still supply existing feedback signals.
-    return paginate(lambda path, params: sb("GET", path, params=params), "papers", {
+    papers = paginate(lambda path, params: sb("GET", path, params=params), "papers", {
         "select": "id,pmid,title,abstract,authors,journal,pub_date,mesh_terms,keywords,paper_type,study_type,fulltext_available,summary_basis,summary_ko,summary_source_hash,summary_model,summarized_at",
         "order": "pub_date.desc,id",
+        "fulltext_available": "eq.true",
     })
+    known={p["id"] for p in papers}
+    signals=[]
+    for table in ("feedbacks","read_history"):
+        signals.extend(paginate(lambda path, params: sb("GET",path,params=params),table,{"select":"paper_id","order":"id"}))
+    missing=sorted({p["paper_id"] for p in signals}-known)
+    for start in range(0,len(missing),100):
+        papers.extend(sb("GET","papers",params={"select":"*","id":"in.("+",".join(map(str,missing[start:start+100]))+")"}))
+    return papers
 
 
 def has_fulltext_summary(paper):
@@ -350,9 +359,6 @@ def main():
             # Skip by title pattern
             t = paper.get("title", "").lower()
             if any(s in t for s in ["reply to", "letter to the editor", "research letter", "letter:", "re:", "comment on", "erratum", "corrigendum", "retraction", "editorial", "correspondence"]):
-                continue
-            # Skip short papers without abstract (likely editorials/comments)
-            if not paper.get("abstract") or len(paper.get("abstract", "")) < 100:
                 continue
             score, reasons = score_paper(paper, profile, liked_papers, disliked_kws, dwell_papers, all_likes)
             if score > 0:

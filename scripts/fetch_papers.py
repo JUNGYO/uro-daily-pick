@@ -4,8 +4,9 @@ Fetches urology papers and inserts into Supabase.
 Run daily via GitHub Actions or manually.
 """
 import os
+import re
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from xml.etree import ElementTree as ET
 
 import requests
@@ -66,11 +67,13 @@ def build_journal_queries():
     queries = []
     # Each urology journal — fetch all recent papers
     for j in URO_JOURNALS:
-        queries.append(f'"{j}"[Journal]')
+        aliases={"BJU International":"British Journal of Urology",
+                 "Scandinavian Journal of Urology":"Scandinavian Journal of Urology and Nephrology"}
+        queries.append(f'({j}[Journal] OR {aliases[j]}[Journal])' if j in aliases else f'{j}[Journal]')
     # Oncology + General journals — only urology-related papers
     uro_filter = "(urology OR urologic OR prostate OR bladder OR kidney OR renal OR testicular)"
     for j in ONCO_JOURNALS + GENERAL_JOURNALS:
-        queries.append(f'"{j}"[Journal] AND {uro_filter}')
+        queries.append(f'({j}[Journal]) AND {uro_filter}')
     return queries
 
 URO_QUERIES = build_journal_queries()
@@ -97,7 +100,7 @@ def search_pmids(query, max_results=100, days_back=7):
     date_to = datetime.now().strftime("%Y/%m/%d")
     params = {
         "db": "pubmed", "term": query, "retmax": max_results,
-        "sort": "relevance", "datetype": "pdat",
+        "sort": "relevance", "datetype": "edat",
         "mindate": date_from, "maxdate": date_to,
         "retmode": "json", "email": PUBMED_EMAIL,
     }
@@ -168,10 +171,16 @@ def parse_article(article):
                      "jul":"07","aug":"08","sep":"09","oct":"10","nov":"11","dec":"12"}
         if m.lower() in month_map:
             m = month_map[m.lower()]
+        if not y:
+            medline=pub_el.findtext("MedlineDate","")
+            year=re.search(r"\b(\d{4})\b",medline)
+            y=year.group(1) if year else ""
+            for name,number in month_map.items():
+                if re.search(r"\b"+name,medline,re.I):m=number;break
         try:
-            pub_date = f"{y}-{int(m):02d}-{int(d):02d}"
+            pub_date = date(int(y),int(m),int(d)).isoformat()
         except (ValueError, TypeError):
-            pub_date = f"{y}-01-01" if y else None
+            pub_date = f"{y}-01-01" if y.isdigit() and 1<=int(y)<=9999 else None
 
     mesh_terms = [mh.findtext("DescriptorName", "") for mh in article.findall(".//MeshHeading")]
     keywords = [kw.text for kw in article.findall(".//Keyword") if kw.text]
@@ -261,7 +270,7 @@ def main():
             if new_pmids:
                 time.sleep(0.4)  # NCBI rate limit
                 details = fetch_details(new_pmids)
-                valid = [d for d in details if d["pmid"] and d["title"] and d.get("abstract") and d.get("paper_type") not in ("letter", "editorial")]
+                valid = [d for d in details if d["pmid"] and d["title"]]
                 all_new_papers.extend(valid)
                 existing.update(d["pmid"] for d in valid)
                 print(f"  [{short}...] {len(pmids)} found, {len(valid)} new")

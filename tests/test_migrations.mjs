@@ -47,7 +47,7 @@ try {
   for (const file of (await readdir(migrations))
     .filter((f) => f.endsWith(".sql"))
     .sort()) {
-    if (file.startsWith("011_")) continue; // Verify migration 010's upgrade contract before applying 011 below.
+    if (file.startsWith("011_") || file.startsWith("012_")) continue; // Test upgrades in order below.
     if (file.startsWith("008_")) {
       let encoded = ["Prostatic Neoplasms", "Randomized Controlled Trial"];
       for (let depth = 0; depth < 21; depth++)
@@ -378,8 +378,18 @@ try {
       .length,
     1,
   );
+  await db.exec(await readFile(path.join(migrations,"012_catalog_backfill.sql"),"utf8"));
+  await db.query("INSERT INTO public.catalog_backfill_jobs(job_key,query) VALUES($1,$2)",["a".repeat(64),"Example[Journal]"]);
+  await asUser("anon","");
+  await assert.rejects(db.query("SELECT * FROM public.catalog_backfill_jobs"),{code:"42501"});
+  await assert.rejects(db.query("SELECT public.catalog_backfill_status()"),{code:"42501"});
+  await asUser("authenticated",unconfirmed);
+  await assert.rejects(db.query("SELECT public.admin_catalog_status()"),{code:"42501"});
+  await asUser("authenticated",admin);
+  assert.equal((await db.query("SELECT public.admin_catalog_status() AS status")).rows[0].status.shards.pending,1);
+  await db.exec("RESET ROLE");
   console.log(
-    "PASS: all 11 migrations; summary-only publication, verified Z8 archival, role isolation, provenance, feedback, recommendations, account deletion",
+    "PASS: all 12 migrations; private all-time backfill checkpoints, summary publication, verified Z8 archival, role isolation, provenance, feedback and account deletion",
   );
 } finally {
   await db.close();

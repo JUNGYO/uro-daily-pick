@@ -104,7 +104,6 @@ export function rankPapers(papers, profile, seen = new Set(), alerts = []) {
       if (
         !hasFulltextSummary(paper) ||
         seen.has(paper.id) ||
-        abstract.length < 100 ||
         ["letter", "editorial", "comment", "erratum"].includes(paper.paper_type) ||
         /^(re:|reply to|letter to|erratum|editorial|comment on)/i.test(title)
       )

@@ -73,7 +73,7 @@ class SparkPipelineTests(unittest.TestCase):
             with self.assertRaises(ValueError): service.rpc(name,**values)
         service.request.assert_not_called()
 
-    def exercise_queue(self,fail_first=False):
+    def exercise_queue(self,fail_first=False,archived=False):
         papers=[{"pmid":str(n),"doi":"10.1000/study","title":"Synthetic study"} for n in (1,2)]
         service=Mock()
         service.candidates.return_value=papers
@@ -94,7 +94,13 @@ class SparkPipelineTests(unittest.TestCase):
              patch.object(worker,"generate_summary",side_effect=summarize),patch.object(worker.time,"sleep"), \
              contextlib.redirect_stdout(io.StringIO()):
             directory=Path(temporary)
+            if archived:
+                (directory/"cloud-archive").mkdir()
+                document=worker.parsed_result(papers[0],browser.read.return_value)
+                worker.save_json(directory/"cloud-archive/1.json",{"paper":papers[0],"document":document})
             worker.run(directory,Path("node.exe"),60)
+            if archived:
+                self.assertEqual(browser.read.call_count,1)
             self.assertIn(BODY.strip(),json.loads((directory/"documents/1.json").read_text(encoding="utf-8"))["document"]["content_text"])
             sent=[c for c in service.rpc.call_args_list if c.args[0]=="publish_institution_summary"]
             self.assertEqual(len(sent),1 if fail_first else 2)
@@ -107,6 +113,18 @@ class SparkPipelineTests(unittest.TestCase):
 
     def test_multiple_papers_are_saved_locally_and_only_summaries_are_published(self):
         self.exercise_queue()
+
+    def test_existing_cloud_archive_is_reused_for_qwen_resummary(self):
+        self.exercise_queue(archived=True)
+
+    def test_candidate_query_includes_old_models_without_publication_cutoff(self):
+        service=object.__new__(worker.Service)
+        service.request=Mock(return_value=[])
+        service.candidates()
+        params=service.request.call_args.kwargs["params"]
+        self.assertIn("summary_model.neq."+spark.MODEL_LABEL,params["or"])
+        self.assertNotIn("fetched_at",params)
+        self.assertNotIn("pub_date",params)
 
     def test_one_invalid_summary_retains_body_and_does_not_block_next_paper(self):
         service=self.exercise_queue(fail_first=True)
