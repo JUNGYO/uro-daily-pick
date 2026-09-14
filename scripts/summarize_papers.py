@@ -4,11 +4,12 @@ import json
 import os
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 
 import requests
 from common import supabase_headers
-from common import get_json, paginate
+from common import get_json, paginate, patch_fields
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
@@ -35,11 +36,9 @@ def sb_get(path, params):
 
 
 def sb_patch(paper_id, data):
-    response = requests.patch(f"{SUPABASE_URL}/rest/v1/papers", params={"id": f"eq.{paper_id}"},
+    return patch_fields(f"{SUPABASE_URL}/rest/v1/papers", params={"id": f"eq.{paper_id}"},
         headers={**supabase_headers(SUPABASE_KEY),
-                 "Prefer": "return=minimal"}, json=data, timeout=30)
-    response.raise_for_status()
-    return response
+                 "Prefer": "return=minimal"}, data=data)
 
 
 def summarize(title, source, basis="fulltext"):
@@ -108,6 +107,35 @@ def validate_summary(raw):
             "clinical_relevance": relevance, "qa_data": [{k: item[k] for k in ("q", "a")} for item in qa]}
 
 
+def summarize_and_save(job):
+    paper, source, basis, source_hash = job
+    patch_data = None
+    for attempt in range(3):
+        try:
+            patch_data = validate_summary(summarize(paper["title"], source, basis))
+            break
+        except (ValueError, TypeError):
+            if attempt < 2:
+                time.sleep(3 * (attempt + 1))
+    if patch_data is None:
+        print(f"PMID {paper['pmid']}: failed validation after three attempts", flush=True)
+        return False
+    patch_data.update(summary_basis=basis, summary_model=GEMINI_MODEL,
+        summary_source_hash=source_hash, summarized_at=datetime.now(timezone.utc).isoformat())
+    sb_patch(paper["id"], patch_data)
+    print(f"PMID {paper['pmid']}: {basis} summary saved", flush=True)
+    time.sleep(1)
+    return True
+
+
+def save_group(jobs):
+    # Only three bodies and model requests can be in flight. A completed result
+    # is persisted immediately, even while the other requests are still running.
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        results = list(executor.map(summarize_and_save, jobs))
+    return sum(results), len(results) - sum(results)
+
+
 def main():
     basis = os.environ.get("SUMMARY_SOURCE") or "fulltext"
     if basis not in {"fulltext", "abstract"}:
@@ -131,6 +159,7 @@ def main():
         fulltexts = {p["paper_id"]: p for p in paginate(sb_get, "paper_fulltexts", {
             "select": "paper_id,content_hash", "status": "eq.ready", "order": "paper_id"})}
     failed, done, pending, unavailable = 0, 0, 0, 0
+    jobs = []
     for paper in papers:
         fulltext = fulltexts.get(paper["id"])
         if basis == "fulltext" and not fulltext:
@@ -157,27 +186,19 @@ def main():
         source_hash = hashlib.sha256(f"{basis}\n{paper['title']}\n{source}".encode()).hexdigest()
         if paper.get("summary_source_hash") == source_hash and paper.get("summary_model") == GEMINI_MODEL:
             continue
-        if (budget and done + failed >= budget) or time.monotonic() >= deadline:
+        if (budget and done + failed + len(jobs) >= budget) or time.monotonic() >= deadline:
             pending += 1
             continue
-        patch_data = None
-        for attempt in range(3):
-            try:
-                patch_data = validate_summary(summarize(paper["title"], source, basis))
-                break
-            except (ValueError, TypeError):
-                if attempt < 2:
-                    time.sleep(3 * (attempt + 1))
-        if patch_data is None:
-            failed += 1
-            print(f"PMID {paper['pmid']}: failed validation after three attempts")
-            continue
-        patch_data.update(summary_basis=basis, summary_model=GEMINI_MODEL,
-            summary_source_hash=source_hash, summarized_at=datetime.now(timezone.utc).isoformat())
-        sb_patch(paper["id"], patch_data)
-        done += 1
-        print(f"PMID {paper['pmid']}: full-text summary saved" if basis == "fulltext" else f"PMID {paper['pmid']}: abstract summary saved", flush=True)
-        time.sleep(1)
+        jobs.append((paper, source, basis, source_hash))
+        if len(jobs) == 3:
+            completed, errors = save_group(jobs)
+            done += completed
+            failed += errors
+            jobs = []
+    if jobs:
+        completed, errors = save_group(jobs)
+        done += completed
+        failed += errors
     print(f"Summaries ({basis}): {done} updated, {failed} failed, {pending} pending (runtime/batch budget), {unavailable} awaiting full text")
     if failed:
         raise SystemExit(f"ERROR: {failed} summaries failed; downstream steps must wait")

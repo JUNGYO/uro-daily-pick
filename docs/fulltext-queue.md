@@ -5,6 +5,7 @@ The daily 06:00 KST pipeline fetches new papers. The Full-text queue workflow al
 - `SUMMARY_BATCH_SIZE=0` processes every ready, changed full text within 45 minutes. Zero removes the paper-count cap; it does not disable processing. Each validated three-line summary is saved immediately. Unchanged source/model pairs skip model calls. Remaining work resumes on the next run.
 - `FULLTEXT_BATCH_SIZE=0` scans the entire catalog within 15 minutes, including older papers and papers without an abstract. Unattempted papers take priority over retries. Ready bodies are preserved; unavailable OA documents are checked again after seven days.
 - Positive batch sizes remain available for diagnostics. They are not the production default.
+- At most three model requests run concurrently. Each result is saved independently; a transient database gateway error retries the same payload without generating or paying for a second model response.
 - A provider error does not prevent the queue worker from summarizing bodies already imported. Failed model requests are reported; successful summaries remain checkpointed.
 - The queue never sends email. Imported bodies remain in private storage. Summary provenance must say `fulltext`; unavailable bodies never fall back to abstracts.
 

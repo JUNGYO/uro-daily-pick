@@ -35,6 +35,32 @@ def get_json(url, *, headers, params=None, attempts=4):
         time.sleep(min(2 ** (attempt + 1), 8))
 
 
+def patch_fields(url, *, headers, params, data, attempts=4):
+    """Retry an idempotent field assignment with the exact same payload.
+
+    A gateway can fail after the database committed. Never regenerate a model
+    response or use this helper for increments, inserts, or email delivery.
+    """
+    for attempt in range(attempts):
+        response = None
+        try:
+            response = requests.patch(url, headers={**headers, "Connection": "close"},
+                                      params=params, json=data, timeout=(10, 45))
+            response.raise_for_status()
+            return response
+        except requests.HTTPError:
+            if response is None or response.status_code not in (408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524):
+                raise
+        except (requests.ConnectionError, requests.Timeout):
+            pass
+        finally:
+            if response is not None:
+                response.close()
+        if attempt + 1 == attempts:
+            raise requests.RequestException(f"Database write failed after {attempts} attempts") from None
+        time.sleep(min(2 ** (attempt + 1), 8))
+
+
 def json_value(value, fallback):
     try:
         parsed = json.loads(value) if isinstance(value, str) else value

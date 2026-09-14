@@ -7,6 +7,8 @@ import sys
 import unittest
 from pathlib import Path
 from unittest.mock import patch
+import requests
+import threading
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 import summarize_papers as summary
@@ -86,6 +88,46 @@ class SourceTests(unittest.TestCase):
         self.assertIsNone(error)
         model.assert_not_called()
         save.assert_not_called()
+
+    def test_database_504_does_not_regenerate_a_successful_model_result(self):
+        responses = []
+        for status in (504, 204):
+            response = requests.Response()
+            response.status_code = status
+            response._content = b""
+            response._content_consumed = True
+            responses.append(response)
+        with patch.dict(summary.os.environ, {"SUMMARY_SOURCE": "fulltext", "SUMMARY_PMID": "", "SUMMARY_BATCH_SIZE": "0"}), \
+             patch.multiple(summary, SUPABASE_URL="https://example.test", SUPABASE_KEY="test", GEMINI_API_KEY="test"), \
+             patch.object(summary, "sb_get", side_effect=[[{"id": 1257, "pmid": "42303909", "title": "Study"}],
+                 [{"paper_id": 1257, "content_hash": "body"}], [{"content_text": BODY}]]), \
+             patch.object(summary, "summarize", return_value=VALID) as model, \
+             patch.object(summary.requests, "patch", side_effect=responses) as save, \
+             patch.object(summary.time, "sleep"):
+            summary.main()
+        model.assert_called_once()
+        self.assertEqual(save.call_count, 2)
+        self.assertEqual(save.call_args_list[0].kwargs["json"], save.call_args_list[1].kwargs["json"])
+
+    def test_three_model_requests_progress_concurrently_and_save_distinct_papers(self):
+        barrier = threading.Barrier(3)
+        papers = [{"id": n, "pmid": str(n), "title": f"Study {n}"} for n in range(1, 4)]
+        def get(table, params):
+            if table == "papers":
+                return papers
+            if params["select"] == "paper_id,content_hash":
+                return [{"paper_id": n, "content_hash": "body"} for n in range(1, 4)]
+            return [{"content_text": BODY}]
+        def model(*args):
+            barrier.wait(timeout=3)
+            return VALID
+        with patch.dict(summary.os.environ, {"SUMMARY_SOURCE": "fulltext", "SUMMARY_PMID": "", "SUMMARY_BATCH_SIZE": "0"}), \
+             patch.multiple(summary, SUPABASE_URL="https://example.test", SUPABASE_KEY="test", GEMINI_API_KEY="test"), \
+             patch.object(summary, "sb_get", side_effect=get), patch.object(summary, "summarize", side_effect=model), \
+             patch.object(summary, "sb_patch") as save, patch.object(summary.time, "sleep"):
+            summary.main()
+        self.assertEqual(save.call_count, 3)
+        self.assertEqual({call.args[0] for call in save.call_args_list}, {1, 2, 3})
 
 
 if __name__ == "__main__":
