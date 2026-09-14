@@ -14,6 +14,7 @@ const Landing = lazy(() => import("./pages/Landing"));
 const Insights = lazy(() => import("./pages/Insights"));
 const Admin = lazy(() => import("./pages/Admin"));
 const Privacy = lazy(() => import("./pages/Privacy"));
+const FullText = lazy(() => import("./pages/FullText"));
 import { Newspaper, FolderOpen, Settings as SettingsIcon, LogOut, Network, BarChart3 } from "lucide-react";
 
 const ADMIN_EMAILS = ["crazyslime@gmail.com"];
@@ -209,6 +210,7 @@ export default function App() {
                         <Route path="/collections" element={<Collections />} />
                         <Route path="/settings" element={<Settings />} />
                         <Route path="/admin" element={<Admin />} />
+                        <Route path="/fulltext/:pmid" element={<FullText />} />
                         <Route
                           path="*"
                           element={

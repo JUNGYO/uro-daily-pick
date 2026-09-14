@@ -41,6 +41,7 @@ const papers = Array.from({ length: 5 }, (_, i) => ({
   keywords: ["prostate", "clinical outcomes"],
   mesh_terms: ["Prostatic Neoplasms"],
   fulltext_available: true,
+  fulltext_storage: "z8",
   summary_basis: "fulltext",
   summary_source_hash: "a".repeat(64),
   summary_model: "fixture",
@@ -284,7 +285,11 @@ function query(table) {
 export const supabase = {
   from: query,
   auth: {
-    getSession: async () => ({ data: { session: user ? { user } : null } }),
+    getSession: async () => ({
+      data: {
+        session: user ? { user, access_token: "fixture.access.token" } : null,
+      },
+    }),
     onAuthStateChange(fn) {
       listener = fn;
       return {

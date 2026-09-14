@@ -6,6 +6,7 @@ import { checked, jsonValue, kstDate, shiftDate, appUrl } from "../lib/data";
 import { getDailyPicks } from "../lib/recommendations";
 import { keywordPattern } from "../lib/keywords";
 import PaperSummary from "../components/PaperSummary";
+import FullTextLink from "../components/FullTextLink";
 import {
   Heart,
   X,
@@ -486,6 +487,7 @@ function Detail({ rec, onFeedback, onPrev, onNext, hasPrev, hasNext, likeAnim })
           >
             {copied === "cite" ? <Check size={15} /> : <Copy size={15} />}
           </button>
+          <FullTextLink paper={paper} />
           {paper.doi && (
             <a
               href={`https://doi.org/${encodeURIComponent(paper.doi)}`}
@@ -493,7 +495,7 @@ function Detail({ rec, onFeedback, onPrev, onNext, hasPrev, hasNext, likeAnim })
               rel="noopener"
               className="h-9 px-4 rounded-lg bg-accent text-white text-[0.778rem] font-medium flex items-center gap-1.5 hover:bg-[#0066D6] transition-colors no-underline"
             >
-              Full Text <ExternalLink size={13} />
+              Publisher <ExternalLink size={13} />
             </a>
           )}
           <a
@@ -573,6 +575,9 @@ function MobileDetail({ rec, onFeedback, onBack, likeAnim }) {
           </div>
         )}
         <PaperSummary paper={paper} />
+        <div className="mb-5">
+          <FullTextLink paper={paper} />
+        </div>
         {/* Details & Q&A accordion */}
         {(paper.structured_data || paper.qa_data) && <DetailAccordion paper={paper} />}
         {paper.abstract && (
