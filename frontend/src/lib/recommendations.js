@@ -1,6 +1,7 @@
 import { supabase } from "./supabase";
 import { checked, kstDate, normalizeRec, stringList, withTimeout, allRows } from "./data";
 import { keywordMatches, paperMatchesKeyword } from "./keywords";
+import { hasFulltextSummary } from "./summary";
 
 export async function getDailyPicks(userId, day) {
   const stored = await withTimeout(
@@ -13,8 +14,9 @@ export async function getDailyPicks(userId, day) {
         .order("score", { ascending: false }),
     ),
   );
-  if (stored?.length) {
-    const valid = stored.filter((rec) => rec.paper);
+  const historical = day !== kstDate();
+  const valid = (stored || []).filter((rec) => rec.paper && (historical || hasFulltextSummary(rec.paper)));
+  if (historical || valid.length >= 5) {
     const feedback = valid.length
       ? await checked(
           supabase
@@ -30,8 +32,7 @@ export async function getDailyPicks(userId, day) {
     const actions = Object.fromEntries((feedback || []).map((f) => [f.paper_id, f.action]));
     return valid.map((rec) => normalizeRec({ ...rec, feedback_action: actions[rec.paper_id] || null }));
   }
-  // Historical dates must never receive today's fallback recommendations.
-  if (day !== kstDate()) return [];
+  // Repair today's stale/partial picks immediately. History remains as recorded.
   const [profile, papers, feedback, reads, alerts] = await withTimeout(
     Promise.all([
       checked(
@@ -41,15 +42,16 @@ export async function getDailyPicks(userId, day) {
           .eq("id", userId)
           .single(),
       ),
-      checked(
+      allRows(() =>
         supabase
           .from("papers")
           .select("*")
-          .gte("fetched_at", new Date(Date.now() - 30 * 86400000).toISOString())
+          .eq("fulltext_available", true)
+          .eq("summary_basis", "fulltext")
           .order("pub_date", { ascending: false })
-          .limit(300),
+          .order("id"),
       ),
-      allRows(() => supabase.from("feedbacks").select("paper_id").eq("user_id", userId).order("id")),
+      allRows(() => supabase.from("feedbacks").select("paper_id,action").eq("user_id", userId).order("id")),
       checked(
         supabase
           .from("read_history")
@@ -61,9 +63,10 @@ export async function getDailyPicks(userId, day) {
       checked(supabase.from("alerts").select("alert_type,value").eq("user_id", userId).eq("is_active", true)),
     ]),
   );
-  const seen = new Set([...(feedback || []), ...(reads || [])].map((row) => row.paper_id));
-  return rankPapers(papers || [], profile || {}, seen, alerts || [])
-    .slice(0, 5)
+  const actions = Object.fromEntries((feedback || []).map((f) => [f.paper_id, f.action]));
+  const seen = new Set([...valid, ...(feedback || []), ...(reads || [])].map((row) => row.paper_id));
+  const added = rankPapers(papers || [], profile || {}, seen, alerts || [])
+    .slice(0, 5 - valid.length)
     .map(({ paper, score, terms, alert }) =>
       normalizeRec({
         id: `instant-${paper.id}`,
@@ -84,6 +87,10 @@ export async function getDailyPicks(userId, day) {
         },
       }),
     );
+  return [
+    ...valid.map((rec) => normalizeRec({ ...rec, feedback_action: actions[rec.paper_id] || null })),
+    ...added,
+  ];
 }
 
 export function rankPapers(papers, profile, seen = new Set(), alerts = []) {
@@ -95,6 +102,7 @@ export function rankPapers(papers, profile, seen = new Set(), alerts = []) {
       const title = (paper.title || "").toLowerCase(),
         abstract = (paper.abstract || "").toLowerCase();
       if (
+        !hasFulltextSummary(paper) ||
         seen.has(paper.id) ||
         abstract.length < 100 ||
         ["letter", "editorial", "comment", "erratum"].includes(paper.paper_type) ||

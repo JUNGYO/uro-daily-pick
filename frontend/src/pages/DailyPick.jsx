@@ -872,7 +872,7 @@ export default function DailyPick() {
           <p className="text-[0.889rem] text-text3 leading-relaxed mb-4">
             {selectedDate !== todayKST
               ? "There are no recommendations for this date."
-              : "New papers are collected every morning at 6:00 AM KST. Make sure your research keywords are set in Settings."}
+              : "아직 읽지 않은 본문 요약이 준비되면 추천에 추가됩니다. 새 논문은 매일 수집하고 원문·요약 처리는 계속 진행합니다."}
           </p>
           {selectedDate !== todayKST ? (
             <button
@@ -943,6 +943,12 @@ export default function DailyPick() {
               </button>
             </div>
           </div>
+
+          {selectedDate === todayKST && (
+            <p className="px-4 pt-2 text-xs leading-relaxed text-text3">
+              본문 요약이 준비된 논문을 관심사에 맞춰 추천합니다.
+            </p>
+          )}
 
           {/* Progress */}
           <div className="px-4 py-2">

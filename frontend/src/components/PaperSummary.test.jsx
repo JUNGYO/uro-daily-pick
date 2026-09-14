@@ -8,6 +8,7 @@ it("shows exactly three numbered lines only for a verified full-text summary", (
       paper={{
         summary_ko: "목적과 설계.\n주요 결과.\n연구 한계.",
         summary_basis: "fulltext",
+        fulltext_available: true,
         summary_source_hash: "hash",
         summary_model: "model",
         summarized_at: "2026-09-13",

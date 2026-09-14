@@ -1,15 +1,8 @@
+import { hasFulltextSummary, summaryLines } from "../lib/summary";
+
 export default function PaperSummary({ paper }) {
-  const lines =
-    typeof paper.summary_ko === "string"
-      ? paper.summary_ko
-          .split(/\r?\n/)
-          .map((line) => line.trim())
-          .filter(Boolean)
-      : [];
-  const ready =
-    paper.summary_basis === "fulltext" &&
-    Boolean(paper.summary_source_hash && paper.summary_model && paper.summarized_at) &&
-    lines.length === 3;
+  const lines = summaryLines(paper);
+  const ready = hasFulltextSummary(paper);
   return (
     <section
       aria-label="본문 기반 세 줄 요약"
