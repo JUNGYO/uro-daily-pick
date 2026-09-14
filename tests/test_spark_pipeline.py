@@ -73,7 +73,7 @@ class SparkPipelineTests(unittest.TestCase):
             with self.assertRaises(ValueError): service.rpc(name,**values)
         service.request.assert_not_called()
 
-    def exercise_queue(self,fail_first=False,archived=False):
+    def exercise_queue(self,fail_first=False,archived=False,revised_title=False):
         papers=[{"pmid":str(n),"doi":"10.1000/study","title":"Synthetic study"} for n in (1,2)]
         service=Mock()
         service.candidates.return_value=papers
@@ -97,7 +97,8 @@ class SparkPipelineTests(unittest.TestCase):
             if archived:
                 (directory/"cloud-archive").mkdir()
                 document=worker.parsed_result(papers[0],browser.read.return_value)
-                worker.save_json(directory/"cloud-archive/1.json",{"paper":papers[0],"document":document})
+                cached_paper={**papers[0],"title":papers[0]["title"]+"."} if revised_title else papers[0]
+                worker.save_json(directory/"cloud-archive/1.json",{"paper":cached_paper,"document":document})
             worker.run(directory,Path("node.exe"),60)
             if archived:
                 self.assertEqual(browser.read.call_count,1)
@@ -116,6 +117,26 @@ class SparkPipelineTests(unittest.TestCase):
 
     def test_existing_cloud_archive_is_reused_for_qwen_resummary(self):
         self.exercise_queue(archived=True)
+
+    def test_corrected_title_reuses_matching_doi_archive_with_new_summary_hash(self):
+        self.exercise_queue(archived=True,revised_title=True)
+
+    def test_cache_title_corrections_require_matching_doi_and_similar_title(self):
+        paper={"title":"Structured prostate cancer clinical study","doi":"10.1000/study"}
+        self.assertTrue(worker.cached_paper_matches({**paper,"title":paper["title"]+"."},paper))
+        self.assertFalse(worker.cached_paper_matches({**paper,"doi":"10.1000/another"},paper))
+        self.assertFalse(worker.cached_paper_matches({**paper,"title":"Unrelated bladder article"},paper))
+        self.assertFalse(worker.cached_paper_matches({"title":paper["title"]+".","doi":""},{**paper,"doi":""}))
+        with self.assertRaises(ValueError):worker.verify_cached_body({"content_text":"changed","content_hash":"original"})
+
+    def test_catalog_conflict_requeues_only_the_publication(self):
+        service=object.__new__(worker.Service)
+        service.config={"url":"https://example.invalid","public_key":"test"}
+        service.opener=Mock()
+        service.opener.open.side_effect=worker.HTTPError("https://example.invalid",400,"Catalog changed",{},None)
+        with self.assertRaises(ValueError):service.request("rpc/publish_institution_summary",{})
+        service.opener.open.side_effect=worker.HTTPError("https://example.invalid",403,"Denied",{},None)
+        with self.assertRaises(RuntimeError):service.request("rpc/publish_institution_summary",{})
 
     def test_candidate_query_includes_old_models_without_publication_cutoff(self):
         service=object.__new__(worker.Service)

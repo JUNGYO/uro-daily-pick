@@ -86,6 +86,8 @@ class Service:
                     content = response.read(2 * 1024 * 1024)
                 return json.loads(content) if content else None
             except HTTPError as error:
+                if path=="rpc/publish_institution_summary" and error.code in (400,409,422):
+                    raise ValueError("Summary publication requires revalidation") from None
                 if error.code not in (408,429,500,502,503,504,520,522,524):
                     raise RuntimeError(f"Service HTTP {error.code}") from None
             except ssl.SSLCertVerificationError:
@@ -165,6 +167,24 @@ def next_retry(status, now):
     return now + (900 if status == "retryable_error" else 86400 if status == "challenge" else 7 * 86400)
 
 
+def cached_paper_matches(saved, paper):
+    """Reuse a verified PMID cache across minor publisher title corrections."""
+    old_doi=(saved.get("doi") or "").strip().lower()
+    new_doi=(paper.get("doi") or "").strip().lower()
+    if old_doi!=new_doi:return False
+    if saved.get("title")==paper.get("title"):return True
+    if not new_doi:return False
+    normalized=lambda title:" ".join(re.findall(r"\w+",(title or "").lower()))
+    old_title,new_title=normalized(saved.get("title")),normalized(paper.get("title"))
+    return bool(old_title and new_title) and SequenceMatcher(None,old_title,new_title).ratio()>=.9
+
+
+def verify_cached_body(document):
+    if hashlib.sha256(document["content_text"].encode()).hexdigest()!=document["content_hash"]:
+        raise ValueError("Cached body hash mismatch")
+    return document
+
+
 def save_json(path, value):
     temporary=path.with_suffix(path.suffix+".pending")
     with temporary.open("w",encoding="utf-8") as output:
@@ -242,16 +262,14 @@ def run(directory, node, seconds):
             try:
                 if document_path.exists():
                     saved = json.loads(document_path.read_text(encoding="utf-8"))
-                    document = saved["document"] if saved.get("doi") == paper["doi"] and saved.get("title") == paper["title"] else None
+                    document = verify_cached_body(saved["document"]) if cached_paper_matches(saved,paper) else None
                 else:
                     document = None
                 archive_path = directory / "cloud-archive" / (pmid + ".json")
                 if document is None and archive_path.exists():
                     archived = json.loads(archive_path.read_text(encoding="utf-8"))
-                    if archived["paper"].get("title") == paper["title"] and archived["paper"].get("doi") == paper["doi"]:
-                        document = archived["document"]
-                        if hashlib.sha256(document["content_text"].encode()).hexdigest() != document["content_hash"]:
-                            raise ValueError("Archived body hash mismatch")
+                    if cached_paper_matches(archived["paper"],paper):
+                        document = verify_cached_body(archived["document"])
                         save_json(document_path,{"doi":paper["doi"],"title":paper["title"],"document":document})
                 if document is None:
                     cached_source=directory/"sources"/(pmid+".browser.json")

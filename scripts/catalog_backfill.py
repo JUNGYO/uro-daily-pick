@@ -62,7 +62,10 @@ class Store:
 
     def insert(self,table,rows,conflict):
         if not rows:return 0
-        headers={**self.headers,"Prefer":"resolution=ignore-duplicates,return=representation"}
+        # Refresh citation fields on existing rows. Model output/provenance and
+        # user activity are absent from these payloads and remain untouched.
+        resolution="merge-duplicates" if table=="papers" else "ignore-duplicates"
+        headers={**self.headers,"Prefer":f"resolution={resolution},return=representation"}
         params={"on_conflict":conflict,"select":conflict}
         for attempt in range(4):
             try:
@@ -91,6 +94,21 @@ def pubmed_search(job):
     time.sleep(.4)
     return get_json(PUBMED_BASE+"/esearch.fcgi",headers={},params={"db":"pubmed","term":search_term(job),
         "retmax":PAGE_LIMIT,"retmode":"json","tool":"uro_daily_pick","email":PUBMED_EMAIL})["esearchresult"]
+
+
+def seed_existing_catalog(store):
+    """Audit a durable snapshot of every existing PMID, including other journals."""
+    job=job_for("Existing catalog citation audit v1")
+    if store.read("catalog_backfill_jobs",{"select":"job_key","job_key":"eq."+job["job_key"],"limit":1}):
+        return
+    ids=[]
+    while True:
+        page=store.read("papers",{"select":"pmid","order":"id","offset":len(ids),"limit":1000})
+        ids.extend(row["pmid"] for row in page)
+        if len(page)<1000:break
+    # These identifiers are already known locally; no ESearch pagination limit
+    # applies. The committed snapshot is reused after every interruption.
+    store.insert("catalog_backfill_jobs",[{**job,"status":"active","pmids":ids,"source_count":len(ids)}],"job_key")
 
 
 def pubmed_details(ids):
@@ -147,6 +165,7 @@ def main():
     args=parser.parse_args()
     if not 60<=args.max_seconds<=3600:parser.error("Runtime must be 60..3600 seconds")
     store=Store()
+    seed_existing_catalog(store)
     store.insert("catalog_backfill_jobs",[job_for(q) for q in URO_QUERIES],"job_key")
     deadline=time.monotonic()+args.max_seconds
     failures=0
