@@ -174,6 +174,14 @@ export default function Admin() {
           {catalog?.shards?.error > 0 && (
             <p className="text-sm text-text2 mt-2">일부 문헌 조회가 실패해 저장된 위치부터 재시도합니다.</p>
           )}
+          {catalog?.storage && (
+            <p className="text-sm text-text2 mt-2">
+              DB 사용량 {Math.ceil(catalog.storage.database_bytes / 1048576)}MB · 수집 저장공간 예산{" "}
+              {Math.floor(catalog.storage.budget_bytes / 1048576)}MB
+              {catalog.storage.database_bytes >= catalog.storage.budget_bytes &&
+                " — 저장공간 확장 대기 중입니다. 수집 지점은 보존되며 용량 조정 후 이어집니다."}
+            </p>
+          )}
           {(fulltexts?.workers || []).map((worker, index) => {
             const stale =
               !worker.last_seen_at || Date.now() - Date.parse(worker.last_seen_at) > 2 * 60 * 60 * 1000;

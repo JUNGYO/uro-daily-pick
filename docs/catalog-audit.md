@@ -27,6 +27,10 @@ The all-time cloud workflow runs hourly and resumes for up to 20 minutes per run
 
 The admin page reports catalog size, publication span, Qwen completion/pending counts and historical metadata progress. It distinguishes citation collection from body acquisition and model processing.
 
+The first production run completed successfully with 47,919 catalog papers, reaching February 17, 1866, and no unresolved metadata omissions at that checkpoint. Qwen had produced 83 validated summaries at the same snapshot. These stages continue independently.
+
+The current free database has a 500 MB allowance. Collection checks a private 450 MiB database budget and preserves its checkpoint before exceeding it, leaving room for the running service. This is a storage safeguard, not a date or paper-count restriction. Capacity must be adjusted only after the owner approves a suitable plan. Unchanged citations are skipped before upsert to avoid unnecessary writes and table bloat. Admin shows database usage and a capacity-waiting message when applicable.
+
 ## Primary references
 
 [PubMed Help](https://pubmed.ncbi.nlm.nih.gov/help/) documents journal-name mapping, date fields and the absence of abstracts in many older records. [NCBI E-utilities documentation](https://www.ncbi.nlm.nih.gov/books/NBK25499/) documents the PubMed search retrieval limit and supported Entrez query syntax.

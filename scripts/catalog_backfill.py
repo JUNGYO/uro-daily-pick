@@ -14,6 +14,10 @@ from fetch_papers import URO_QUERIES, PUBMED_BASE, PUBMED_EMAIL, parse_article
 PAGE_LIMIT = 9999
 
 
+class StorageCapacityReached(Exception):
+    pass
+
+
 def job_for(query, lower=1, upper=None):
     identity=json.dumps([query,lower,upper],separators=(",",":"))
     return {"job_key":hashlib.sha256(identity.encode()).hexdigest(),"query":query,
@@ -62,6 +66,12 @@ class Store:
 
     def insert(self,table,rows,conflict):
         if not rows:return 0
+        if table=="papers":
+            columns=sorted({key for row in rows for key in row})
+            existing=self.read("papers",{"select":",".join(columns),"pmid":"in.("+",".join(row["pmid"] for row in rows)+")"})
+            known={row["pmid"]:row for row in existing}
+            rows=[row for row in rows if row["pmid"] not in known or any(known[row["pmid"]].get(k)!=v for k,v in row.items())]
+            if not rows:return 0
         # Refresh citation fields on existing rows. Model output/provenance and
         # user activity are absent from these payloads and remain untouched.
         resolution="merge-duplicates" if table=="papers" else "ignore-duplicates"
@@ -88,6 +98,11 @@ class Store:
             "or":f"(retry_after.is.null,retry_after.lte.{now})",
             "order":"status.asc,lower_uid.desc,updated_at.asc,job_key","limit":1})
         return rows[0] if rows else None
+
+    def ensure_capacity(self):
+        status=self.read("rpc/catalog_storage_status",{})
+        if status["database_bytes"]>=status["budget_bytes"]:
+            raise StorageCapacityReached("Database storage budget reached; checkpoint retained")
 
 
 def pubmed_search(job):
@@ -141,6 +156,7 @@ def process_job(store,job,deadline,search=pubmed_search,details=pubmed_details):
     offset=job.get("processed",0)
     missing=list(job.get("unavailable_pmids") or [])
     while offset<len(ids) and time.monotonic()<deadline:
+        if offset%1000==0:store.ensure_capacity()
         requested=ids[offset:offset+100]
         articles=details(requested)
         valid=[p for p in articles if p.get("pmid") in requested and p.get("title")]
@@ -165,6 +181,10 @@ def main():
     args=parser.parse_args()
     if not 60<=args.max_seconds<=3600:parser.error("Runtime must be 60..3600 seconds")
     store=Store()
+    try:store.ensure_capacity()
+    except StorageCapacityReached:
+        print("::warning::Catalog paused at its storage budget; existing service and checkpoints are preserved")
+        return
     seed_existing_catalog(store)
     store.insert("catalog_backfill_jobs",[job_for(q) for q in URO_QUERIES],"job_key")
     deadline=time.monotonic()+args.max_seconds
@@ -173,6 +193,9 @@ def main():
         job=store.next_job()
         if not job:break
         try:process_job(store,job,deadline)
+        except StorageCapacityReached:
+            print("::warning::Catalog paused at its storage budget; resume after approved capacity adjustment")
+            break
         except Exception as error:
             failures+=1
             store.update(job["job_key"],{"status":"error","error_code":type(error).__name__,
