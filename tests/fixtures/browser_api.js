@@ -99,6 +99,14 @@ if (scenario === "ai-regression") {
     rec.reasons = { matched_terms: ["AI"], reasons: [{ type: "keyword", label: "ai" }] };
   }
 }
+if (scenario === "journal-alert") {
+  db.recommendations = [];
+  db.read_history = [];
+  db.profiles[0].keywords = [];
+  db.profiles[0].preferred_journals = [];
+  db.profiles[0].preferred_study_types = [];
+  db.alerts = [{ id: 1, user_id: "reader", alert_type: "journal", value: "Urol", is_active: true }];
+}
 function query(table) {
   let action = "select",
     payload,

@@ -53,3 +53,17 @@ it("rejects historical AI reasons from repair/remains, including absent terms an
     expect(rec.reasons.reasons).toEqual([]);
   }
 });
+
+it("preserves journal and author subscriptions while validating keyword alerts against paper text", () => {
+  const rec = normalizeRec({
+    paper: { title: "DNA mismatch repair", journal: "European Urology", authors: ["Ai Lee"] },
+    reasons: {
+      reasons: [
+        { type: "alert", alert_type: "journal", label: "Alert: Urol" },
+        { type: "alert", alert_type: "author", label: "Alert: Ai Lee" },
+        { type: "alert", alert_type: "keyword", label: "Alert: AI" },
+      ],
+    },
+  });
+  expect(rec.reasons.reasons.map((r) => r.label)).toEqual(["Alert: Urol", "Alert: Ai Lee"]);
+});

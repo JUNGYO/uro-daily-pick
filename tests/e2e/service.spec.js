@@ -93,3 +93,9 @@ for (const width of [1440, 390]) {
     expect(marks.every((text) => text === "AI")).toBe(true);
   });
 }
+
+test("instant recommendations preserve partial journal subscription explanations", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  await page.goto("/uro-daily-pick/?scenario=journal-alert");
+  await expect(page.getByText("Alert: Urol", { exact: true }).filter({ visible: true }).first()).toBeVisible();
+});

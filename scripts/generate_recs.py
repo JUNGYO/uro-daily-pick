@@ -270,7 +270,7 @@ def score_paper(paper, profile, liked_papers, disliked_kws, dwell_papers, all_li
         matches = (keyword_matches(paper.get("title"), value) or keyword_matches(paper.get("abstract"), value)) if kind == "keyword" else value in haystack.lower()
         if value and matches:
             content += 0.5
-            reasons.insert(0, {"type": "alert", "label": f"Alert: {alert['value']}"})
+            reasons.insert(0, {"type": "alert", "alert_type": kind, "label": f"Alert: {alert['value']}"})
             break
 
     final = (

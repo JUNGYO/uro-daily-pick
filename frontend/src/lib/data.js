@@ -59,6 +59,13 @@ export function normalizeRec(rec) {
     const label = item.label.trim();
     if (label.startsWith("Alert: ") && ["keyword", "alert"].includes(item.type)) {
       const value = label.slice(7).trim();
+      if (["journal", "author"].includes(item.alert_type)) {
+        const text = item.alert_type === "journal" ? paper.journal || "" : paper.authors.join(" ");
+        return Boolean(value) && text.toLowerCase().includes(value.toLowerCase());
+      }
+      if (item.alert_type === "keyword") {
+        return keywordMatches(paper.title, value) || keywordMatches(paper.abstract, value);
+      }
       return [paper.title, paper.abstract, paper.journal, ...paper.authors].some((text) =>
         keywordMatches(text, value),
       );

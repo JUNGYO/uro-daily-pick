@@ -21,3 +21,11 @@ class RepairTests(unittest.TestCase):
         reasons = {"reasons": [{"type": "keyword", "label": "AI"}]}
         self.assertEqual(repair_reasons({"abstract": "Available findings"}, reasons)["reasons"], [])
         self.assertEqual(repair_reasons({"abstract": "An AI-assisted tool"}, reasons)["reasons"], reasons["reasons"])
+
+    def test_typed_alerts_keep_author_and_journal_matching_separate(self):
+        paper = {"title": "DNA mismatch repair", "journal": "European Urology", "authors": ["Ai Lee"]}
+        reasons = {"reasons": [
+            {"type": "alert", "alert_type": "journal", "label": "Alert: Urol"},
+            {"type": "alert", "alert_type": "author", "label": "Alert: Ai Lee"},
+            {"type": "alert", "alert_type": "keyword", "label": "Alert: AI"}]}
+        self.assertEqual([r["label"] for r in repair_reasons(paper, reasons)["reasons"]], ["Alert: Urol", "Alert: Ai Lee"])
