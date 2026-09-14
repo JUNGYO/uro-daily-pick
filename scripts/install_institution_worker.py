@@ -10,6 +10,7 @@ import subprocess
 import sys
 import sysconfig
 import venv
+from institution_entry import resolve_state_directory
 
 ROOT = Path(__file__).resolve().parents[1]
 FILES = ["institution_worker.py", "institution_entry.py", "browser_fulltext.cjs", "fulltext.py", "common.py", "local_summary.py", "summarize_papers.py"]
@@ -54,10 +55,11 @@ def main():
                         "import requests,bs4,defusedxml,pypdf,institution_worker"], cwd=release, check=True)
         subprocess.run([str(release / "node.exe"), "-e", "require('playwright-core')"], cwd=release, check=True)
         (release / "installed.json").write_text(json.dumps({"release":release.name,"playwright":package["version"]}), encoding="utf-8")
+    state = resolve_state_directory(expected)
     result = subprocess.run([str(release / "python/Scripts/python.exe"), str(release / "institution_worker.py"),
-        "--state-dir", str(expected / "state"), "--enroll"], capture_output=True, text=True, check=True)
+        "--state-dir", str(state), "--enroll"], capture_output=True, text=True, check=True)
     enrollment = json.loads(result.stdout)
-    print(json.dumps({"release":str(release),"state":str(expected / "state"),**enrollment}))
+    print(json.dumps({"release":str(release),"state":str(state),**enrollment}))
 
 
 if __name__ == "__main__":

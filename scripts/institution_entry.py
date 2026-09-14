@@ -1,11 +1,31 @@
 """Run independent acquisition and Spark queues with one existing scheduled task."""
 from datetime import datetime, timezone
+import json
 import os
 from pathlib import Path
 import subprocess
 import sqlite3
 import sys
 import time
+
+def resolve_state_directory(install_root):
+    """Use the durable local storage choice for every scheduled release."""
+    install_root = Path(install_root).resolve()
+    config_path = install_root / "storage.json"
+    if not config_path.exists():
+        return install_root / "state"
+    config = json.loads(config_path.read_text(encoding="utf-8-sig"))
+    selected = config.get("state_dir")
+    if not isinstance(selected, str) or not selected:
+        raise ValueError("Storage configuration needs state_dir")
+    state = Path(selected)
+    if not state.is_absolute():
+        raise ValueError("Storage must be an absolute local path")
+    state = state.resolve(strict=True)
+    if not state.is_dir() or str(state).startswith(("\\\\", "//")) or any(part.lower().startswith("onedrive") for part in state.parts):
+        raise ValueError("Storage must be a local directory outside OneDrive")
+    return state
+
 
 def stop_child(process):
     if process.poll() is not None:
@@ -22,7 +42,7 @@ def stop_child(process):
 def main():
     import msvcrt
     release = Path(__file__).resolve().parent
-    state = release.parent.parent / "state"
+    state = resolve_state_directory(release.parent.parent)
     state.mkdir(exist_ok=True)
     sys.stdout = (state / "worker.log").open("a", encoding="utf-8", buffering=1)
     sys.stderr = sys.stdout

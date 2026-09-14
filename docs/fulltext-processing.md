@@ -28,3 +28,12 @@ Operational logs are `worker.log`, `collect.log`, and `summarize.log` under the
 existing local state directory. The hourly task retries subsequent work; it has
 no article-count cap or publication-date cutoff. Publisher access failures remain
 explicit failures, and summary validation is not relaxed to increase throughput.
+
+Storage is independent of the runtime release. A local `storage.json` in the
+installation root selects an absolute `state_dir` outside OneDrive. The scheduled
+controller and future release installers use the same setting. An invalid or
+missing configured destination fails instead of silently collecting elsewhere.
+Existing installations without this file retain their original local state path.
+When changing disks, stop the literature task, copy and hash-verify its state,
+verify the SQLite checkpoint, then update this setting and the viewer's state path
+before restarting. Keep the source copy until the destination is verified.
