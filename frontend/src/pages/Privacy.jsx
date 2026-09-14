@@ -20,10 +20,10 @@ export default function Privacy() {
         <section>
           <h2 className="section-title">Paper summaries</h2>
           <p>
-            AI summaries are generated through Google Gemini from paper abstracts or available full text. The
-            summary identifies its source basis. AI output can omit context or contain errors; check the
-            original paper for figures, methods, and interpretation. This service is a research reading aid
-            and does not provide patient-specific advice.
+            New summaries are generated from full articles using Spark. Some earlier full-text summaries were
+            generated with Google Gemini. The summary identifies its source basis. AI output can omit context
+            or contain errors; check the original paper for figures, methods, and interpretation. This service
+            is a research reading aid and does not provide patient-specific advice.
           </p>
         </section>
         <section>
@@ -39,7 +39,8 @@ export default function Privacy() {
           <h2 className="section-title">Use journal access responsibly</h2>
           <p>
             Publisher links may require your institution's subscription. Access to this app does not grant
-            journal access. Imported full text is stored separately from public paper metadata. Do not enter
+            journal access. Original article files remain on the operator's Z8 workstation, and Spark receives
+            article text for inference. Supabase stores derived summaries and necessary metadata. Do not enter
             patient information into your profile, keywords, alerts, or collection names.
           </p>
         </section>
