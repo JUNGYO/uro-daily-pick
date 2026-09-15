@@ -1,4 +1,4 @@
-"""Z8 institution-network browser worker. No publisher API key is required."""
+"""Independent local collection and summary workers, using authorized sources."""
 import argparse
 import ctypes
 import hashlib
@@ -185,7 +185,8 @@ class Browser:
     def __init__(self, node, directory, profile="browser-profile"):
         self.process = subprocess.Popen([str(node), str(Path(__file__).with_name("browser_fulltext.cjs"))],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-            text=True, encoding="utf-8", env={**os.environ, "URO_BROWSER_PROFILE": str(directory / profile)},
+            text=True, encoding="utf-8", env={**os.environ, "URO_BROWSER_PROFILE": str(directory / profile),
+                "URO_PUBLISHER_STATE": str(directory / "publisher-pauses")},
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         self.responses = queue.Queue()
         def receive():
@@ -257,6 +258,39 @@ def next_retry(status, now):
     return now + (900 if status == "retryable_error" else 86400 if status == "challenge" else 7 * 86400)
 
 
+def prepare_collection_attempts(db):
+    """Add retry metadata without rewriting the existing collection/summary queues."""
+    with db:
+        db.execute("CREATE TABLE IF NOT EXISTS collection_attempts(pmid TEXT PRIMARY KEY,status TEXT,next_retry REAL)")
+        db.execute("INSERT OR IGNORE INTO collection_attempts SELECT * FROM attempts WHERE status!='ready'")
+        db.execute("""CREATE TABLE IF NOT EXISTS collection_retry_metadata(
+            pmid TEXT PRIMARY KEY, status TEXT NOT NULL, reason TEXT NOT NULL,
+            consecutive_failures INTEGER NOT NULL, attempted_at REAL NOT NULL)""")
+
+
+def record_collection_attempt(db, pmid, status, reason="", now=None):
+    """Back off repeated collection failures; summarization keeps its own policy."""
+    if status not in STATES | {"ready"}:
+        raise ValueError("Unknown collection outcome")
+    now = time.time() if now is None else now
+    # Store only the bounded machine reason, never publisher text or source URLs.
+    reason = reason if isinstance(reason, str) and re.fullmatch(r"[a-z0-9_]{1,80}", reason) else "unspecified"
+    with db:
+        prior = db.execute("SELECT status,reason,consecutive_failures FROM collection_retry_metadata WHERE pmid=?", (pmid,)).fetchone()
+        same_failure = prior and prior[0] == status and prior[1] == reason
+        failures = prior[2] + 1 if same_failure and status == "retryable_error" else 1
+        retry_at = 0 if status == "ready" else next_retry(status, now)
+        if status == "retryable_error":
+            retry_at = now + (900, 3600, 21600, 86400)[min(failures, 4) - 1]
+        db.execute("INSERT OR REPLACE INTO collection_attempts VALUES(?,?,?)", (pmid, status, retry_at))
+        if status == "ready":
+            db.execute("DELETE FROM collection_retry_metadata WHERE pmid=?", (pmid,))
+        else:
+            db.execute("INSERT OR REPLACE INTO collection_retry_metadata VALUES(?,?,?,?,?)",
+                       (pmid, status, reason, failures, now))
+    return retry_at
+
+
 def cached_paper_matches(saved, paper):
     """Reuse a verified PMID cache across minor publisher title corrections."""
     old_doi=(saved.get("doi") or "").strip().lower()
@@ -275,13 +309,25 @@ def verify_cached_body(document):
     return document
 
 
+def atomic_replace(temporary, path):
+    """Retry only transient Windows sharing/lock violations; never remove the target."""
+    delays = (.1, .2, .4, .8)
+    for attempt in range(len(delays) + 1):
+        try:
+            return temporary.replace(path)
+        except OSError as error:
+            if getattr(error, "winerror", None) not in (32, 33) or attempt == len(delays):
+                raise
+            time.sleep(delays[attempt])
+
+
 def save_json(path, value):
     temporary=path.with_suffix(path.suffix+".pending")
     with temporary.open("w",encoding="utf-8") as output:
         json.dump(value,output,ensure_ascii=False)
         output.flush()
         os.fsync(output.fileno())
-    temporary.replace(path)
+    atomic_replace(temporary, path)
 
 
 def archive_legacy_bodies(service, directory, deadline):
@@ -328,9 +374,7 @@ def run(directory, node, seconds, phase="all", requested_pmid=None):
     db.execute("CREATE TABLE IF NOT EXISTS attempts(pmid TEXT PRIMARY KEY,status TEXT,next_retry REAL)")
     attempt_table="collection_attempts" if phase=="collect" else "attempts"
     if phase=="collect":
-        db.execute("CREATE TABLE IF NOT EXISTS collection_attempts(pmid TEXT PRIMARY KEY,status TEXT,next_retry REAL)")
-        db.execute("INSERT OR IGNORE INTO collection_attempts SELECT * FROM attempts WHERE status!='ready'")
-        db.commit()
+        prepare_collection_attempts(db)
     spool = directory / "documents"
     spool.mkdir(exist_ok=True)
     deadline = time.monotonic() + seconds
@@ -346,6 +390,12 @@ def run(directory, node, seconds, phase="all", requested_pmid=None):
                 for path in folder.glob("*.json")}
         papers.sort(key=lambda paper: (str(paper["pmid"]) in cached) if phase=="collect" else (str(paper["pmid"]) not in cached))
         print(f"Institution {phase} queue: {len(papers)} papers", flush=True)
+        if phase == "collect":
+            from collection_queue import run_collection
+            counts = run_collection(directory, node, deadline, service, db, papers)
+            print(f"Institution collect: {counts['completed']} completed, {counts['failed']} unavailable/invalid, "
+                  f"{counts['deferred']} deferred", flush=True)
+            return
         for paper in papers:
             if time.monotonic() >= deadline:
                 break
@@ -372,9 +422,6 @@ def run(directory, node, seconds, phase="all", requested_pmid=None):
                         if phase!="summarize":
                             save_json(document_path,{"doi":paper["doi"],"title":paper["title"],"document":document})
                 if phase=="summarize" and document is None:
-                    continue
-                if phase=="collect" and document is not None:
-                    if not paper.get("fulltext_available"): service.register_original(paper,document)
                     continue
                 if document is None:
                     cached_source=directory/"sources"/(pmid+".browser.json")
@@ -410,13 +457,6 @@ def run(directory, node, seconds, phase="all", requested_pmid=None):
                     if result: (spool / (pmid + ".html")).write_text(result["html"], encoding="utf-8")
                     save_json(document_path,{"doi":paper["doi"],"title":paper["title"],"document":document})
                 if not paper.get("fulltext_available"): service.register_original(paper,document)
-                if phase=="collect":
-                    db.execute("INSERT OR REPLACE INTO collection_attempts VALUES(?,?,?)", (pmid,"ready",0))
-                    db.commit()
-                    done+=1
-                    print(f"PMID {pmid}: original stored locally; queued for Spark summary",flush=True)
-                    time.sleep(2)
-                    continue
                 operation="summary"
                 summary_path = spool / (pmid + ".summary.json")
                 expected_hash = hashlib.sha256(("fulltext\n"+paper["title"]+"\n"+document["content_text"]).encode()).hexdigest()

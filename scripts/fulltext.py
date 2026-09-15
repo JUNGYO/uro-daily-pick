@@ -11,7 +11,8 @@ import os
 from pathlib import Path
 import re
 import ssl
-from urllib.parse import urlencode
+import time
+from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, build_opener, HTTPSHandler, HTTPRedirectHandler
 from urllib.error import HTTPError
 
@@ -34,30 +35,67 @@ class NoRedirect(HTTPRedirectHandler):
         return None  # Never forward publisher credentials to another location.
 
 
-def download(url, headers=None):
+def _download_timeout(deadline):
+    if deadline is None:
+        return 45
+    remaining = deadline - time.monotonic()
+    if not remaining > 0:
+        raise TimeoutError("Full-text download budget expired")
+    return min(45, remaining)
+
+
+def download(url, headers=None, *, deadline=None, request_gate=None):
+    _download_timeout(deadline)
+    hostname = (urlsplit(url).hostname or '').lower().rstrip('.')
+    if hostname == 'sciencedirect.com' or hostname.endswith('.sciencedirect.com'):
+        raise FulltextUnavailable("ScienceDirect browser downloads are disabled; use an authorized API")
     # Windows uses its institution trust store. TLS verification remains enabled.
     request = Request(url, headers={"User-Agent": "UroDailyPick/1.0", "Accept": "application/xml, application/json", **(headers or {})})
     opener = build_opener(HTTPSHandler(context=ssl.create_default_context()), NoRedirect())
-    with opener.open(request, timeout=45) as response:
-        content = response.read(MAX_BYTES + 1)
-    if len(content) > MAX_BYTES:
-        raise ValueError("Document exceeds 20 MB")
-    return content
+    if request_gate is not None:
+        request_gate(url, deadline)
+    # Gate waits consume the same article budget; recompute immediately before I/O.
+    with opener.open(request, timeout=_download_timeout(deadline)) as response:
+        content = bytearray()
+        read = getattr(response, 'read1', None) or response.read
+        while True:
+            timeout = _download_timeout(deadline)
+            # urllib's HTTPResponse wraps the socket in BufferedReader/SocketIO.
+            # Update each blocking read, rather than reusing the opening timeout.
+            raw = getattr(getattr(response, 'fp', None), 'raw', None)
+            sock = getattr(raw, '_sock', None)
+            if sock is not None:
+                sock.settimeout(timeout)
+            chunk = read(min(64 * 1024, MAX_BYTES + 1 - len(content)))
+            _download_timeout(deadline)
+            if not chunk:
+                break
+            content.extend(chunk)
+            if len(content) > MAX_BYTES:
+                raise ValueError("Document exceeds 20 MB")
+    return bytes(content)
 
 
-def fetch_oa(pmid):
+def fetch_oa(pmid, *, deadline=None, request_gate=None):
+    pmid = str(pmid)
+    if not re.fullmatch(r'\d{1,12}', pmid):
+        raise ValueError("PMID must be numeric")
     query = urlencode({"query": f"EXT_ID:{pmid} AND SRC:MED", "format": "json"})
-    result = json.loads(download(f"https://www.ebi.ac.uk/europepmc/webservices/rest/search?{query}"))
+    result = json.loads(download(f"https://www.ebi.ac.uk/europepmc/webservices/rest/search?{query}",
+                                 deadline=deadline, request_gate=request_gate))
     papers = result.get("resultList", {}).get("result", [])
     paper = next((p for p in papers if str(p.get("id")) == pmid and p.get("isOpenAccess") == "Y"), None)
     pmcid = paper.get("pmcid", "") if paper else ""
     if not re.fullmatch(r"PMC\d+", pmcid):
         raise FulltextUnavailable("No Europe PMC open-access full text; import your authorized local download")
     url = f"https://www.ebi.ac.uk/europepmc/webservices/rest/{pmcid}/fullTextXML"
-    return download(url), url
+    return download(url, deadline=deadline, request_gate=request_gate), url
 
 
-def fetch_elsevier(pmid):
+def fetch_elsevier(pmid, *, deadline=None, request_gate=None):
+    pmid = str(pmid)
+    if not re.fullmatch(r'\d{1,12}', pmid):
+        raise ValueError("PMID must be numeric")
     key = os.environ.get("ELSEVIER_API_KEY")
     if not key:
         raise ValueError("ELSEVIER_API_KEY is required for the Elsevier provider")
@@ -65,7 +103,7 @@ def fetch_elsevier(pmid):
     headers = {"X-ELS-APIKey": key, "Accept": "text/xml"}
     if os.environ.get("ELSEVIER_INST_TOKEN"):
         headers["X-ELS-Insttoken"] = os.environ["ELSEVIER_INST_TOKEN"]
-    return download(url, headers), url
+    return download(url, headers, deadline=deadline, request_gate=request_gate), url
 
 
 def parse_document(content):

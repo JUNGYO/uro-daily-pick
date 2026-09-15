@@ -2,9 +2,54 @@
 import hashlib
 import json
 import re
+from decimal import Decimal
 
 DETAIL_FIELDS = ('intervention','comparator','follow_up','outcome','limitations')
 BASE_FIELDS = ('study_design','sample_size','key_finding','population')
+
+_GROUP_SEPARATORS = ',\u00a0\u2009\u202f'
+_NUMBER = re.compile(r'(?<![\d.])([+\-\u2212]?)((?:\d+|\.\d+)(?:[.,\u00a0\u2009\u202f]\d+)*)(?!\d)')
+_SCIENTIFIC = re.compile(
+    r'(?<![\d.])(?:[+\-\u2212]?(?:\d+(?:\.\d+)?|\.\d+)\s*[eE]\s*[+\-\u2212]?\d+'
+    r'|(?:[+\-\u2212]?(?:\d+(?:\.\d+)?|\.\d+)\s*[x\u00d7]\s*)?10'
+    r'(?:\s*\^\s*\{?\s*[+\-\u2212]?\d+\s*\}?|[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+))')
+_NUMBER_WORDS = ('zero','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen','twenty')
+
+
+def numeric_values(text, *, source=False):
+    """Exact values only: no rounding, tolerances, or unit conversion.
+
+    Claims with unsupported notation must be regenerated. Such source tokens
+    cannot supply evidence for an unrelated integer or decimal. Source-only
+    number-word expansion preserves the existing zero-through-twenty rule.
+    """
+    if source:
+        for number, word in enumerate(_NUMBER_WORDS):
+            text = re.sub(r'\b'+word+r'\b', str(number), text, flags=re.I)
+    if _SCIENTIFIC.search(text):
+        if not source:
+            raise ValueError('Unsupported scientific notation in numeric claim')
+        text = _SCIENTIFIC.sub(lambda match: ' ' * len(match.group()), text)
+    values = set()
+    for match in _NUMBER.finditer(text):
+        sign, number = match.groups()
+        # An ASCII hyphen directly between numbers denotes a range, not unary minus.
+        if sign == '-' and match.start() and text[match.start()-1].isdecimal():
+            sign = ''
+        integer, dot, fraction = number.partition('.')
+        separators = set(integer).intersection(_GROUP_SEPARATORS)
+        valid = not dot or bool(fraction) and fraction.isdecimal()
+        if separators:
+            separator = next(iter(separators))
+            valid = valid and len(separators) == 1 and bool(re.fullmatch(
+                r'\d{1,3}(?:'+re.escape(separator)+r'\d{3})+', integer))
+            integer = integer.replace(separator, '')
+        if not valid:
+            if source:
+                continue
+            raise ValueError('Invalid numeric grouping in claim')
+        values.add(Decimal(sign.replace('\u2212', '-') + (integer or '0') + (dot + fraction if dot else '')))
+    return values
 
 
 def source_blocks(text):
@@ -42,10 +87,7 @@ def validate_evidence(data,summary,body):
             raise ValueError('Duplicate source location')
         # Numeric evidence must be present at the cited location, not only somewhere in the article.
         cited=' '.join(blocks[ref] for ref in refs)
-        for n,word in enumerate(('zero','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen','twenty')):
-            cited=re.sub(r'\b'+word+r'\b',str(n),cited,flags=re.I)
-        nums=lambda s:set(re.findall(r'(?<![\d.])\d+(?:\.\d+)?(?![\d.])',re.sub(r'(?<=\d),(?=\d)','',s)))
-        if not nums(statement).issubset(nums(cited)):
+        if not numeric_values(statement).issubset(numeric_values(cited, source=True)):
             raise ValueError('Number absent from cited source for '+key)
     return {'evidence':{'version':1,'content_hash':hashlib.sha256(body.encode()).hexdigest(),'claims':claims},'research_details':details}
 
