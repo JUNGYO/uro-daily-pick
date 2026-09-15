@@ -7,9 +7,10 @@ let user =
     : {
         id: "reader",
         email:
-          scenario === "admin" ? "crazyslime@gmail.com" : "reader@example.test",
+          scenario.startsWith("admin") ? "crazyslime@gmail.com" : "reader@example.test",
       };
 let listener = () => {};
+let catalogAttempt = 0;
 const papers = Array.from({ length: 5 }, (_, i) => ({
   id: i + 1,
   pmid: String(12345670 + i),
@@ -312,7 +313,8 @@ export const supabase = {
     resetPasswordForEmail: async () => ({}),
     updateUser: async () => ({}),
   },
-  async rpc(name, args) {
+  rpc(name, args) {
+    const result = (async () => {
     if (name === "set_paper_feedback") {
       if (scenario === "feedback-error")
         return { error: { message: "Simulated save failure" } };
@@ -332,6 +334,7 @@ export const supabase = {
       return {
         data: {
           ready_bodies: 5,
+          local_bodies: 5,
           ready_summaries: 5,
           workers: [
             {
@@ -343,6 +346,8 @@ export const supabase = {
         },
         error: null,
       };
+    if (name === "admin_catalog_status" && scenario === "admin-partial-error" && catalogAttempt++ === 0)
+      return { error: { code: "57014", message: "Simulated query timeout" } };
     if (name === "admin_catalog_status")
       return {
         data: {
@@ -371,5 +376,8 @@ export const supabase = {
         error: null,
       };
     return { data: name.startsWith("admin_") ? [] : null, error: null };
+    })();
+    result.abortSignal = () => result;
+    return result;
   },
 };

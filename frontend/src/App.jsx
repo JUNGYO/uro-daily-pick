@@ -54,7 +54,7 @@ function Layout({ children }) {
     }
   };
 
-  const isAdmin = ADMIN_EMAILS.includes(user?.email);
+  const isAdmin = ADMIN_EMAILS.includes(user?.email?.trim().toLowerCase());
   const links = [
     { to: "/", icon: Newspaper, label: "Daily Pick" },
     { to: "/insights", icon: Network, label: "Insights" },
