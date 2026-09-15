@@ -1,5 +1,6 @@
+import { safeReturn } from "../lib/workspace";
 import { useState } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { withTimeout } from "../lib/data";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/auth";
@@ -71,6 +72,7 @@ const CATEGORIES = [
 export default function Onboarding() {
   const { user, setProfile } = useAuth();
   const navigate = useNavigate();
+  const [nextParams] = useSearchParams();
   const [keywords, setKeywords] = useState([]);
   const [emailDigest, setEmailDigest] = useState(false);
   const [input, setInput] = useState("");
@@ -107,7 +109,7 @@ export default function Onboarding() {
       if (saveError) throw saveError;
       if (!data?.onboarding_done) throw new Error("Profile was not saved.");
       setProfile(data);
-      navigate("/", { replace: true });
+      navigate(safeReturn(nextParams.get("next")), { replace: true });
     } catch {
       setError("Could not save your topics. Please try again.");
     } finally {

@@ -6,7 +6,7 @@ Run daily via GitHub Actions or manually.
 import os
 import re
 import time
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from xml.etree import ElementTree as ET
 
 import requests
@@ -210,11 +210,23 @@ def parse_article(article):
     # Study type classification
     study_type = classify_study_type(title_lower, abstract.lower(), pub_types_lower)
 
+    notices=[]
+    for node in article.findall('.//CommentsCorrections'):
+        linked=(node.findtext('PMID') or '').strip()
+        relation=node.get('RefType','')
+        if linked.isdigit() and relation in ('RetractionIn','RetractionOf','ErratumIn','ErratumFor','ExpressionOfConcernIn','ExpressionOfConcernFor'):
+            notices.append({'pmid':linked,'relation':relation})
+    relations={n['relation'] for n in notices}
+    integrity=('retracted' if 'retracted publication' in pub_types_lower or 'RetractionIn' in relations else
+               'concern' if 'ExpressionOfConcernIn' in relations else 'corrected' if 'ErratumIn' in relations else 'current')
     return {
         "pmid": pmid, "title": title, "abstract": abstract,
         "authors": authors, "journal": journal, "pub_date": pub_date,
         "mesh_terms": mesh_terms, "keywords": keywords, "doi": doi,
         "paper_type": paper_type, "pub_types": pub_types, "study_type": study_type,
+        "volume":article.findtext('.//JournalIssue/Volume',''),"issue":article.findtext('.//JournalIssue/Issue',''),
+        "pages":article.findtext('.//Pagination/MedlinePgn',''),"publication_types":pub_types,
+        "integrity_status":integrity,"related_notices":notices,"integrity_checked_at":datetime.now(timezone.utc).isoformat(),
     }
 
 

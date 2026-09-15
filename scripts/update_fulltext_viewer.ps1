@@ -8,6 +8,7 @@ param(
 $ErrorActionPreference='Stop'
 $root=[IO.Path]::GetFullPath($InstallRoot).TrimEnd('\')
 $source=(Resolve-Path -LiteralPath (Join-Path $ReleasePath 'fulltext_viewer.py')).Path
+$sourceEvidence=(Resolve-Path -LiteralPath (Join-Path $ReleasePath 'evidence.py')).Path
 $name='UroDailyPick-Original-Viewer'
 $config=Join-Path $root 'config.json'
 $report=Join-Path $root 'update-result.json'
@@ -26,6 +27,9 @@ try {
  $expectedHash=(Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
  $stamp=Get-Date -Format yyyyMMddHHmmss
  $backup=Join-Path $root ('viewer-before-'+$stamp+'.py')
+ $activeEvidence=Join-Path (Split-Path -Parent $active) 'evidence.py'
+ $evidenceBackup=Join-Path $root ('evidence-before-'+$stamp+'.py')
+ if(Test-Path -LiteralPath $activeEvidence){Copy-Item -LiteralPath $activeEvidence -Destination $evidenceBackup}
  $configBackup=Join-Path $root ('config-before-'+$stamp+'.json')
  Copy-Item -LiteralPath $active -Destination $backup
  Copy-Item -LiteralPath $config -Destination $configBackup
@@ -37,6 +41,8 @@ try {
  Stop-ScheduledTask -TaskName $name
  $changed=$true
  Copy-Item -LiteralPath $source -Destination $active -Force
+ Copy-Item -LiteralPath $sourceEvidence -Destination $activeEvidence -Force
+ if((Get-FileHash -LiteralPath $activeEvidence -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $sourceEvidence -Algorithm SHA256).Hash){throw 'Evidence module hash mismatch'}
  if((Get-FileHash -LiteralPath $active -Algorithm SHA256).Hash -ne $expectedHash){throw 'Installed script hash mismatch'}
  $settings | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $config -Encoding utf8
  Start-ScheduledTask -TaskName $name
@@ -57,6 +63,7 @@ try {
   try {
    Stop-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
    Copy-Item -LiteralPath $backup -Destination $active -Force
+   if(Test-Path -LiteralPath $evidenceBackup){Copy-Item -LiteralPath $evidenceBackup -Destination $activeEvidence -Force}
    Copy-Item -LiteralPath $configBackup -Destination $config -Force
    Start-ScheduledTask -TaskName $name
    $result.restored=$true

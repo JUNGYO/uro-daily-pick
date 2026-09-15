@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:db": "node ../tests/test_migrations.mjs",
+    "test:db": "node ../tests/test_migrations.mjs && node ../tests/test_reader_workspace.mjs",
     "check": "npm test && npm run test:db && npm run build",
     "test:e2e": "playwright test",
     "format": "prettier --write \"src/**/*.{js,jsx}\" \"*.js\"",

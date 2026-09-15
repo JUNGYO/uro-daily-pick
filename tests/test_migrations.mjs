@@ -47,7 +47,7 @@ try {
   for (const file of (await readdir(migrations))
     .filter((f) => f.endsWith(".sql"))
     .sort()) {
-    if (["011_", "012_", "013_", "014_", "015_", "016_"].some((prefix) => file.startsWith(prefix))) continue; // Test upgrades in order below.
+    if (Number(file.slice(0,3)) >= 11) continue; // Legacy upgrades below; reader tests apply the complete sequence.
     if (file.startsWith("008_")) {
       let encoded = ["Prostatic Neoplasms", "Randomized Controlled Trial"];
       for (let depth = 0; depth < 21; depth++)

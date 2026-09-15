@@ -6,8 +6,9 @@ let user =
     ? null
     : {
         id: "reader",
-        email:
-          scenario.startsWith("admin") ? "crazyslime@gmail.com" : "reader@example.test",
+        email: scenario.startsWith("admin")
+          ? "crazyslime@gmail.com"
+          : "reader@example.test",
       };
 let listener = () => {};
 let catalogAttempt = 0;
@@ -64,6 +65,11 @@ const papers = Array.from({ length: 5 }, (_, i) => ({
   ],
 }));
 const db = {
+  reader_states: [],
+  saved_searches: [],
+  summary_issues: [],
+  project_notes: [],
+  collection_members: [],
   profiles: [
     {
       id: "reader",
@@ -231,7 +237,7 @@ function query(table) {
       return q;
     },
     upsert(data) {
-      action = "insert";
+      action = "upsert";
       payload = data;
       return q;
     },
@@ -257,17 +263,36 @@ function query(table) {
           let rows = (db[table] || []).filter((row) =>
             filters.every((fn) => fn(row)),
           );
-          if (action === "insert") {
-            rows = (Array.isArray(payload) ? payload : [payload]).map(
-              (row) => ({ id: Date.now(), ...row }),
-            );
-            db[table].push(...rows);
+          if (action === "insert" || action === "upsert") {
+            rows = (Array.isArray(payload) ? payload : [payload]).map((row) => {
+              const existing =
+                action === "upsert"
+                  ? db[table].find((x) =>
+                      table === "profiles"
+                        ? x.id === row.id
+                        : x.collection_id === row.collection_id &&
+                          x.paper_id === row.paper_id,
+                    )
+                  : null;
+              if (existing) {
+                Object.assign(existing, row);
+                return existing;
+              }
+              const inserted = {
+                id: Date.now(),
+                created_at: new Date().toISOString(),
+                enabled: true,
+                ...row,
+              };
+              db[table].push(inserted);
+              return inserted;
+            });
           }
           if (action === "update")
             rows.forEach((row) => Object.assign(row, payload));
           if (action === "delete")
             db[table] = db[table].filter((row) => !rows.includes(row));
-          if (table === "collection_papers")
+          if (["collection_papers", "reader_states"].includes(table))
             rows = rows.map((row) => ({
               ...row,
               paper: papers.find((p) => p.id === row.paper_id),
@@ -309,78 +334,265 @@ export const supabase = {
       return {};
     },
     signInWithPassword: async () => ({}),
+    signInWithOAuth: async () => ({
+      error: { message: "Provider test: redirect prepared" },
+    }),
     signUp: async () => ({ data: { session: null } }),
     resetPasswordForEmail: async () => ({}),
     updateUser: async () => ({}),
   },
-  rpc(name, args) {
+  rpc(name, args = {}) {
     const result = (async () => {
-    if (name === "set_paper_feedback") {
-      if (scenario === "feedback-error")
-        return { error: { message: "Simulated save failure" } };
-      db.feedbacks = db.feedbacks.filter((f) => f.paper_id !== args.p_paper_id);
-      if (args.p_action !== "none")
-        db.feedbacks.push({
-          user_id: "reader",
-          paper_id: args.p_paper_id,
-          action: args.p_action,
-        });
-    }
-    if (name === "delete_own_account") {
-      db.profiles = [];
-      return {};
-    }
-    if (name === "admin_fulltext_status")
-      return {
-        data: {
-          ready_bodies: 5,
-          local_bodies: 5,
-          ready_summaries: 5,
-          workers: [
-            {
-              name: "Z8",
-              state: "idle",
-              last_seen_at: new Date().toISOString(),
-            },
-          ],
-        },
-        error: null,
-      };
-    if (name === "admin_catalog_status" && scenario === "admin-partial-error" && catalogAttempt++ === 0)
-      return { error: { code: "57014", message: "Simulated query timeout" } };
-    if (name === "admin_catalog_status")
-      return {
-        data: {
-          catalog_papers: 5,
-          automatic_papers: 4,
-          originals_acquired: 3,
-          summaries_ready: 2,
-          undated_papers: 0,
-          archived_papers: 1,
-          qwen_summaries: 4,
-          awaiting_qwen: 0,
-          oldest_publication: "1937-11-01",
-          newest_publication: "2026-09-14",
-          metadata_examined: 5,
-          metadata_unavailable: 0,
-          storage: {
-            database_bytes: 450 * 1048576,
-            budget_bytes: 450 * 1048576,
+      const ready = (p) =>
+        p.fulltext_available && p.summary_basis === "fulltext";
+      const state = (id) =>
+        db.reader_states.find((s) => s.paper_id === id) || {};
+      const card = (p) => ({
+        ...p,
+        summary_ready: ready(p),
+        insight: ready(p) ? p.summary_ko.split("\n")[1] : "",
+        read: state(p.id).reading_state === "read",
+      });
+      if (scenario === "error")
+        return { error: { message: "Simulated API outage" } };
+      if (name === "preview_papers")
+        return { data: db.papers.filter(ready).slice(0, 3) };
+      if (name === "reader_daily")
+        return {
+          data: db.papers
+            .filter(
+              (p) =>
+                ready(p) &&
+                p.integrity_status !== "retracted" &&
+                !p.summary_review_required,
+            )
+            .slice(0, 5)
+            .map((p) => ({
+              ...card(p),
+              reason:
+                scenario === "journal-alert" ? "구독 저널 · Urol" : "관심 주제",
+            })),
+        };
+      if (name === "reader_paper") {
+        const paper = db.papers.find((p) => p.pmid === args.p_pmid);
+        return {
+          data: paper
+            ? {
+                paper,
+                state: state(paper.id),
+                opinion: db.feedbacks.find((f) => f.paper_id === paper.id)
+                  ?.action,
+                access: { can_read: scenario.startsWith("admin") },
+                issues: db.summary_issues.filter(
+                  (i) => i.paper_id === paper.id,
+                ),
+              }
+            : null,
+        };
+      }
+      if (name === "update_reader_state") {
+        let s = db.reader_states.find((s) => s.paper_id === args.p_paper_id);
+        if (!s) {
+          s = {
+            user_id: "reader",
+            paper_id: args.p_paper_id,
+            saved: false,
+            reading_state: "unread",
+            position: 0,
+            note: "",
+            tags: [],
+          };
+          db.reader_states.push(s);
+        }
+        Object.assign(s, args.p_patch);
+        return { data: { ...s } };
+      }
+      if (name === "reader_opinion") {
+        if (scenario === "feedback-error")
+          return { error: { message: "Simulated save failure" } };
+        db.feedbacks = db.feedbacks.filter(
+          (f) => f.paper_id !== args.p_paper_id,
+        );
+        if (args.p_action !== "none")
+          db.feedbacks.push({
+            paper_id: args.p_paper_id,
+            user_id: "reader",
+            action: args.p_action,
+          });
+        return { data: null };
+      }
+      if (name === "search_papers") {
+        const term = (args.p_query || "")
+          .replace(/^https?:\/\/(dx\.)?doi\.org\//i, "")
+          .toLowerCase();
+        let matches = db.papers.filter(
+          (p) =>
+            !term ||
+            p.pmid === term ||
+            p.doi === term ||
+            term
+              .split(/\s+/)
+              .every((t) =>
+                new RegExp(
+                  "\\b" + t.replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "\\b",
+                  "i",
+                ).test(p.title + " " + p.abstract),
+              ),
+        );
+        if (args.p_state === "ready") matches = matches.filter(ready);
+        if (args.p_state === "pending")
+          matches = matches.filter((p) => !ready(p));
+        if (args.p_journal)
+          matches = matches.filter((p) => p.journal === args.p_journal);
+        const page = args.p_page || 0;
+        return {
+          data: {
+            items: matches.slice(page * 20, page * 20 + 20).map(card),
+            total: matches.length,
+            page,
           },
-        },
-        error: null,
-      };
-    if (name === "admin_stats")
-      return {
-        data: {
-          total_users: 3,
-          total_papers: 5,
-          total_feedbacks: 0,
-          total_reads: 1,
-        },
-        error: null,
-      };
-    return { data: name.startsWith("admin_") ? [] : null, error: null };
+        };
+      }
+      if (name === "search_notifications")
+        return {
+          data: db.saved_searches.map((s) => ({
+            ...s,
+            new_count: s.enabled ? 1 : 0,
+            last_seen_at: s.last_seen_at || new Date().toISOString(),
+          })),
+        };
+      if (name === "project_invitations") return { data: [] };
+      if (name === "project_papers") {
+        const items = db.collection_papers
+          .filter((c) => c.collection_id === args.p_id)
+          .map((c) => ({
+            ...card(db.papers.find((p) => p.id === c.paper_id)),
+            ...db.project_notes.find(
+              (n) =>
+                n.collection_id === c.collection_id &&
+                n.paper_id === c.paper_id,
+            ),
+          }));
+        return { data: { items, total: items.length, can_edit: true } };
+      }
+      if (name === "project_recommendations")
+        return {
+          data: db.papers
+            .filter(
+              (p) =>
+                !db.collection_papers.some(
+                  (c) => c.collection_id === args.p_id && c.paper_id === p.id,
+                ),
+            )
+            .map(card),
+        };
+      if (name === "project_members") {
+        if (args.p_email)
+          db.collection_members.push({
+            collection_id: args.p_id,
+            user_id: "guest",
+            email: args.p_email,
+            role: args.p_role,
+            accepted: false,
+          });
+        if (args.p_remove)
+          db.collection_members = db.collection_members.filter(
+            (m) => m.user_id !== args.p_remove,
+          );
+        return {
+          data: db.collection_members.filter(
+            (m) => m.collection_id === args.p_id,
+          ),
+        };
+      }
+      if (name === "admin_summary_issues") {
+        if (args.p_id)
+          Object.assign(
+            db.summary_issues.find((i) => i.id === args.p_id),
+            { status: args.p_status, resolution: args.p_resolution },
+          );
+        return {
+          data: db.summary_issues.map((i) => ({
+            ...i,
+            ...{
+              title: db.papers.find((p) => p.id === i.paper_id)?.title,
+              pmid: db.papers.find((p) => p.id === i.paper_id)?.pmid,
+            },
+          })),
+        };
+      }
+      if (name === "set_paper_feedback") {
+        if (scenario === "feedback-error")
+          return { error: { message: "Simulated save failure" } };
+        db.feedbacks = db.feedbacks.filter(
+          (f) => f.paper_id !== args.p_paper_id,
+        );
+        if (args.p_action !== "none")
+          db.feedbacks.push({
+            user_id: "reader",
+            paper_id: args.p_paper_id,
+            action: args.p_action,
+          });
+      }
+      if (name === "delete_own_account") {
+        db.profiles = [];
+        return {};
+      }
+      if (name === "admin_fulltext_status")
+        return {
+          data: {
+            ready_bodies: 5,
+            local_bodies: 5,
+            ready_summaries: 5,
+            workers: [
+              {
+                name: "Z8",
+                state: "idle",
+                last_seen_at: new Date().toISOString(),
+              },
+            ],
+          },
+          error: null,
+        };
+      if (
+        name === "admin_catalog_status" &&
+        scenario === "admin-partial-error" &&
+        catalogAttempt++ === 0
+      )
+        return { error: { code: "57014", message: "Simulated query timeout" } };
+      if (name === "admin_catalog_status")
+        return {
+          data: {
+            catalog_papers: 5,
+            automatic_papers: 4,
+            originals_acquired: 3,
+            summaries_ready: 2,
+            undated_papers: 0,
+            archived_papers: 1,
+            qwen_summaries: 4,
+            awaiting_qwen: 0,
+            oldest_publication: "1937-11-01",
+            newest_publication: "2026-09-14",
+            metadata_examined: 5,
+            metadata_unavailable: 0,
+            storage: {
+              database_bytes: 450 * 1048576,
+              budget_bytes: 450 * 1048576,
+            },
+          },
+          error: null,
+        };
+      if (name === "admin_stats")
+        return {
+          data: {
+            total_users: 3,
+            total_papers: 5,
+            total_feedbacks: 0,
+            total_reads: 1,
+          },
+          error: null,
+        };
+      return { data: name.startsWith("admin_") ? [] : null, error: null };
     })();
     result.abortSignal = () => result;
     return result;

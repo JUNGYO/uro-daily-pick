@@ -13,7 +13,7 @@ import venv
 from institution_entry import resolve_state_directory
 
 ROOT = Path(__file__).resolve().parents[1]
-FILES = ["institution_worker.py", "institution_entry.py", "browser_fulltext.cjs", "article_images.py", "catalog_policy.py", "fulltext.py", "common.py", "local_summary.py", "summarize_papers.py"]
+FILES = ["evidence.py","institution_worker.py", "institution_entry.py", "browser_fulltext.cjs", "article_images.py", "catalog_policy.py", "fulltext.py", "common.py", "local_summary.py", "summarize_papers.py"]
 PACKAGES = ["requests", "urllib3", "charset_normalizer", "idna", "certifi", "bs4", "soupsieve", "defusedxml", "pypdf", "typing_extensions.py"]
 
 

@@ -28,6 +28,12 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
         run: python scripts/check_fulltext_queue.py
+      - name: Refresh citation corrections and retractions
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          NCBI_EMAIL: ${{ vars.NCBI_EMAIL }}
+        run: python scripts/refresh_integrity.py
       - name: Refresh recommendations
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}

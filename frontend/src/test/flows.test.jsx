@@ -84,6 +84,7 @@ it("highlights a standalone AI mention without splitting Affairs and keeps the s
   expect(screen.getByText("원문이 아직 확보되지 않아 본문 기반 요약을 제공할 수 없습니다.")).toBeVisible();
 });
 it("shows confirmation instructions when signup does not create a session", async () => {
+  mock.auth = { user: null, loading: false };
   mock.signUp.mockResolvedValue({ data: { session: null }, error: null });
   show(<Login />);
   const user = userEvent.setup();

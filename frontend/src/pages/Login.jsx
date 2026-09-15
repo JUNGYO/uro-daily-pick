@@ -1,11 +1,15 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
+import { safeReturn } from "../lib/workspace";
 import { appUrl } from "../lib/data";
 import { Loader2 } from "lucide-react";
+import { useAuth } from "../lib/auth";
 
 export default function Login() {
   const emailAuthReady = import.meta.env.VITE_EMAIL_AUTH_READY !== "false";
+  const kakaoReady = import.meta.env.VITE_KAKAO_AUTH_READY === "true";
+  const auth = useAuth();
   const [mode, setMode] = useState("signin"); // signin | signup | forgot
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -14,6 +18,31 @@ export default function Login() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const [params] = useSearchParams();
+  const next = safeReturn(params.get("next"));
+  useEffect(() => {
+    if (auth?.user && !auth.loading) navigate(next, { replace: true });
+  }, [auth?.user?.id, auth?.loading, next]);
+  useEffect(() => {
+    if (new URLSearchParams(window.location.hash.slice(1)).has("error")) {
+      setError("로그인이 완료되지 않았습니다. 다시 시도하거나 다른 로그인 방법을 선택해 주세요.");
+      window.history.replaceState(null, "", window.location.pathname + window.location.search);
+    }
+  }, []);
+  async function kakaoLogin() {
+    setLoading(true);
+    setError("");
+    try {
+      const { error } = await supabase.auth.signInWithOAuth({
+        provider: "kakao",
+        options: { scopes: "profile_nickname", redirectTo: appUrl("login?next=" + encodeURIComponent(next)) },
+      });
+      if (error) throw error;
+    } catch (e) {
+      setError(e.message);
+      setLoading(false);
+    }
+  }
 
   const inputCls =
     "w-full h-12 bg-card border border-border rounded-lg px-4 text-[1rem] text-text1 outline-none focus:border-accent transition-colors";
@@ -38,10 +67,13 @@ export default function Login() {
         const { data, error: signUpError } = await supabase.auth.signUp({
           email: email.trim(),
           password,
-          options: { data: { name: name.trim() }, emailRedirectTo: appUrl("") },
+          options: {
+            data: { name: name.trim() },
+            emailRedirectTo: appUrl("login?next=" + encodeURIComponent(next)),
+          },
         });
         if (signUpError) throw signUpError;
-        if (data.session) navigate("/", { replace: true });
+        if (data.session) navigate(next, { replace: true });
         else setMessage("Check your email to confirm your account, then sign in.");
       } else {
         const { error: signInError } = await supabase.auth.signInWithPassword({
@@ -49,7 +81,7 @@ export default function Login() {
           password,
         });
         if (signInError) throw signInError;
-        navigate("/", { replace: true });
+        navigate(next, { replace: true });
       }
     } catch (err) {
       setError(err.message);
@@ -87,14 +119,32 @@ export default function Login() {
         >
           {!emailAuthReady && (
             <p role="status" className="text-sm text-text2 mb-6">
-              Existing members can sign in. New registration and email recovery are coming soon.
+              기존 이메일 계정으로 로그인하세요. 새 사용자는 카카오로 시작하거나 공개 요약을 먼저 확인할 수
+              있습니다.
             </p>
+          )}
+          {kakaoReady && (
+            <div className="mb-6">
+              <button
+                type="button"
+                className="w-full min-h-12 rounded-lg bg-[#FEE500] text-[#191919] font-semibold px-3"
+                disabled={loading}
+                onClick={kakaoLogin}
+              >
+                카카오로 로그인·시작하기
+              </button>
+              <p className="text-xs text-text2 mt-2">
+                카카오 계정 복구는 카카오 로그인 화면에서 진행합니다. 기존 이메일 계정과 다른 계정으로 가입될
+                수 있습니다.
+              </p>
+            </div>
           )}
           {mode !== "forgot" && (
             <div className="flex rounded-lg border border-border overflow-hidden mb-8">
               {["Sign in", "Sign up"].map((label, i) => (
                 <button
-                  disabled={loading || (i === 1 && !emailAuthReady)}
+                  hidden={i === 1 && !emailAuthReady}
+                  disabled={loading}
                   key={label}
                   onClick={() => {
                     setMode(i === 0 ? "signin" : "signup");
@@ -193,6 +243,9 @@ export default function Login() {
           </form>
 
           <div className="mt-4 text-center">
+            <Link to="/preview" className="block mb-3 text-accent underline">
+              공개 요약 체험
+            </Link>
             <Link to="/privacy" className="block mb-3 text-xs text-accent underline">
               Privacy & research use
             </Link>
@@ -210,7 +263,8 @@ export default function Login() {
               </button>
             ) : (
               <button
-                disabled={loading || !emailAuthReady}
+                hidden={!emailAuthReady}
+                disabled={loading}
                 onClick={() => {
                   setMode("forgot");
                   setError("");

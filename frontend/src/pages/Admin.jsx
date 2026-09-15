@@ -1,3 +1,5 @@
+import IntegrityReview from "../components/IntegrityReview";
+import IssueReview from "../components/IssueReview";
 import { useState } from "react";
 import AdminPanel from "../components/AdminPanel";
 import CollectionOverview, { ProcessingHealth } from "../components/CollectionOverview";
@@ -56,8 +58,14 @@ export default function Admin() {
           상태 새로고침
         </button>
         <AdminPanel title="문헌 처리 현황" rpc="admin_catalog_status" refresh={retry}>
-          {(catalog) => <CollectionOverview catalog={catalog} />}
+          {(catalog) => (
+            <>
+              <CollectionOverview catalog={catalog} />
+            </>
+          )}
         </AdminPanel>
+        <IssueReview />
+        <IntegrityReview />
         <AdminPanel title="자동 처리 상태" rpc="admin_fulltext_status" refresh={retry}>
           {(fulltexts) => <ProcessingHealth workers={fulltexts?.workers || []} />}
         </AdminPanel>

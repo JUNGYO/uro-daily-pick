@@ -1,5 +1,5 @@
 import { it, expect, vi } from "vitest";
-import { render, screen, act, waitFor } from "@testing-library/react";
+import { render, screen, act, waitFor, cleanup } from "@testing-library/react";
 const mock = vi.hoisted(() => ({ listener: null, from: vi.fn(), getSession: vi.fn() }));
 vi.mock("./supabase", () => ({
   supabase: {
@@ -52,4 +52,24 @@ it("does not expose the previous account profile after an auth change", async ()
   expect(screen.queryByText("First reader")).not.toBeInTheDocument();
   await act(async () => mock.listener("SIGNED_OUT", null));
   expect(await screen.findByText("Signed out")).toBeVisible();
+});
+
+it("keeps device-only identity through INITIAL_SESSION and clears it on sign out", async () => {
+  cleanup();
+  const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
+  localStorage.setItem("uro-offline-active", "offline-reader");
+  localStorage.setItem("uro-offline:offline-reader", "[{\"id\":1}]");
+  localStorage.setItem("uro-profile:offline-reader", JSON.stringify({id:"offline-reader",name:"Device reader"}));
+  try {
+    render(<AuthProvider><View /></AuthProvider>);
+    expect(await screen.findByText("Device reader")).toBeVisible();
+    await act(async () => mock.listener("INITIAL_SESSION", null));
+    expect(screen.getByText("Device reader")).toBeVisible();
+    await act(async () => mock.listener("SIGNED_OUT", null));
+    expect(await screen.findByText("Signed out")).toBeVisible();
+  } finally {
+    cleanup();
+    online.mockRestore();
+    localStorage.clear();
+  }
 });
