@@ -21,6 +21,7 @@ export function useDailyReader(uid, day, requestedPmid, active = true) {
   const [notice, setNotice] = useState(null);
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
+  const automaticWrite = useRef(null);
   const cards = queue.data?.uid === uid && queue.data?.day === day ? queue.data.cards : [];
   const index = Math.max(
     0,
@@ -43,7 +44,20 @@ export function useDailyReader(uid, day, requestedPmid, active = true) {
     }
     return session.pending.get(pmid);
   }
-  const detail = useResource(() => (selected ? load(selected.pmid) : null), [session, selected?.pmid]);
+  const loadedDetail = useResource(() => (selected ? load(selected.pmid) : null), [session, selected?.pmid]);
+  const loadedId = loadedDetail.data?.paper?.id;
+  // A cached detail can resolve just after a write. Committed state takes precedence
+  // over that earlier snapshot, including while returning rapidly to the same paper.
+  const detail = {
+    ...loadedDetail,
+    data: loadedDetail.data
+      ? {
+          ...loadedDetail.data,
+          state: states[loadedId] || loadedDetail.data.state,
+          opinion: opinions[loadedId] ?? loadedDetail.data.opinion,
+        }
+      : null,
+  };
 
   useEffect(() => {
     setStates({});
@@ -132,16 +146,23 @@ export function useDailyReader(uid, day, requestedPmid, active = true) {
     session.opened.add(paperId);
     lock.current = true;
     setBusy(true);
-    rpc("update_reader_state", { p_paper_id: paperId, p_patch: { reading_state: "reading" } })
+    automaticWrite.current = rpc("update_reader_state", {
+      p_paper_id: paperId,
+      p_patch: { reading_state: "reading" },
+    })
       .then((state) => updateCached(paperId, { state }))
       .catch(() => {})
       .finally(() => {
+        automaticWrite.current = null;
         lock.current = false;
         setBusy(false);
       });
   }, [detail.data?.paper?.id, busy, active]);
 
   async function commit(paperId, patch, opinion, previous, message) {
+    // Retain a click that arrives between rendering and the automatic reading marker.
+    // The initiating paper ID and patch are captured before this wait.
+    if (automaticWrite.current) await automaticWrite.current;
     if (lock.current) return;
     lock.current = true;
     setBusy(true);
