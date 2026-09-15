@@ -40,4 +40,4 @@ before restarting. Keep the source copy until the destination is verified.
 
 Candidate enumeration pages by the indexed article ID, then orders the completed
 list by publication date locally. This avoids increasingly expensive offset scans
-as the all-time catalog grows, without imposing a date or article-count limit.
+as the catalog grows. Automatic processing starts at publication date 2000-01-01, with no article-count limit.

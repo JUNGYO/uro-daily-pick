@@ -47,7 +47,7 @@ try {
   for (const file of (await readdir(migrations))
     .filter((f) => f.endsWith(".sql"))
     .sort()) {
-    if (file.startsWith("011_") || file.startsWith("012_") || file.startsWith("013_") || file.startsWith("014_")) continue; // Test upgrades in order below.
+    if (["011_", "012_", "013_", "014_", "015_", "016_"].some((prefix) => file.startsWith(prefix))) continue; // Test upgrades in order below.
     if (file.startsWith("008_")) {
       let encoded = ["Prostatic Neoplasms", "Randomized Controlled Trial"];
       for (let depth = 0; depth < 21; depth++)
@@ -429,8 +429,50 @@ try {
   assert.deepEqual(daily.map(day => day.date), daily.map(day => day.date).sort());
   for (const fn of functions) await db.query(`SELECT public.${fn}`);
   await db.exec("RESET ROLE");
+  await db.exec(await readFile(path.join(migrations,"015_catalog_since_2000.sql"),"utf8"));
+  await db.exec(`INSERT INTO public.papers(pmid,title,pub_date) VALUES
+    ('800005','Before automatic window','1999-12-31'),
+    ('800006','First automatic day','2000-01-01');
+    INSERT INTO public.catalog_backfill_jobs(job_key,query,start_date,processed)
+      VALUES(repeat('b',64),'Scoped fixture','2000-01-01',3);`);
+  for (const [role, uid] of [["anon", ""], ["authenticated", unconfirmed]]) {
+    await asUser(role,uid);
+    await assert.rejects(db.query("SELECT public.admin_catalog_status()"),{code:"42501"});
+    await assert.rejects(db.query("SELECT public.catalog_backfill_status()"),{code:"42501"});
+  }
+  await asUser("authenticated",admin);
+  const scoped=(await db.query("SELECT public.admin_catalog_status() AS status")).rows[0].status;
+  assert.equal(scoped.automatic_start_date,"2000-01-01");
+  assert.equal(scoped.recent_years,5);
+  assert.equal(scoped.automatic_papers,scoped.qwen_summaries+scoped.awaiting_qwen);
+  assert.equal(scoped.catalog_papers,scoped.automatic_papers+scoped.archived_papers+scoped.undated_papers);
+  assert.equal(scoped.shards.pending,1); // The all-time checkpoint remains stored, outside the new scope.
+  assert.equal(scoped.metadata_examined,3);
+  await db.exec("RESET ROLE");
+  assert.equal((await db.query("SELECT count(*)::int AS n FROM public.catalog_backfill_jobs")).rows[0].n,2);
+  assert.equal((await db.query("SELECT count(*)::int AS n FROM public.papers WHERE pmid='800005'")).rows[0].n,1);
+  assert.equal((await db.query("SELECT count(*)::int AS n FROM public.papers WHERE pub_date>=DATE '2000-01-01'")).rows[0].n,scoped.automatic_papers);
+  await db.exec(await readFile(path.join(migrations,"016_original_acquisition_receipts.sql"),"utf8"));
+  const receipt={...source,summary_source_hash:sha("fulltext\nFirst automatic day\n"+body)};
+  const register=(metadata=receipt,credential=token)=>db.query(
+    "SELECT public.register_institution_original($1,$2,$3,$4,$5,$6)",
+    [worker,credential,"800006",null,"First automatic day",JSON.stringify(metadata)]);
+  await asUser("anon","");
+  await assert.rejects(register(receipt,"invalid"),{code:"42501"});
+  await assert.rejects(register({...receipt,content_text:body}),{code:"22023"});
+  await register();
+  await register();
+  await db.exec("RESET ROLE");
+  const acquired=(await db.query("SELECT * FROM public.papers WHERE pmid='800006'")).rows[0];
+  assert.equal(acquired.fulltext_available,true);
+  assert.equal(acquired.summary_source_hash,null);
+  await asUser("authenticated",admin);
+  const afterReceipt=(await db.query("SELECT public.admin_catalog_status() AS status")).rows[0].status;
+  assert.equal(afterReceipt.originals_acquired,scoped.originals_acquired+1);
+  assert.equal(afterReceipt.summaries_ready,scoped.summaries_ready);
+  await db.exec("RESET ROLE");
   console.log(
-    "PASS: all 14 migrations; responsive admin counts and 30 KST calendar days; private catalog capacity/checkpoints, summary publication, verified Z8 archival, role isolation, provenance, feedback and account deletion",
+    "PASS: all 16 migrations; publication cutoff, preserved archives, responsive admin counts, private checkpoints, summary publication, role isolation, provenance, feedback and account deletion",
   );
 } finally {
   await db.close();

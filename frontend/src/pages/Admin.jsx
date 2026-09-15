@@ -1,5 +1,6 @@
 import { useState } from "react";
 import AdminPanel from "../components/AdminPanel";
+import CollectionOverview, { ProcessingHealth } from "../components/CollectionOverview";
 import { useAuth } from "../lib/auth";
 import { Users, FileText, Heart, Clock } from "lucide-react";
 
@@ -54,6 +55,13 @@ export default function Admin() {
         >
           상태 새로고침
         </button>
+        <AdminPanel title="문헌 처리 현황" rpc="admin_catalog_status" refresh={retry}>
+          {(catalog) => <CollectionOverview catalog={catalog} />}
+        </AdminPanel>
+        <AdminPanel title="자동 처리 상태" rpc="admin_fulltext_status" refresh={retry}>
+          {(fulltexts) => <ProcessingHealth workers={fulltexts?.workers || []} />}
+        </AdminPanel>
+
         <AdminPanel title="서비스 이용 현황" rpc="admin_stats" refresh={retry}>
           {(stats) => {
             const likeRate =
@@ -69,7 +77,7 @@ export default function Admin() {
                 />
                 <StatCard
                   icon={FileText}
-                  label="Total Papers"
+                  label="등록 문헌 정보"
                   value={stats?.total_papers || 0}
                   sub={`+${stats?.papers_7d || 0} this week`}
                   color="#187A36"
@@ -92,73 +100,6 @@ export default function Admin() {
             );
           }}
         </AdminPanel>
-        <AdminPanel title="원문 수집 상태" rpc="admin_fulltext_status" refresh={retry}>
-          {(fulltexts) => (
-            <>
-              <p className="text-sm text-text2">
-                Z8 원문 등록 {fulltexts?.local_bodies || 0}편 · 본문 요약 {fulltexts?.ready_summaries || 0}편
-              </p>
-              {(fulltexts?.workers || []).map((worker, index) => {
-                const stale =
-                  !worker.last_seen_at || Date.now() - Date.parse(worker.last_seen_at) > 2 * 60 * 60 * 1000;
-                const label = stale
-                  ? "연결 확인 필요"
-                  : {
-                      running: "작업 중",
-                      idle: "다음 실행 대기",
-                      error: "오류 · 다음 실행에서 재시도",
-                      registered: "등록됨",
-                    }[worker.state] || worker.state;
-                return (
-                  <p key={index} className="text-sm text-text2 mt-2">
-                    {worker.name}: {label} · 최근 연결{" "}
-                    {worker.last_seen_at ? new Date(worker.last_seen_at).toLocaleString() : "없음"}
-                  </p>
-                );
-              })}
-              {!fulltexts?.workers?.length && (
-                <p className="text-sm text-text3 mt-2">등록된 원내망 수집기가 없습니다.</p>
-              )}
-              <p className="text-xs text-text3 mt-3">
-                원문 수집과 Spark 요약은 독립적으로 실행됩니다. 원문은 Z8에 보관하며 요약과 필요한 정보만
-                서비스에 반영합니다. 원문 등록 수는 서비스에 반영된 메타데이터 기준이며, 수집 직후 요약 대기
-                중인 원문은 아직 포함되지 않을 수 있습니다.
-              </p>
-            </>
-          )}
-        </AdminPanel>
-        <AdminPanel title="전체 문헌 수집" rpc="admin_catalog_status" refresh={retry}>
-          {(catalog) => (
-            <>
-              <p className="text-sm text-text2 mt-2">
-                전체 목록 {catalog?.catalog_papers || 0}편 · Qwen 요약 {catalog?.qwen_summaries || 0}편 · Qwen
-                처리 대기 {catalog?.awaiting_qwen || 0}편 (원문 미확보 포함)
-              </p>
-              <p className="text-sm text-text2 mt-2">
-                수집된 발행 기간: {catalog?.oldest_publication || "확인 중"} ~{" "}
-                {catalog?.newest_publication || "확인 중"}
-              </p>
-              <p className="text-sm text-text2 mt-2">
-                전체 기간 문헌 조회 {catalog?.metadata_examined || 0}건 · 조회 재시도{" "}
-                {catalog?.metadata_unavailable || 0}건
-              </p>
-              {catalog?.shards?.error > 0 && (
-                <p className="text-sm text-text2 mt-2">
-                  일부 문헌 조회가 실패해 저장된 위치부터 재시도합니다.
-                </p>
-              )}
-              {catalog?.storage && (
-                <p className="text-sm text-text2 mt-2">
-                  DB 사용량 {Math.ceil(catalog.storage.database_bytes / 1048576)}MB · 수집 저장공간 예산{" "}
-                  {Math.floor(catalog.storage.budget_bytes / 1048576)}MB
-                  {catalog.storage.database_bytes >= catalog.storage.budget_bytes &&
-                    " — DB 예산에 도달해 새 문헌 등록이 대기 중입니다. 기존 원문 수집·요약은 계속됩니다."}
-                </p>
-              )}
-            </>
-          )}
-        </AdminPanel>
-
         {/* Daily activity chart */}
         <AdminPanel title="Daily Activity (30 days)" rpc="admin_daily_activity" refresh={retry} list>
           {(daily) => (

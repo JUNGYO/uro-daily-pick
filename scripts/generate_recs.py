@@ -13,6 +13,7 @@ import requests
 from common import supabase_headers
 from common import get_json, paginate, strings
 from keywords import keyword_matches, keyword_count
+from catalog_policy import AUTOMATIC_START_DATE, automatic_paper, recent_paper
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
@@ -68,6 +69,7 @@ def get_catalog_papers():
         "select": "id,pmid,title,abstract,authors,journal,pub_date,mesh_terms,keywords,paper_type,study_type,fulltext_available,summary_basis,summary_ko,summary_source_hash,summary_model,summarized_at",
         "order": "pub_date.desc,id",
         "fulltext_available": "eq.true",
+        "pub_date": "gte."+AUTOMATIC_START_DATE,
     })
     known={p["id"] for p in papers}
     signals=[]
@@ -350,7 +352,7 @@ def main():
         skip_types = {"letter", "comment", "erratum", "editorial"}
         scored = []
         for paper in papers:
-            if not has_fulltext_summary(paper):
+            if not automatic_paper(paper) or not has_fulltext_summary(paper):
                 continue
             if paper["id"] in seen_ids:
                 continue
@@ -364,7 +366,7 @@ def main():
             if score > 0:
                 scored.append((paper, score, reasons))
 
-        scored.sort(key=lambda x: (x[1], x[0]["id"]), reverse=True)
+        scored.sort(key=lambda x: (recent_paper(x[0]), x[1], x[0]["id"]), reverse=True)
         top5 = scored[:5]
 
         recs = [{"paper_id": p["id"], "score": score, "reasons": reasons} for p, score, reasons in top5]

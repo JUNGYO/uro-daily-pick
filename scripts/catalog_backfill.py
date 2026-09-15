@@ -1,4 +1,4 @@
-"""Resumable all-time PubMed inventory. Only citation metadata goes to Supabase."""
+"""Resumable PubMed inventory from 2000 onward. Only citation metadata goes to Supabase."""
 import argparse
 from datetime import datetime, timedelta, timezone
 import hashlib
@@ -10,6 +10,7 @@ from xml.etree import ElementTree as ET
 import requests
 from common import get_json, patch_fields, supabase_headers
 from fetch_papers import URO_QUERIES, PUBMED_BASE, PUBMED_EMAIL, parse_article
+from catalog_policy import AUTOMATIC_START_DATE, PUBMED_DATE_RANGE, automatic_paper
 
 PAGE_LIMIT = 9999
 
@@ -19,13 +20,13 @@ class StorageCapacityReached(Exception):
 
 
 def job_for(query, lower=1, upper=None):
-    identity=json.dumps([query,lower,upper],separators=(",",":"))
+    identity=json.dumps([query,lower,upper,AUTOMATIC_START_DATE],separators=(",",":"))
     return {"job_key":hashlib.sha256(identity.encode()).hexdigest(),"query":query,
-            "lower_uid":lower,"upper_uid":upper}
+            "lower_uid":lower,"upper_uid":upper,"start_date":AUTOMATIC_START_DATE}
 
 
 def search_term(job):
-    query="("+job["query"]+")"
+    query="("+job["query"]+") AND "+PUBMED_DATE_RANGE
     low,high=job["lower_uid"],job.get("upper_uid")
     if high is not None:
         return f"{query} AND {low}:{high}[UID]"
@@ -34,7 +35,7 @@ def search_term(job):
 
 def split_job(job, ids):
     low,high=job["lower_uid"],job.get("upper_uid")
-    # The open-ended right branch keeps future/large PMIDs and undated records.
+    # UID partitions cover the complete date-filtered search, including future IDs.
     ceiling=high if high is not None else max(int(pmid) for pmid in ids)
     pivot=(low+ceiling)//2
     if pivot<low or (high is not None and pivot>=high) or ceiling<=low:
@@ -95,6 +96,7 @@ class Store:
     def next_job(self):
         now=datetime.now(timezone.utc).isoformat()
         rows=self.read("catalog_backfill_jobs",{"select":"*","status":"in.(pending,active,error)",
+            "start_date":"eq."+AUTOMATIC_START_DATE,
             "or":f"(retry_after.is.null,retry_after.lte.{now})",
             "order":"status.asc,lower_uid.desc,updated_at.asc,job_key","limit":1})
         return rows[0] if rows else None
@@ -112,13 +114,13 @@ def pubmed_search(job):
 
 
 def seed_existing_catalog(store):
-    """Audit a durable snapshot of every existing PMID, including other journals."""
+    """Audit the date-eligible existing catalog; preserve older stored records."""
     job=job_for("Existing catalog citation audit v1")
     if store.read("catalog_backfill_jobs",{"select":"job_key","job_key":"eq."+job["job_key"],"limit":1}):
         return
     ids=[]
     while True:
-        page=store.read("papers",{"select":"pmid","order":"id","offset":len(ids),"limit":1000})
+        page=store.read("papers",{"select":"pmid","pub_date":"gte."+AUTOMATIC_START_DATE,"order":"id","offset":len(ids),"limit":1000})
         ids.extend(row["pmid"] for row in page)
         if len(page)<1000:break
     # These identifiers are already known locally; no ESearch pagination limit
@@ -161,8 +163,10 @@ def process_job(store,job,deadline,search=pubmed_search,details=pubmed_details):
         articles=details(requested)
         valid=[p for p in articles if p.get("pmid") in requested and p.get("title")]
         found={p["pmid"] for p in valid}
-        # No abstract/date/article-type filter: complete historical citation inventory.
-        for start in range(0,len(valid),50):store.insert("papers",valid[start:start+50],"pmid")
+        # Date corrections outside the search window are examined but not imported.
+        # They are not missing metadata and must not trap a checkpoint in retries.
+        eligible=[p for p in valid if automatic_paper(p)]
+        for start in range(0,len(eligible),50):store.insert("papers",eligible[start:start+50],"pmid")
         missing=[pmid for pmid in missing if pmid not in found]
         missing.extend(pmid for pmid in requested if pmid not in found and pmid not in missing)
         if any(pmid not in found for pmid in requested):
@@ -205,7 +209,7 @@ def main():
     print(json.dumps(status),flush=True)
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"],"a",encoding="utf-8") as output:
-            output.write("All-time catalog backfill\n\n```json\n"+json.dumps(status,indent=2)+"\n```\n")
+            output.write("Catalog backfill from 2000-01-01\n\n```json\n"+json.dumps(status,indent=2)+"\n```\n")
     if failures:print(f"::warning::{failures} catalog searches need retry; completed pages are preserved")
 
 

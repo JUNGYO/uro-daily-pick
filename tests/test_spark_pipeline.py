@@ -45,6 +45,7 @@ class SparkPipelineTests(unittest.TestCase):
             self.assertEqual(len(list((directory/"documents").glob("[12].json"))),2)
             readiness.assert_not_called(); summary.assert_not_called()
             service.rpc.assert_not_called()
+            self.assertEqual(service.register_original.call_count,2)
 
     def test_summary_queue_uses_local_bodies_without_opening_a_publisher(self):
         paper={"pmid":"1","doi":"10.1000/study","title":"Synthetic study"}
@@ -125,9 +126,21 @@ class SparkPipelineTests(unittest.TestCase):
         service=object.__new__(worker.Service)
         service.request=Mock()
         for name,values in [("publish_institution_fulltext",{"p_document":{"content_text":BODY}}),
-                ("publish_institution_summary",{"p_document":{"content_text":BODY}})]:
+                ("publish_institution_summary",{"p_document":{"content_text":BODY}}),
+                ("register_institution_original",{"p_document":{"content_text":BODY}})]:
             with self.assertRaises(ValueError): service.rpc(name,**values)
         service.request.assert_not_called()
+
+    def test_acquisition_receipt_contains_provenance_without_original_text(self):
+        service=object.__new__(worker.Service)
+        service.rpc=Mock()
+        document={**worker.parse_document(HTML.encode()),"source_url":"https://example.test/article"}
+        service.register_original({"pmid":"1","title":"Study","doi":""},document)
+        name=service.rpc.call_args.args[0]
+        payload=service.rpc.call_args.kwargs
+        self.assertEqual(name,"register_institution_original")
+        self.assertEqual(set(payload["p_source"]),{"content_hash","summary_source_hash","characters","section_count","source_url"})
+        self.assertNotIn(document["content_text"],json.dumps(payload))
 
     def exercise_queue(self,fail_first=False,archived=False,revised_title=False):
         papers=[{"pmid":str(n),"doi":"10.1000/study","title":"Synthetic study"} for n in (1,2)]
@@ -194,14 +207,30 @@ class SparkPipelineTests(unittest.TestCase):
         service.opener.open.side_effect=worker.HTTPError("https://example.invalid",403,"Denied",{},None)
         with self.assertRaises(RuntimeError):service.request("rpc/publish_institution_summary",{})
 
-    def test_candidate_query_includes_old_models_without_publication_cutoff(self):
+    def test_candidate_query_includes_old_models_with_publication_cutoff(self):
         service=object.__new__(worker.Service)
         service.request=Mock(return_value=[])
         service.candidates()
         params=service.request.call_args.kwargs["params"]
         self.assertIn("summary_model.neq."+spark.MODEL_LABEL,params["or"])
         self.assertNotIn("fetched_at",params)
+        self.assertEqual(params["pub_date"],"gte.2000-01-01")
+
+    def test_only_an_explicit_pmid_bypasses_the_automatic_cutoff(self):
+        service=object.__new__(worker.Service)
+        service.request=Mock(return_value=[])
+        service.candidates("123")
+        params=service.request.call_args.kwargs["params"]
+        self.assertEqual(params["pmid"],"eq.123")
         self.assertNotIn("pub_date",params)
+
+    def test_figures_use_catalog_dates_even_for_already_summarized_papers(self):
+        service=object.__new__(worker.Service)
+        service.request=Mock(side_effect=[[{"pmid":"5"}],[{"pmid":"101"}]])
+        self.assertEqual(service.automatic_figure_pmids([str(i) for i in range(1,102)]),{"5","101"})
+        for call in service.request.call_args_list:
+            self.assertEqual(call.kwargs["params"]["pub_date"],"gte.2000-01-01")
+            self.assertNotIn("or",call.kwargs["params"])
 
     def test_candidate_cursor_avoids_deep_offsets_and_keeps_newest_first(self):
         service=object.__new__(worker.Service)

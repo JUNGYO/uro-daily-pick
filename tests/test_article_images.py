@@ -29,6 +29,23 @@ class ImageCollectionTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def test_automatic_queue_skips_archived_dates_but_explicit_request_can_read_them(self):
+        for pmid in ('1','2'):
+            (self.docs/(pmid+'.json')).write_text(json.dumps(self.record),encoding='utf-8')
+        before=(self.docs/'1.json').read_bytes()
+        with patch.dict(sys.modules,{'msvcrt':Mock()}), \
+             patch('institution_worker.Service') as service, \
+             patch('institution_worker.Browser'), \
+             patch.object(images,'collect_images',return_value={'figures':[]}) as collect:
+            service.return_value.automatic_figure_pmids.return_value={'2'}
+            images.run_image_queue(self.root,'node',60)
+            self.assertEqual([call.args[1] for call in collect.call_args_list],['2'])
+            collect.reset_mock();service.reset_mock()
+            images.run_image_queue(self.root,'node',60,'1')
+            service.assert_not_called()
+            self.assertEqual([call.args[1] for call in collect.call_args_list],['1'])
+        self.assertEqual((self.docs/'1.json').read_bytes(),before)
+
     def test_high_resolution_caption_and_tables(self):
         result = images.html_figures(HTML + '<figure><a href="/tables/1">Table 1</a></figure>', self.record['document']['source_url'])
         self.assertEqual(len(result), 1)

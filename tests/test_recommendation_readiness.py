@@ -39,7 +39,7 @@ class RecommendationReadinessTests(unittest.TestCase):
         self.assertEqual(get.call_args_list[1].kwargs["params"]["offset"], "500")
         self.assertNotIn("fetched_at", get.call_args.kwargs["params"])
 
-    def test_rebuild_uses_old_ready_bodies_preserving_feedback_and_history(self):
+    def test_rebuild_excludes_pre2000_papers_preserving_feedback_and_history(self):
         papers = [ready_paper(n) for n in range(1, 8)]
         papers[-1]["abstract"]=""
         papers[-1]["pub_date"]="1937-11-01"
@@ -59,7 +59,7 @@ class RecommendationReadinessTests(unittest.TestCase):
         self.assertEqual(writes[0].args[:2], ("POST", "rpc/replace_daily_recommendations"))
         payload = writes[0].args[2]
         self.assertEqual(payload["p_date"], datetime.now(timezone(timedelta(hours=9))).date().isoformat())
-        self.assertEqual({r["paper_id"] for r in payload["p_recs"]}, set(range(3, 8)))
+        self.assertEqual({r["paper_id"] for r in payload["p_recs"]}, set(range(3, 7)))
 
 
 if __name__ == "__main__":

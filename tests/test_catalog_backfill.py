@@ -50,7 +50,7 @@ class AllTimeTests(unittest.TestCase):
         store=MemoryStore(job)
         store.papers["1"]={"pmid":"1","title":"Old title","summary_ko":"Verified body summary","summarized_at":"existing"}
         backfill.process_job(store,job,time.monotonic()+10,lambda _:self.fail("Known PMID needs no search"),
-            lambda _:[{"pmid":"1","title":"Corrected title","abstract":"New abstract"}])
+            lambda _:[{"pmid":"1","title":"Corrected title","abstract":"New abstract","pub_date":"2000-01-01"}])
         self.assertEqual(store.papers["1"]["title"],"Corrected title")
         self.assertEqual(store.papers["1"]["summary_ko"],"Verified body summary")
 
@@ -78,7 +78,7 @@ class AllTimeTests(unittest.TestCase):
         job={**backfill.job_for("Known citations"),"pmids":[str(i) for i in range(1100)],"processed":0}
         store=MemoryStore(job)
         store.ensure_capacity=Mock(side_effect=[None,backfill.StorageCapacityReached()])
-        details=lambda ids:[{"pmid":pmid,"title":"Article "+pmid} for pmid in ids]
+        details=lambda ids:[{"pmid":pmid,"title":"Article "+pmid,"pub_date":"2000-01-01"} for pmid in ids]
         with self.assertRaises(backfill.StorageCapacityReached):
             backfill.process_job(store,job,time.monotonic()+10,details=details)
         self.assertEqual(store.jobs[job["job_key"]]["processed"],1000)
@@ -95,7 +95,7 @@ class AllTimeTests(unittest.TestCase):
         self.assertTrue(any("British Journal of Urology[Journal]" in q for q in queries))
         self.assertFalse(any('"' in q for q in queries))
 
-    def test_partition_covers_all_identifiers_without_date_limits(self):
+    def test_partition_covers_identifiers_with_a_shared_publication_cutoff(self):
         root=backfill.job_for("A journal[Journal]")
         high,low=backfill.split_job(root,["10","1000"])
         self.assertEqual(low["lower_uid"],1)
@@ -103,7 +103,9 @@ class AllTimeTests(unittest.TestCase):
         self.assertIsNone(high["upper_uid"])
         self.assertIn("NOT 1:",backfill.search_term(high))
         self.assertNotIn("date",backfill.search_term(root))
-        self.assertNotIn("[dp]",backfill.search_term(root))
+        self.assertIn("2000:3000[dp]",backfill.search_term(root))
+        self.assertIn("2000:3000[dp]",backfill.search_term(high))
+        self.assertEqual(root["start_date"],"2000-01-01")
 
     def test_truncated_and_unrecognized_queries_are_rejected(self):
         for result in [{"count":"3","idlist":["1","2"]},
@@ -116,7 +118,7 @@ class AllTimeTests(unittest.TestCase):
         store=MemoryStore(job)
         ids=[str(n) for n in range(1,104)]
         def details(items):
-            return [{"pmid":p,"title":"Historical article "+p,"abstract":"","pub_date":"1901-01-01"} for p in items]
+            return [{"pmid":p,"title":"Historical article "+p,"abstract":"","pub_date":"2000-01-01"} for p in items]
         search=lambda _: {"count":str(len(ids)),"idlist":ids}
         store.fail_checkpoint=True
         with self.assertRaises(RuntimeError):backfill.process_job(store,job,time.monotonic()+10,search,details)
@@ -131,13 +133,27 @@ class AllTimeTests(unittest.TestCase):
           '<Journal><JournalIssue><PubDate><MedlineDate>1937 Nov-Dec</MedlineDate></PubDate></JournalIssue></Journal></Article></MedlineCitation></PubmedArticle>')
         self.assertEqual(fetch.parse_article(article)["pub_date"],"1937-11-01")
 
+    def test_out_of_scope_results_are_examined_without_insert_or_deleting_archives(self):
+        job={**backfill.job_for("A journal[Journal]"),"pmids":["1","2","3"],"processed":0}
+        store=MemoryStore(job)
+        old={"pmid":"1","title":"Preserved original","pub_date":"1999-12-31","summary_ko":"Existing"}
+        store.papers["1"]=copy.deepcopy(old)
+        details=lambda _:[{"pmid":"1","title":"Outside range","pub_date":"1999-12-31"},
+            {"pmid":"2","title":"Boundary article","pub_date":"2000-01-01"},
+            {"pmid":"3","title":"Date unknown","pub_date":None}]
+        backfill.process_job(store,job,time.monotonic()+10,details=details)
+        self.assertEqual(store.papers["1"],old)
+        self.assertEqual(set(store.papers),{"1","2"})
+        self.assertEqual(store.jobs[job["job_key"]]["processed"],3)
+        self.assertEqual(store.jobs[job["job_key"]]["status"],"done")
+
     def test_missing_metadata_is_retried_without_marking_page_complete(self):
         job={**backfill.job_for("A journal[Journal]"),"processed":0}
         store=MemoryStore(job)
         with self.assertRaises(ValueError):
             backfill.process_job(store,job,time.monotonic()+10,
                 lambda _:{"count":"2","idlist":["1","2"]},
-                lambda _:[{"pmid":"1","title":"Available article"}])
+                lambda _:[{"pmid":"1","title":"Available article","pub_date":"2000-01-01"}])
         self.assertEqual(store.jobs[job["job_key"]]["processed"],0)
         self.assertEqual(store.jobs[job["job_key"]]["unavailable_pmids"],["2"])
         self.assertIn("1",store.papers)

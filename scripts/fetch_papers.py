@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta
 from xml.etree import ElementTree as ET
 
 import requests
+from catalog_policy import PUBMED_DATE_RANGE, automatic_paper
 from common import supabase_headers
 from classify_papers import classify
 from common import get_json
@@ -265,12 +266,12 @@ def main():
     for query in URO_QUERIES:
         short = query[:50]
         try:
-            pmids = search_pmids(query, max_results=200, days_back=7)
+            pmids = search_pmids(f'({query}) AND {PUBMED_DATE_RANGE}', max_results=200, days_back=7)
             new_pmids = [p for p in pmids if p not in existing]
             if new_pmids:
                 time.sleep(0.4)  # NCBI rate limit
                 details = fetch_details(new_pmids)
-                valid = [d for d in details if d["pmid"] and d["title"]]
+                valid = [d for d in details if d["pmid"] and d["title"] and automatic_paper(d)]
                 all_new_papers.extend(valid)
                 existing.update(d["pmid"] for d in valid)
                 print(f"  [{short}...] {len(pmids)} found, {len(valid)} new")
