@@ -23,6 +23,9 @@ try {
   $readerConfig = Get-Content -LiteralPath $readerConfigFile -Raw -Encoding utf8 | ConvertFrom-Json
   if ($readerConfig.port -ne 18451 -or $readerConfig.origin -ne 'https://jungyo.github.io') { throw 'Unexpected viewer configuration' }
   $readerScript = Join-Path $readerRelease 'fulltext_viewer.py'
+  if (-not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'viewer_account_rights.ps1') -PathType Leaf)) {
+    throw 'The viewer batch-logon helper must be staged beside the installer'
+  }
   & $PythonPath -I -B $readerScript --config $readerConfigFile --check
   if ($LASTEXITCODE -ne 0) { throw 'Viewer configuration check failed' }
   $readerExisting = Get-LocalUser -Name $readerName -ErrorAction SilentlyContinue
@@ -37,6 +40,9 @@ try {
   $readerSid = $readerUser.SID.Value
   # No administrator membership. Grant only the runtime and article/config directories.
   Add-LocalGroupMember -SID 'S-1-5-32-545' -Member $readerUser -ErrorAction SilentlyContinue
+  $readerStage = 'batch-logon'
+  . (Join-Path $PSScriptRoot 'viewer_account_rights.ps1')
+  Enable-ViewerBatchLogon -Sid $readerSid | Out-Null
   $readerStage = 'read-only-access'
   foreach ($readerDirectory in @($readerRelease, (Join-Path $readerConfig.state_dir 'documents'), (Join-Path $readerConfig.state_dir 'cloud-archive'))) {
     $readerResolved = (Resolve-Path -LiteralPath $readerDirectory).Path
@@ -76,6 +82,16 @@ try {
   Register-ScheduledTask -TaskName $readerTask -InputObject $readerDefinition -User $readerName -Password $readerPassword | Out-Null
   $readerPassword = $null
   Start-ScheduledTask -TaskName $readerTask
+  $readerStage = 'health'
+  $readerHealthy = $false
+  for ($readerAttempt=0; $readerAttempt -lt 10; $readerAttempt++) {
+    try {
+      $readerHealth = Invoke-RestMethod -Uri 'http://127.0.0.1:18451/health' -TimeoutSec 2
+      if ($readerHealth.status -eq 'ok') { $readerHealthy=$true; break }
+    } catch {}
+    Start-Sleep -Seconds 2
+  }
+  if (-not $readerHealthy) { throw 'Viewer task registered but did not start; inspect the task result before enabling public access' }
   @{status='installed';task=$readerTask;identity=$readerSid;release=$readerRelease} | ConvertTo-Json | Set-Content -LiteralPath $readerResult -Encoding utf8
 } catch {
   @{status='failed';stage=$readerStage;message=$_.Exception.Message} | ConvertTo-Json | Set-Content -LiteralPath $readerResult -Encoding utf8

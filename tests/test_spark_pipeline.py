@@ -203,6 +203,23 @@ class SparkPipelineTests(unittest.TestCase):
         self.assertNotIn("fetched_at",params)
         self.assertNotIn("pub_date",params)
 
+    def test_candidate_cursor_avoids_deep_offsets_and_keeps_newest_first(self):
+        service=object.__new__(worker.Service)
+        first=[{"id":i,"pmid":str(i),"pub_date":"2020-01-01"} for i in range(1,1001)]
+        service.request=Mock(side_effect=[first,[{"id":1001,"pmid":"1001","pub_date":"2026-01-01"}]])
+        result=service.candidates()
+        self.assertEqual(len(result),1001)
+        self.assertEqual(result[0]["pmid"],"1001")
+        self.assertEqual(service.request.call_args_list[0].kwargs["params"]["id"],"gt.0")
+        self.assertEqual(service.request.call_args_list[1].kwargs["params"]["id"],"gt.1000")
+        for call in service.request.call_args_list:
+            self.assertNotIn("offset",call.kwargs["params"])
+
+    def test_candidate_cursor_rejects_a_nonadvancing_page(self):
+        service=object.__new__(worker.Service)
+        service.request=Mock(return_value=[{"id":0,"pmid":"1"}]*1000)
+        with self.assertRaises(ValueError): service.candidates()
+
     def test_one_invalid_summary_retains_body_and_does_not_block_next_paper(self):
         service=self.exercise_queue(fail_first=True)
         service.status.assert_any_call("running","1","retryable_error")

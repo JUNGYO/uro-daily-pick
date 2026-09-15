@@ -37,3 +37,7 @@ Existing installations without this file retain their original local state path.
 When changing disks, stop the literature task, copy and hash-verify its state,
 verify the SQLite checkpoint, then update this setting and the viewer's state path
 before restarting. Keep the source copy until the destination is verified.
+
+Candidate enumeration pages by the indexed article ID, then orders the completed
+list by publication date locally. This avoids increasingly expensive offset scans
+as the all-time catalog grows, without imposing a date or article-count limit.
