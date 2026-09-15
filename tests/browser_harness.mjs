@@ -17,7 +17,6 @@ const compiler = await context({
   define: {
     "import.meta.env.PROD": "false",
     "import.meta.env.BASE_URL": JSON.stringify("/uro-daily-pick/"),
-    "import.meta.env.VITE_KAKAO_AUTH_READY": JSON.stringify("true"),
     "import.meta.env.VITE_EMAIL_AUTH_READY": JSON.stringify("false"),
     "import.meta.env.VITE_EMAIL_DELIVERY_READY": JSON.stringify("false"),
     "import.meta.env.VITE_FULLTEXT_ORIGIN": JSON.stringify(
