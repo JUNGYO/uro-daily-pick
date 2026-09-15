@@ -21,7 +21,7 @@ Implemented the sixteen accepted UX review items for clinical daily reading and 
 | I15 offline/resume | Explicit device summaries, app shell cache, account isolation, removal, logout purge and reading position | Production-build offline reload/sign-out, allowlist and auth race tests |
 | I16 projects/sharing | Topics, suggestions, invitations/acceptance, reader/editor roles and revocation | PostgreSQL role isolation and project browser workflows |
 
-Validation: 114 Python tests, 47 frontend unit tests and 19 browser scenarios passed locally. Isolated PostgreSQL tests cover all migrations through 021, including existing upgrades, role isolation, summary publication and source changes. Browser fixtures contain synthetic data and never request production data; the offline scenario uses the production build and service worker.
+Validation: 114 Python tests, 47 frontend unit tests and 20 browser scenarios passed locally (the full 19-scenario run plus the welcome-to-preview regression). Isolated PostgreSQL tests cover all migrations through 021, including existing upgrades, role isolation, summary publication and source changes. Browser fixtures contain synthetic data and never request production data; the offline scenario uses the production build and service worker.
 
 A real original produced a validated three-line summary, three Q&A pairs and fifteen source references through the existing model endpoint. The publication payload contains derived fields only. Live database verification is required alongside fixtures. Migration 021 enables readiness checks to use the acquired-original index and adds a bounded integrity-refresh index.
 

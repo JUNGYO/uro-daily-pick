@@ -12,6 +12,12 @@ test.beforeEach(async ({ page }) => {
       : route.abort(),
   );
 });
+test("public summary trial opens directly from the welcome page", async ({page}) => {
+  await page.goto("/uro-daily-pick/welcome?scenario=signed-out");
+  await page.getByRole("button",{name:"요약 체험하기"}).click();
+  await expect(page).toHaveURL(/\/preview$/);
+  await expect(page.getByRole("heading",{name:"본문 기반 세 줄 요약"}).first()).toBeVisible();
+});
 for (const viewport of [
   { width: 1440, height: 1000 },
   { width: 390, height: 844 },
