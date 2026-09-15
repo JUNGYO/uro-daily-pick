@@ -9,13 +9,13 @@ export function Loading({ text = "Loading…" }) {
   );
 }
 
-export function ErrorNotice({ message, onRetry }) {
+export function ErrorNotice({ message, onRetry, retryLabel = "Try again" }) {
   return (
     <div role="alert" className="rounded-xl border border-red-200 bg-red-50 p-4 my-4 text-sm text-red-800">
       <p>{message}</p>
       {onRetry && (
         <button className="mt-3 font-semibold underline" onClick={onRetry}>
-          Try again
+          {retryLabel}
         </button>
       )}
     </div>

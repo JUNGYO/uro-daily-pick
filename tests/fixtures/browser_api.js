@@ -12,6 +12,8 @@ let user =
       };
 let listener = () => {};
 let catalogAttempt = 0;
+let detailFailed = false,
+  stateFailed = false;
 const papers = Array.from({ length: 5 }, (_, i) => ({
   id: i + 1,
   pmid: String(12345670 + i),
@@ -357,6 +359,8 @@ export const supabase = {
         return { error: { message: "Simulated API outage" } };
       if (name === "preview_papers")
         return { data: db.papers.filter(ready).slice(0, 3) };
+      if (name === "reader_daily" && args.p_day && args.p_day !== today)
+        return { data: [] };
       if (name === "reader_daily")
         return {
           data: db.papers
@@ -374,6 +378,18 @@ export const supabase = {
             })),
         };
       if (name === "reader_paper") {
+        if (scenario === "slow-daily")
+          await new Promise((r) =>
+            setTimeout(r, args.p_pmid === "12345671" ? 900 : 100),
+          );
+        if (
+          scenario === "daily-detail-error" &&
+          args.p_pmid === "12345670" &&
+          !detailFailed
+        ) {
+          detailFailed = true;
+          return { error: { message: "문헌을 불러오지 못했습니다." } };
+        }
         const paper = db.papers.find((p) => p.pmid === args.p_pmid);
         return {
           data: paper
@@ -391,6 +407,18 @@ export const supabase = {
         };
       }
       if (name === "update_reader_state") {
+        if (scenario === "slow-daily")
+          await new Promise((r) => setTimeout(r, 500));
+        if (
+          scenario === "daily-state-error" &&
+          args.p_patch.saved &&
+          !stateFailed
+        ) {
+          stateFailed = true;
+          return {
+            error: { message: "저장하지 못했습니다. 다시 시도해 주세요." },
+          };
+        }
         let s = db.reader_states.find((s) => s.paper_id === args.p_paper_id);
         if (!s) {
           s = {

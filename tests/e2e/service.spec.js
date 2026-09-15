@@ -12,11 +12,15 @@ test.beforeEach(async ({ page }) => {
       : route.abort(),
   );
 });
-test("public summary trial opens directly from the welcome page", async ({page}) => {
+test("public summary trial opens directly from the welcome page", async ({
+  page,
+}) => {
   await page.goto("/uro-daily-pick/welcome?scenario=signed-out");
-  await page.getByRole("button",{name:"요약 체험하기"}).click();
+  await page.getByRole("button", { name: "요약 체험하기" }).click();
   await expect(page).toHaveURL(/\/preview$/);
-  await expect(page.getByRole("heading",{name:"본문 기반 세 줄 요약"}).first()).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "본문 기반 세 줄 요약" }).first(),
+  ).toBeVisible();
 });
 for (const viewport of [
   { width: 1440, height: 1000 },
@@ -164,20 +168,28 @@ for (const width of [1440, 390]) {
     await expect(
       page.getByRole("link", { name: /Recent paper without/ }),
     ).toHaveCount(0);
-    for (const title of [
+    const titles = [
       /Personalized treatment/,
       /Long-term outcomes/,
       /A multicenter evaluation/,
       /Patient-reported quality/,
       /Imaging surveillance/,
-    ]) {
-      await page.getByRole("link", { name: title }).click();
+    ];
+    for (let i = 0; i < titles.length; i++) {
+      await expect(
+        page
+          .getByRole("article", { name: "선택한 논문" })
+          .getByRole("heading", { name: titles[i] }),
+      ).toBeVisible();
       await expect(
         page
           .getByRole("region", { name: "본문 기반 세 줄 요약" })
           .locator("ol > li"),
       ).toHaveCount(3);
-      await page.getByRole("link", { name: "← 목록으로" }).click();
+      if (i < titles.length - 1)
+        await page
+          .getByRole("button", { name: "다음 논문", exact: true })
+          .click();
     }
   });
 }

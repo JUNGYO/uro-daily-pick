@@ -33,7 +33,7 @@ export function Resource({ resource, children }) {
   return resource.loading ? (
     <Loading text="불러오는 중…" />
   ) : resource.error ? (
-    <ErrorNotice message={resource.error} onRetry={resource.reload} />
+    <ErrorNotice message={resource.error} onRetry={resource.reload} retryLabel="다시 시도" />
   ) : (
     children
   );

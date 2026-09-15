@@ -3,7 +3,6 @@ import { Link, useLocation, useParams, useSearchParams } from "react-router-dom"
 import { useAuth } from "../lib/auth";
 import { supabase } from "../lib/supabase";
 import { checked, normalizePaper } from "../lib/data";
-import { hasFulltextSummary } from "../lib/summary";
 import {
   rpc,
   publisherLink,
@@ -18,17 +17,14 @@ import {
 } from "../lib/workspace";
 import { ReaderPage, Resource, useResource } from "../components/ReaderUI";
 import { useReading } from "../lib/useReading";
-export const FIELDS = [
-  ["study_design", "설계"],
-  ["population", "대상"],
-  ["sample_size", "표본"],
-  ["intervention", "중재"],
-  ["comparator", "비교군"],
-  ["follow_up", "추적 기간"],
-  ["outcome", "주요 평가변수"],
-  ["key_finding", "주요 결과"],
-  ["limitations", "한계"],
-];
+import {
+  FIELDS,
+  IntegrityNotice,
+  SummaryContent,
+  StudyContent,
+  EvidenceLinks,
+} from "../components/ReadingContent";
+export { FIELDS };
 export default function Paper() {
   const { pmid } = useParams(),
     { user } = useAuth(),
@@ -97,44 +93,15 @@ export default function Paper() {
     setMessage("저장했습니다.");
   }
   const p = r.data?.paper ? normalizePaper(r.data.paper) : null;
-  const ready = p && hasFulltextSummary(p),
-    s = r.data?.state || {};
+  const s = r.data?.state || {};
   function evidence(id) {
-    if (!r.data.access?.can_read)
-      return (
-        <p className="reader-muted">
-          <a href={publisherLink(p)} target="_blank" rel="noreferrer">
-            출판사·기관에서 근거 확인
-          </a>
-        </p>
-      );
-    const refs = p.evidence?.claims?.[id];
-    return refs?.length ? (
-      <div className="reader-actions">
-        {refs.map((ref) => (
-          <Link
-            className="btn-secondary"
-            key={ref}
-            to={`/fulltext/${p.pmid}?source=${encodeURIComponent(p.evidence.content_hash)}#${encodeURIComponent(ref)}`}
-            state={{ returnTo: location.pathname + location.search }}
-          >
-            근거 확인 · {ref.startsWith("figure-") ? "그림" : ref.startsWith("table-") ? "표" : "본문"}
-          </Link>
-        ))}
-      </div>
-    ) : (
-      <p className="reader-muted">
-        문장별 근거 연결 전 ·{" "}
-        {r.data.access?.can_read ? (
-          <Link to={"/fulltext/" + pmid} state={{ returnTo: location.pathname + location.search }}>
-            원문 전체 보기
-          </Link>
-        ) : (
-          <a href={publisherLink(p)} target="_blank" rel="noreferrer">
-            출판사에서 확인
-          </a>
-        )}
-      </p>
+    return (
+      <EvidenceLinks
+        paper={p}
+        claim={id}
+        canRead={r.data?.access?.can_read && !r.data?.offline}
+        returnTo={location.pathname + location.search}
+      />
     );
   }
   return (
@@ -158,37 +125,7 @@ export default function Paper() {
                 후 확인해 주세요.
               </div>
             )}
-            {p.integrity_status && p.integrity_status !== "current" && (
-              <div className="reader-notice">
-                <strong>
-                  {
-                    { retracted: "철회된 문헌", corrected: "정정된 문헌", concern: "우려 표명이 있는 문헌" }[
-                      p.integrity_status
-                    ]
-                  }
-                </strong>
-                {(p.related_notices || []).map((n, i) => (
-                  <p key={i}>
-                    <a
-                      href={"https://pubmed.ncbi.nlm.nih.gov/" + encodeURIComponent(n.pmid) + "/"}
-                      target="_blank"
-                      rel="noreferrer"
-                    >
-                      관련 공지 · PMID {n.pmid}
-                    </a>
-                  </p>
-                ))}
-              </div>
-            )}
-            {p.summary_review_required && (
-              <div className="reader-notice" role="status">
-                <strong>정정·우려 공지 이후 요약 재검토가 필요합니다.</strong>
-                <p>
-                  아래 요약에는 최근 공지 내용이 반영되지 않았을 수 있습니다. 연결된 공지와 원문을 확인해
-                  주세요.
-                </p>
-              </div>
-            )}
+            <IntegrityNotice paper={p} />
             <div className="reader-actions">
               <button
                 className={s.saved ? "btn-primary" : "btn-secondary"}
@@ -263,76 +200,8 @@ export default function Paper() {
                 </button>
               ))}
             </div>
-            {tab === "summary" && (
-              <>
-                {ready ? (
-                  <section className="reader-summary" aria-label="본문 기반 세 줄 요약">
-                    <h2>본문 기반 세 줄 요약</h2>
-                    <ol>
-                      {p.summary_ko
-                        .split("\n")
-                        .filter(Boolean)
-                        .map((line, i) => (
-                          <li key={i}>
-                            {line}
-                            {evidence("summary_" + (i + 1))}
-                          </li>
-                        ))}
-                    </ol>
-                    <p className="reader-muted">
-                      생성 {new Date(p.summarized_at).toLocaleDateString("ko-KR")} · AI 요약
-                    </p>
-                  </section>
-                ) : (
-                  <div className="reader-notice">
-                    <h2>{p.fulltext_available ? "원문 확보 · 본문 요약 미제공" : "서지정보 등록"}</h2>
-                    <p>
-                      {p.abstract
-                        ? "초록을 확인하거나 출판사에서 원문을 볼 수 있습니다."
-                        : "현재 초록이 제공되지 않습니다. 출판사에서 확인해 주세요."}
-                    </p>
-                  </div>
-                )}
-                <dl className="reader-facts">
-                  {FIELDS.slice(0, 3).map(([key, label]) => (
-                    <div key={key}>
-                      <dt>{label}</dt>
-                      <dd>{p.structured_data?.[key] || "확인 전"}</dd>
-                    </div>
-                  ))}
-                </dl>
-                {p.abstract && (
-                  <details>
-                    <summary>초록 보기</summary>
-                    <p className="whitespace-pre-wrap">{p.abstract}</p>
-                  </details>
-                )}
-              </>
-            )}
-            {tab === "study" && (
-              <>
-                <dl className="reader-facts">
-                  {FIELDS.map(([key, label]) => (
-                    <div key={key}>
-                      <dt>{label}</dt>
-                      <dd>{p.research_details?.[key] || p.structured_data?.[key] || "확인 전"}{evidence(key)}</dd>
-                    </div>
-                  ))}
-                </dl>
-                <h2 className="mt-8">Q&A</h2>
-                {p.qa_data?.length ? (
-                  p.qa_data.map((qa, i) => (
-                    <section className="reader-card" key={i}>
-                      <h3>{qa.q}</h3>
-                      <p>{qa.a}</p>
-                      {evidence("qa_" + (i + 1))}
-                    </section>
-                  ))
-                ) : (
-                  <p>현재 제공할 Q&A가 없습니다.</p>
-                )}
-              </>
-            )}
+            {tab === "summary" && <SummaryContent paper={p} evidence={evidence} />}
+            {tab === "study" && <StudyContent paper={p} evidence={evidence} />}
             {tab === "original" && (
               <>
                 <h2>원문과 근거 확인</h2>
