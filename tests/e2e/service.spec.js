@@ -30,6 +30,8 @@ for (const viewport of [
   test(`all pages render at ${viewport.width}px without overflow or accessibility violations`, async ({
     page,
   }, testInfo) => {
+    // This case visits 17 routes and runs a complete axe audit on each.
+    test.setTimeout(60000);
     await page.setViewportSize(viewport);
     const errors = [];
     page.on("pageerror", (error) => errors.push(error.message));
@@ -43,6 +45,7 @@ for (const viewport of [
       "preview",
       "settings",
       "collections",
+      "projects",
       "insights",
       "admin?scenario=admin",
       "welcome",
@@ -89,6 +92,7 @@ test("mobile detail keeps save, read and recommendation opinions separate", asyn
 }) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/uro-daily-pick/");
+  await page.getByRole("button", { name: /Personalized treatment/ }).click();
   await page.getByRole("link", { name: /Personalized treatment/ }).click();
   await expect(page).toHaveURL(/papers\/12345670/);
   await page
@@ -113,7 +117,7 @@ test("mobile detail keeps save, read and recommendation opinions separate", asyn
 test("projects support topic suggestions, notes and revocation", async ({
   page,
 }) => {
-  await page.goto("/uro-daily-pick/collections");
+  await page.goto("/uro-daily-pick/projects");
   await page.getByLabel("새 프로젝트 이름").fill("Upcoming journal club");
   await page
     .getByRole("button", { name: "프로젝트 만들기", exact: true })
@@ -168,6 +172,7 @@ for (const width of [1440, 390]) {
     await expect(
       page.getByRole("link", { name: /Recent paper without/ }),
     ).toHaveCount(0);
+    if (width < 768) await page.getByRole("button", { name: /Personalized treatment/ }).click();
     const titles = [
       /Personalized treatment/,
       /Long-term outcomes/,

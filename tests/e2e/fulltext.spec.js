@@ -111,6 +111,7 @@ for (const width of [390, 320]) {
       },
     );
     await page.goto("/uro-daily-pick/?scenario=admin");
+    await page.getByRole("button", { name: /Personalized treatment/ }).click();
     await page.getByRole("link", { name: /Personalized treatment/ }).click();
     await page.getByRole("button", { name: "근거·원문", exact: true }).click();
     await page

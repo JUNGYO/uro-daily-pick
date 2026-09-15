@@ -85,7 +85,7 @@ export function StudyFacts({ paper, fields = FIELDS, evidence = () => null }) {
   );
 }
 
-export function SummaryContent({ paper: p, evidence = () => null, abstract = true }) {
+export function SummaryContent({ paper: p, evidence = () => null, abstract = true, facts = true }) {
   return (
     <>
       {hasFulltextSummary(p) ? (
@@ -111,7 +111,7 @@ export function SummaryContent({ paper: p, evidence = () => null, abstract = tru
           </p>
         </div>
       )}
-      <StudyFacts paper={p} fields={FIELDS.slice(0, 3)} />
+      {facts && <StudyFacts paper={p} fields={FIELDS.slice(0, 3)} />}
       {abstract && p.abstract && (
         <details>
           <summary>초록 보기</summary>

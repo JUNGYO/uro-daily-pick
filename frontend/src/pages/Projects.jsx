@@ -140,7 +140,7 @@ export default function Projects() {
               className="btn-secondary"
               onClick={() =>
                 run(async () => {
-                  await navigator.clipboard.writeText(appUrl("collections?project=" + id));
+                  await navigator.clipboard.writeText(appUrl("projects?project=" + id));
                   setMessage("프로젝트 주소를 복사했습니다. 초대를 수락한 회원만 열 수 있습니다.");
                 })
               }

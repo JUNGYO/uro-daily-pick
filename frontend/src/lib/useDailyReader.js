@@ -6,7 +6,7 @@ import { useResource } from "../components/ReaderUI";
 
 // One day's bounded recommendation queue. Detail requests are deduplicated and only
 // the adjacent article is prefetched; private state never enters persistent storage.
-export function useDailyReader(uid, day, requestedPmid) {
+export function useDailyReader(uid, day, requestedPmid, active = true) {
   const queue = useResource(
     async () => ({ uid, day, cards: await rpc("reader_daily", { p_day: day }) }),
     [uid, day],
@@ -15,10 +15,13 @@ export function useDailyReader(uid, day, requestedPmid) {
   const currentSession = useRef(session);
   currentSession.current = session;
   const [states, setStates] = useState({});
+  const [opinions, setOpinions] = useState({});
   const [reasons, setReasons] = useState({});
+  const [scores, setScores] = useState({});
   const [notice, setNotice] = useState(null);
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
+  const automaticWrite = useRef(null);
   const cards = queue.data?.uid === uid && queue.data?.day === day ? queue.data.cards : [];
   const index = Math.max(
     0,
@@ -41,11 +44,26 @@ export function useDailyReader(uid, day, requestedPmid) {
     }
     return session.pending.get(pmid);
   }
-  const detail = useResource(() => (selected ? load(selected.pmid) : null), [session, selected?.pmid]);
+  const loadedDetail = useResource(() => (selected ? load(selected.pmid) : null), [session, selected?.pmid]);
+  const loadedId = loadedDetail.data?.paper?.id;
+  // A cached detail can resolve just after a write. Committed state takes precedence
+  // over that earlier snapshot, including while returning rapidly to the same paper.
+  const detail = {
+    ...loadedDetail,
+    data: loadedDetail.data
+      ? {
+          ...loadedDetail.data,
+          state: states[loadedId] || loadedDetail.data.state,
+          opinion: opinions[loadedId] ?? loadedDetail.data.opinion,
+        }
+      : null,
+  };
 
   useEffect(() => {
     setStates({});
+    setOpinions({});
     setReasons({});
+    setScores({});
     setNotice(null);
   }, [session]);
   useEffect(() => {
@@ -54,7 +72,7 @@ export function useDailyReader(uid, day, requestedPmid) {
     checked(
       supabase
         .from("recommendations")
-        .select("paper_id,reasons")
+        .select("paper_id,reasons,score")
         .eq("user_id", uid)
         .eq("rec_date", day)
         .in(
@@ -64,9 +82,32 @@ export function useDailyReader(uid, day, requestedPmid) {
         .limit(5),
     )
       .then((rows) => {
-        if (live) setReasons(Object.fromEntries((rows || []).map((r) => [r.paper_id, r.reasons])));
+        if (live) {
+          setReasons(Object.fromEntries((rows || []).map((r) => [r.paper_id, r.reasons])));
+          setScores(Object.fromEntries((rows || []).map((r) => [r.paper_id, r.score])));
+        }
       })
       .catch(() => {}); // The server's recommendation explanation remains available.
+    checked(
+      supabase
+        .from("feedbacks")
+        .select("paper_id,action")
+        .eq("user_id", uid)
+        .in(
+          "paper_id",
+          cards.map((p) => p.id),
+        )
+        .limit(5),
+    )
+      .then((rows) => {
+        // A late initial read must not overwrite an opinion changed in this session.
+        if (live)
+          setOpinions((previous) => ({
+            ...Object.fromEntries((rows || []).map((row) => [row.paper_id, row.action])),
+            ...previous,
+          }));
+      })
+      .catch(() => {});
     return () => {
       live = false;
     };
@@ -83,12 +124,14 @@ export function useDailyReader(uid, day, requestedPmid) {
     }
     if (currentSession.current !== session) return;
     if (values.state) setStates((previous) => ({ ...previous, [paperId]: values.state }));
+    if (values.opinion !== undefined) setOpinions((previous) => ({ ...previous, [paperId]: values.opinion }));
     detail.setData((previous) => (previous?.paper?.id === paperId ? { ...previous, ...values } : previous));
   }
 
   useEffect(() => {
     const data = detail.data;
     if (
+      !active ||
       busy ||
       lock.current ||
       !data?.paper ||
@@ -103,16 +146,23 @@ export function useDailyReader(uid, day, requestedPmid) {
     session.opened.add(paperId);
     lock.current = true;
     setBusy(true);
-    rpc("update_reader_state", { p_paper_id: paperId, p_patch: { reading_state: "reading" } })
+    automaticWrite.current = rpc("update_reader_state", {
+      p_paper_id: paperId,
+      p_patch: { reading_state: "reading" },
+    })
       .then((state) => updateCached(paperId, { state }))
       .catch(() => {})
       .finally(() => {
+        automaticWrite.current = null;
         lock.current = false;
         setBusy(false);
       });
-  }, [detail.data?.paper?.id, busy]);
+  }, [detail.data?.paper?.id, busy, active]);
 
   async function commit(paperId, patch, opinion, previous, message) {
+    // Retain a click that arrives between rendering and the automatic reading marker.
+    // The initiating paper ID and patch are captured before this wait.
+    if (automaticWrite.current) await automaticWrite.current;
     if (lock.current) return;
     lock.current = true;
     setBusy(true);
@@ -168,7 +218,9 @@ export function useDailyReader(uid, day, requestedPmid) {
     selected,
     detail,
     states,
+    opinions,
     reasons,
+    scores,
     change,
     opinion,
     undo,
