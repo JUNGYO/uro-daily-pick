@@ -190,3 +190,16 @@ for (const width of [1440, 390]) {
     }
   });
 }
+
+
+test("admin remains usable when catalog fails and retries that section", async ({ page }) => {
+  await page.goto("admin?scenario=admin-partial-error");
+  await expect(page.getByRole("heading", {name:"Admin Dashboard"})).toBeVisible();
+  const catalog = page.getByRole("region", {name:"전체 문헌 수집"});
+  await expect(catalog.getByRole("alert")).toBeVisible();
+  await expect(page.getByRole("region", {name:"원문 수집 상태"})).toContainText("Z8 원문 등록 5편");
+  await expect(page.getByText("Total Users", {exact:true})).toBeVisible();
+  await catalog.getByRole("button", {name:"다시 시도"}).click();
+  await expect(catalog.getByRole("alert")).toHaveCount(0);
+  await expect(catalog).toContainText("전체 목록 5편");
+});

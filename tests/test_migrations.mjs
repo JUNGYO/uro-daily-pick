@@ -47,7 +47,7 @@ try {
   for (const file of (await readdir(migrations))
     .filter((f) => f.endsWith(".sql"))
     .sort()) {
-    if (file.startsWith("011_") || file.startsWith("012_") || file.startsWith("013_")) continue; // Test upgrades in order below.
+    if (file.startsWith("011_") || file.startsWith("012_") || file.startsWith("013_") || file.startsWith("014_")) continue; // Test upgrades in order below.
     if (file.startsWith("008_")) {
       let encoded = ["Prostatic Neoplasms", "Randomized Controlled Trial"];
       for (let depth = 0; depth < 21; depth++)
@@ -399,8 +399,34 @@ try {
   assert.equal(storage.budget_bytes,450*1024*1024);
   assert.ok(storage.database_bytes>0);
   await db.exec("RESET ROLE");
+  await db.exec(await readFile(path.join(migrations,"014_admin_analytics_performance.sql"),"utf8"));
+  for (const [role, uid] of [["anon", ""], ["authenticated", unconfirmed]]) {
+    await asUser(role, uid);
+    for (const fn of [...functions, "admin_catalog_status()"])
+      await assert.rejects(db.query(`SELECT public.${fn}`), {code:"42501"});
+  }
+  await asUser("authenticated", admin);
+  const catalog = (await db.query("SELECT public.admin_catalog_status() AS status")).rows[0].status;
+  assert.equal(catalog.catalog_papers, catalog.qwen_summaries + catalog.awaiting_qwen);
+  await db.exec("RESET ROLE");
+  await db.exec(`
+    INSERT INTO public.papers (pmid,title,fetched_at) VALUES
+      ('800001','First KST day', ((now() AT TIME ZONE 'Asia/Seoul')::date-29)::timestamp AT TIME ZONE 'Asia/Seoul'),
+      ('800002','Before KST window', (((now() AT TIME ZONE 'Asia/Seoul')::date-29)::timestamp AT TIME ZONE 'Asia/Seoul')-interval '1 second'),
+      ('800003','Last KST day', (((now() AT TIME ZONE 'Asia/Seoul')::date+1)::timestamp AT TIME ZONE 'Asia/Seoul')-interval '1 second'),
+      ('800004','After KST window', ((now() AT TIME ZONE 'Asia/Seoul')::date+1)::timestamp AT TIME ZONE 'Asia/Seoul');
+  `);
+  const expected = (await db.query(`SELECT count(*)::int AS n FROM public.papers WHERE fetched_at>=((now() AT TIME ZONE 'Asia/Seoul')::date-29)::timestamp AT TIME ZONE 'Asia/Seoul' AND fetched_at<((now() AT TIME ZONE 'Asia/Seoul')::date+1)::timestamp AT TIME ZONE 'Asia/Seoul'`)).rows[0].n;
+  await asUser("authenticated", admin);
+  const daily = (await db.query("SELECT public.admin_daily_activity() AS days")).rows[0].days;
+  assert.equal(daily.length, 30);
+  assert.equal(daily[0].new_papers, 1);
+  assert.equal(daily.reduce((n, day) => n + day.new_papers, 0), expected);
+  assert.deepEqual(daily.map(day => day.date), daily.map(day => day.date).sort());
+  for (const fn of functions) await db.query(`SELECT public.${fn}`);
+  await db.exec("RESET ROLE");
   console.log(
-    "PASS: all 13 migrations; private catalog capacity/checkpoints, summary publication, verified Z8 archival, role isolation, provenance, feedback and account deletion",
+    "PASS: all 14 migrations; responsive admin counts and 30 KST calendar days; private catalog capacity/checkpoints, summary publication, verified Z8 archival, role isolation, provenance, feedback and account deletion",
   );
 } finally {
   await db.close();
