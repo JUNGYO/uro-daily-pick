@@ -305,7 +305,8 @@ def main():
     identity = SupabaseIdentity(config["supabase_url"], config["public_key"],
                                 config["owner_email"], config["owner_id"])
     https_origin(config["origin"])
-    if args.access_report:
+    report_path = args.access_report or (Path(config['startup_access_report']) if config.get('startup_access_report') else None)
+    if report_path:
         result = {"archive_readable": False, "archive_read_only": True, "private_paths_denied": True}
         for root in archive.roots:
             for path in root.glob("*.json"):
@@ -342,10 +343,11 @@ def main():
             except ViewerError:
                 result['images_readable'] = False
                 break
-        args.access_report.write_text(json.dumps(result), encoding="utf-8")
+        report_path.write_text(json.dumps(result), encoding="utf-8")
         if not all(result.values()):
             raise SystemExit(1)
-        return
+        if args.access_report:
+            return
     if args.check:
         print("Viewer configuration valid")
         return

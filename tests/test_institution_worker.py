@@ -3,15 +3,29 @@ import hashlib
 from pathlib import Path
 import sys
 import unittest
+import queue
+from unittest.mock import Mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
-from institution_worker import parsed_result, next_retry
+from institution_worker import Browser, parsed_result, next_retry
 
 PAPER = {"title": "A controlled study", "doi": "10.1000/study"}
 PARA = "A synthetic study paragraph records the measured results and limitations. " * 30
 
 
 class InstitutionTests(unittest.TestCase):
+    def test_stalled_browser_is_bounded_and_stopped_before_retry(self):
+        browser=Browser.__new__(Browser)
+        browser.responses=Mock()
+        browser.responses.get.side_effect=queue.Empty
+        browser.kill=Mock()
+        with self.assertRaises(TimeoutError): browser.response(20000)
+        browser.responses.get.assert_called_once_with(timeout=35)
+        browser.kill.assert_called_once()
+        browser.responses.get.side_effect=None
+        browser.responses.get.return_value=None
+        with self.assertRaises(OSError): browser.response(20000)
+
     def result(self, html=None):
         return {"status": "downloaded", "title": PAPER["title"], "doi": PAPER["doi"],
                 "url": "https://www.sciencedirect.com/science/article/pii/fixture?via=ihub",

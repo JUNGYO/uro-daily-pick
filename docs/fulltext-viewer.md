@@ -54,9 +54,12 @@ shown while other figures are still being collected.
 For an existing installation, stage the updated viewer as a new release and run
 `update_fulltext_viewer.ps1` as administrator with the existing install root,
 release path and Python path. It preserves the account, password, triggers,
-settings and network configuration. It tests article/image read access and denied
-private-directory access under the existing reader identity, restores the old
-action on failure, and checks local health after switching.
+settings and network configuration. Password-logon tasks require a password to
+change actions, so the updater backs up and replaces only the script already named
+by the registered task. It checks the installed hash and tests article/image read
+access and denied private-directory access under the existing reader identity at
+startup. Failure restores the script and config backup; success requires local
+health and an unchanged task definition.
 
 Validation uses synthetic articles: `python -m unittest discover -s tests`, frontend
 unit tests, and `tests/e2e/fulltext.spec.js` for mobile access, image retry,

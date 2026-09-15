@@ -186,6 +186,8 @@ def collect_images(directory, pmid, record, browser=None, deadline=None):
         paper = record.get('paper') or record
         recovered = browser.read({'pmid':pmid,'doi':paper.get('doi','')}, budget_ms=90000)
         if recovered.get('status') != 'downloaded': raise ValueError('Source markup unavailable')
+        from institution_worker import parsed_result
+        parsed_result(paper,recovered)
         source_url = recovered['url']
         atomic_write(html, recovered['html'].encode())
         figures = html_figures(recovered['html'], source_url)
@@ -288,7 +290,10 @@ def run_image_queue(directory, node, seconds):
                     if manifest.exists():
                         old=json.loads(manifest.read_text(encoding='utf-8'))
                         if old.get('version')==MANIFEST_VERSION and old.get('content_hash')==record['document']['content_hash'] and (old.get('status')=='complete' or old.get('retry_after',0)>time.time()):continue
+                    if browser is not None and browser.process.poll() is not None:
+                        browser.close();browser=None
                     if browser is None: browser=Browser(node,directory,profile='figure-browser-profile')
+                    print(f'PMID {path.stem}: collecting figures',flush=True)
                     result=collect_images(directory,path.stem,record,browser, min(deadline,time.monotonic()+120))
                     ready=sum(f['status']=='ready' for f in result['figures'])
                     print(f"PMID {path.stem}: figures {ready}/{len(result['figures'])} stored",flush=True)

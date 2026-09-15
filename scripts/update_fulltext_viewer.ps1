@@ -3,79 +3,65 @@ param(
   [Parameter(Mandatory=$true)][string]$ReleasePath,
   [Parameter(Mandatory=$true)][string]$PythonPath
 )
-# Update only the existing dedicated viewer task. No account, password, network,
-# research settings, trigger or protected-directory permission changes.
-$ErrorActionPreference = 'Stop'
-$root = [IO.Path]::GetFullPath($InstallRoot).TrimEnd('\')
-$release = (Resolve-Path -LiteralPath $ReleasePath).Path
-$config = Join-Path $root 'config.json'
-$script = Join-Path $release 'fulltext_viewer.py'
-$report = Join-Path $root 'update-result.json'
-$probe = Join-Path $root 'access-check.json'
-$name = 'UroDailyPick-Original-Viewer'
-$changed = $false
-$stage = 'validate'
+# Password-logon tasks cannot change actions without re-entering a password.
+# Preserve the entire registered task and update its existing script after backup.
+$ErrorActionPreference='Stop'
+$root=[IO.Path]::GetFullPath($InstallRoot).TrimEnd('\')
+$source=(Resolve-Path -LiteralPath (Join-Path $ReleasePath 'fulltext_viewer.py')).Path
+$name='UroDailyPick-Original-Viewer'
+$config=Join-Path $root 'config.json'
+$report=Join-Path $root 'update-result.json'
+$probe=Join-Path $root 'access-check.json'
+$changed=$false
 try {
-  if (-not $release.StartsWith($root + '\releases\') -or -not (Test-Path -LiteralPath $script -PathType Leaf)) { throw 'Unexpected release path' }
-  $task = Get-ScheduledTask -TaskName $name
-  $reader = Get-LocalUser -Name UroDailyPickReader
-  if ($task.Principal.RunLevel -ne 'Limited' -or $task.Principal.LogonType -ne 'Password') { throw 'Unexpected viewer principal' }
-  if ($task.Principal.UserId -notin @($reader.Name, $reader.SID.Value, ($env:COMPUTERNAME + '\' + $reader.Name))) { throw 'Viewer identity changed' }
-  if ($task.Actions.Count -ne 1 -or -not $task.Actions[0].WorkingDirectory.StartsWith($root + '\releases\')) { throw 'Unexpected installed viewer action' }
-  $oldAction = $task.Actions
-  [xml]$before = Export-ScheduledTask -TaskName $name
-  $before.Save((Join-Path $root ('task-before-' + (Get-Date -Format 'yyyyMMddHHmmss') + '.xml')))
-  & $PythonPath -I -B $script --config $config --check
-  if ($LASTEXITCODE -ne 0) { throw 'Release configuration validation failed' }
-  & icacls.exe $release /grant ('*' + $reader.SID.Value + ':(OI)(CI)(RX)') /Q | Out-Null
-  if ($LASTEXITCODE -ne 0) { throw 'Release read access failed' }
-  '{}' | Set-Content -LiteralPath $probe -Encoding utf8
-  & icacls.exe $probe /grant ('*' + $reader.SID.Value + ':(R,W)') /Q | Out-Null
-  if ($LASTEXITCODE -ne 0) { throw 'Probe report access failed' }
-  $pythonw = Join-Path (Split-Path -Parent $PythonPath) 'pythonw.exe'
-  $arguments = '-I -B "' + $script + '" --config "' + $config + '"'
-  Stop-ScheduledTask -TaskName $name
-  $changed = $true
-  $stage = 'probe-action'
-  $check = New-ScheduledTaskAction -Execute $pythonw -Argument ($arguments + ' --access-report "' + $probe + '"') -WorkingDirectory $release
-  Set-ScheduledTask -TaskName $name -Action $check | Out-Null
-  $stage = 'probe-start'
-  Start-ScheduledTask -TaskName $name
-  $access = $null
-  for ($attempt=0; $attempt -lt 20; $attempt++) {
-    Start-Sleep -Milliseconds 500
-    $value = Get-Content -LiteralPath $probe -Raw | ConvertFrom-Json
-    if ($null -ne $value.images_readable) { $access=$value; break }
-  }
-  if (-not ($access.archive_readable -and $access.archive_read_only -and $access.private_paths_denied -and $access.images_readable)) { throw 'Dedicated reader access check failed' }
-  $stage = 'server-action'
-  Stop-ScheduledTask -TaskName $name
-  $action = New-ScheduledTaskAction -Execute $pythonw -Argument $arguments -WorkingDirectory $release
-  Set-ScheduledTask -TaskName $name -Action $action | Out-Null
-  [xml]$after = Export-ScheduledTask -TaskName $name
-  foreach ($section in @('Principals','Triggers','Settings')) {
-    if ($before.Task.$section.OuterXml -ne $after.Task.$section.OuterXml) { throw ('Unexpected task change: ' + $section) }
-  }
-  Start-ScheduledTask -TaskName $name
-  $healthy=$false
-  for ($attempt=0; $attempt -lt 10; $attempt++) {
-    try { if ((Invoke-RestMethod -Uri 'http://127.0.0.1:18451/health' -TimeoutSec 2).status -eq 'ok') { $healthy=$true;break } } catch {}
-    Start-Sleep -Seconds 1
-  }
-  if (-not $healthy) { throw 'Updated viewer did not become healthy' }
-  @{status='updated';release=$release;health=$healthy;access=$access;schedule_preserved=$true} | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $report -Encoding utf8
+ if(-not $source.StartsWith($root+'\releases\')){throw 'Unexpected prepared release'}
+ $task=Get-ScheduledTask -TaskName $name
+ $reader=Get-LocalUser -Name UroDailyPickReader
+ if($task.Principal.RunLevel -ne 'Limited' -or $task.Principal.LogonType -ne 'Password'){throw 'Unexpected viewer principal'}
+ if($task.Principal.UserId -notin @($reader.Name,$reader.SID.Value,($env:COMPUTERNAME+'\'+$reader.Name))){throw 'Viewer identity changed'}
+ if($task.Actions.Count -ne 1){throw 'Unexpected viewer actions'}
+ $active=(Resolve-Path -LiteralPath (Join-Path $task.Actions[0].WorkingDirectory 'fulltext_viewer.py')).Path
+ if(-not $active.StartsWith($root+'\releases\') -or $active -eq $source -or -not $task.Actions[0].Arguments.Contains('"'+$active+'"')){throw 'Unexpected active viewer script'}
+ $definition=Export-ScheduledTask -TaskName $name
+ $expectedHash=(Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash
+ $stamp=Get-Date -Format yyyyMMddHHmmss
+ $backup=Join-Path $root ('viewer-before-'+$stamp+'.py')
+ $configBackup=Join-Path $root ('config-before-'+$stamp+'.json')
+ Copy-Item -LiteralPath $active -Destination $backup
+ Copy-Item -LiteralPath $config -Destination $configBackup
+ $settings=Get-Content -LiteralPath $config -Raw | ConvertFrom-Json
+ $settings | Add-Member -NotePropertyName startup_access_report -NotePropertyValue $probe -Force
+ '{}' | Set-Content -LiteralPath $probe -Encoding utf8
+ & icacls.exe $probe /grant ('*'+$reader.SID.Value+':(R,W)') /Q | Out-Null
+ if($LASTEXITCODE -ne 0){throw 'Access report permission failed'}
+ Stop-ScheduledTask -TaskName $name
+ $changed=$true
+ Copy-Item -LiteralPath $source -Destination $active -Force
+ if((Get-FileHash -LiteralPath $active -Algorithm SHA256).Hash -ne $expectedHash){throw 'Installed script hash mismatch'}
+ $settings | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $config -Encoding utf8
+ Start-ScheduledTask -TaskName $name
+ $healthy=$false
+ for($attempt=0;$attempt -lt 15;$attempt++){
+  Start-Sleep -Seconds 1
+  try {
+   $access=Get-Content -LiteralPath $probe -Raw | ConvertFrom-Json
+   if($access.archive_readable -and $access.archive_read_only -and $access.private_paths_denied -and $access.images_readable -and (Invoke-RestMethod -Uri 'http://127.0.0.1:18451/health' -TimeoutSec 2).status -eq 'ok'){$healthy=$true;break}
+  } catch {}
+ }
+ if(-not $healthy){throw 'Updated viewer failed its startup access/health checks'}
+ if((Export-ScheduledTask -TaskName $name) -ne $definition){throw 'Registered task changed unexpectedly'}
+ @{status='updated';script=$active;source=$source;sha256=$expectedHash;health=$true;access=$access;task_preserved=$true;backup=$backup} | ConvertTo-Json -Depth 4 | Set-Content -LiteralPath $report -Encoding utf8
 } catch {
-  $failure=[string]$_.Exception.Message
-  $result=@{status='failed';stage=$stage;error=$failure;previous_action_restored=$false}
-  $result | ConvertTo-Json | Set-Content -LiteralPath $report -Encoding utf8
-  if ($changed) {
-    try {
-      Stop-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
-      Set-ScheduledTask -TaskName $name -Action $oldAction | Out-Null
-      Start-ScheduledTask -TaskName $name
-      $result.previous_action_restored=$true
-    } catch { $result.rollback_error=[string]$_.Exception.Message }
-  }
-  $result | ConvertTo-Json | Set-Content -LiteralPath $report -Encoding utf8
-  throw
+ $result=@{status='failed';error=[string]$_.Exception.Message;restored=$false}
+ if($changed){
+  try {
+   Stop-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
+   Copy-Item -LiteralPath $backup -Destination $active -Force
+   Copy-Item -LiteralPath $configBackup -Destination $config -Force
+   Start-ScheduledTask -TaskName $name
+   $result.restored=$true
+  } catch {$result.restore_error=[string]$_.Exception.Message}
+ } else {Start-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue}
+ $result | ConvertTo-Json | Set-Content -LiteralPath $report -Encoding utf8
+ throw
 }
