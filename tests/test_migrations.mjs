@@ -416,10 +416,14 @@ try {
       ('800003','Last KST day', (((now() AT TIME ZONE 'Asia/Seoul')::date+1)::timestamp AT TIME ZONE 'Asia/Seoul')-interval '1 second'),
       ('800004','After KST window', ((now() AT TIME ZONE 'Asia/Seoul')::date+1)::timestamp AT TIME ZONE 'Asia/Seoul');
   `);
+  await db.exec("UPDATE public.papers SET journal='Admin fixture journal' WHERE pmid IN ('800001','800002','800003','800004')");
   const expected = (await db.query(`SELECT count(*)::int AS n FROM public.papers WHERE fetched_at>=((now() AT TIME ZONE 'Asia/Seoul')::date-29)::timestamp AT TIME ZONE 'Asia/Seoul' AND fetched_at<((now() AT TIME ZONE 'Asia/Seoul')::date+1)::timestamp AT TIME ZONE 'Asia/Seoul'`)).rows[0].n;
   await asUser("authenticated", admin);
   const daily = (await db.query("SELECT public.admin_daily_activity() AS days")).rows[0].days;
   assert.equal(daily.length, 30);
+  const journals = (await db.query("SELECT public.admin_journal_dist() AS rows")).rows[0].rows;
+  assert.equal(journals.find(row => row.journal === 'Admin fixture journal').paper_count, 4);
+  assert.equal(journals.find(row => row.journal === 'Admin fixture journal').recent_count, 2);
   assert.equal(daily[0].new_papers, 1);
   assert.equal(daily.reduce((n, day) => n + day.new_papers, 0), expected);
   assert.deepEqual(daily.map(day => day.date), daily.map(day => day.date).sort());

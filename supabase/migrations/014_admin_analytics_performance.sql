@@ -3,6 +3,7 @@ BEGIN;
 CREATE INDEX papers_ready_summary_model ON public.papers(summary_model, summary_basis)
   WHERE summary_source_hash IS NOT NULL AND summarized_at IS NOT NULL;
 CREATE INDEX papers_available_fulltext ON public.papers(id) WHERE fulltext_available;
+CREATE INDEX papers_admin_journal_counts ON public.papers(journal, fetched_at) WHERE journal IS NOT NULL;
 
 CREATE OR REPLACE FUNCTION public.catalog_backfill_status()
 RETURNS jsonb LANGUAGE sql SECURITY DEFINER SET search_path='' AS $$
