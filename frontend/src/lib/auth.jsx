@@ -5,6 +5,17 @@ import { checked, withTimeout } from "./data";
 const AuthContext = createContext(null);
 export const useAuth = () => useContext(AuthContext);
 
+function clearResearchDrafts(uid) {
+  try {
+    const prefix = "uro-research-draft:" + (uid ? uid + ":" : "");
+    for (const key of Object.keys(sessionStorage)) {
+      if (key.startsWith(prefix)) sessionStorage.removeItem(key);
+    }
+  } catch {
+    /* Draft storage must not prevent an account change. */
+  }
+}
+
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [profile, setProfile] = useState(null);
@@ -27,6 +38,9 @@ export function AuthProvider({ children }) {
     setAuthLoading(true);
     const apply = (session) => {
       if (!disposed) {
+        if (currentUser.current && currentUser.current !== session?.user?.id) {
+          clearResearchDrafts(currentUser.current);
+        }
         currentUser.current = session?.user?.id;
         setUser(session?.user ?? null);
         setAuthLoading(false);
@@ -38,6 +52,7 @@ export function AuthProvider({ children }) {
       if (offlineMode && _event !== "SIGNED_OUT") return;
       // Also handles account deletion and sign-out initiated outside the header.
       if (_event === "SIGNED_OUT") {
+        clearResearchDrafts();
         try {
           const uid = currentUser.current || localStorage.getItem("uro-offline-active");
           if (uid) {
@@ -45,7 +60,9 @@ export function AuthProvider({ children }) {
             localStorage.removeItem("uro-profile:" + uid);
           }
           localStorage.removeItem("uro-offline-active");
-        } catch { /* Storage failure must not prevent session termination. */ }
+        } catch {
+          /* Storage failure must not prevent session termination. */
+        }
       }
       authEvents += 1;
       apply(session);

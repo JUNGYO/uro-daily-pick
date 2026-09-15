@@ -19,10 +19,17 @@ export default function Library() {
   const { user } = useAuth(),
     [params, setParams] = useSearchParams(),
     tab = params.get("tab") || "saved",
+    query = params.get("q") || "",
     page = Number(params.get("page")) || 0,
     [selected, setSelected] = useState([]),
     [message, setMessage] = useState("");
   const r = useResource(async () => {
+    if (tab === "notes" || (query && !["offline", "searches"].includes(tab))) {
+      const result = await rpc("search_library", { p_query: query, p_tab: tab, p_page: page });
+      const items = result.items.map((item) => ({ ...item, paper: item }));
+      items.total = result.total;
+      return items;
+    }
     if (tab === "offline") return cachedPapers(user.id).map((p) => ({ paper: p }));
     if (tab === "searches") return rpc("search_notifications");
     if (tab === "liked")
@@ -42,7 +49,7 @@ export default function Library() {
     if (tab === "saved") q = q.eq("saved", true);
     else q = q.eq("reading_state", tab);
     return checked(q.order("updated_at", { ascending: false }).range(page * 20, page * 20 + 19));
-  }, [user.id, tab, page]);
+  }, [user.id, tab, page, query]);
   async function updateSearch(id, patch) {
     try {
       await checked(supabase.from("saved_searches").update(patch).eq("id", id));
@@ -81,6 +88,7 @@ export default function Library() {
           ["liked", "관심 있음"],
           ["reading", "읽는 중"],
           ["read", "읽음"],
+          ["notes", "메모·태그"],
           ["searches", "새 문헌 알림"],
           ["offline", "오프라인 보관"],
         ].map(([id, label]) => (
@@ -94,6 +102,33 @@ export default function Library() {
           </button>
         ))}
       </div>
+      {!["searches", "offline"].includes(tab) && (
+        <form
+          className="reader-search"
+          onSubmit={(event) => {
+            event.preventDefault();
+            const q = new FormData(event.currentTarget).get("q").trim();
+            setParams({ tab, ...(q ? { q } : {}) });
+          }}
+        >
+          <label className="query">
+            메모·태그 검색
+            <input
+              key={query}
+              name="q"
+              defaultValue={query}
+              maxLength={200}
+              placeholder="기록한 내용이나 태그"
+            />
+          </label>
+          <button className="btn-primary">검색</button>
+          {query && (
+            <button type="button" className="btn-secondary" onClick={() => setParams({ tab })}>
+              검색 지우기
+            </button>
+          )}
+        </form>
+      )}
       {tab === "offline" && (
         <p className="reader-notice">
           이 기기에 직접 보관한 요약과 서지정보입니다. 원문·그림은 포함하지 않습니다. 연결 후 최신 정정·철회
@@ -154,9 +189,16 @@ export default function Library() {
           </>
         ) : (
           <>
+            {typeof r.data?.total === "number" && <p role="status">검색 결과 {r.data.total}편</p>}
             {!r.data?.length && (
               <div className="reader-empty">
-                <h2>아직 보관된 문헌이 없습니다</h2>
+                <h2>
+                  {query
+                    ? "일치하는 기록이 없습니다"
+                    : tab === "notes"
+                      ? "아직 작성한 메모나 태그가 없습니다"
+                      : "아직 보관된 문헌이 없습니다"}
+                </h2>
                 <Link className="btn-primary" to="/discover">
                   문헌 찾아 저장하기
                 </Link>
@@ -169,8 +211,10 @@ export default function Library() {
                   key={s.paper.id}
                   paper={{
                     ...s.paper,
-                    summary_ready: hasFulltextSummary(s.paper),
-                    insight: hasFulltextSummary(s.paper) ? s.paper.summary_ko.split("\n")[1] : "",
+                    summary_ready: s.paper.summary_ready ?? hasFulltextSummary(s.paper),
+                    insight:
+                      s.paper.insight ??
+                      (hasFulltextSummary(s.paper) ? s.paper.summary_ko.split("\n")[1] : ""),
                   }}
                   compare={selected.includes(s.paper.pmid)}
                   onCompare={(id) => setSelected((p) => selectComparison(p, id))}
@@ -198,14 +242,18 @@ export default function Library() {
                 <button
                   className="btn-secondary"
                   disabled={!page}
-                  onClick={() => setParams({ tab, page: page - 1 })}
+                  onClick={() => setParams({ tab, ...(query ? { q: query } : {}), page: page - 1 })}
                 >
                   이전 페이지
                 </button>
                 <button
                   className="btn-secondary"
-                  disabled={(r.data?.length || 0) < 20}
-                  onClick={() => setParams({ tab, page: page + 1 })}
+                  disabled={
+                    typeof r.data?.total === "number"
+                      ? (page + 1) * 20 >= r.data.total
+                      : (r.data?.length || 0) < 20
+                  }
+                  onClick={() => setParams({ tab, ...(query ? { q: query } : {}), page: page + 1 })}
                 >
                   다음 페이지
                 </button>

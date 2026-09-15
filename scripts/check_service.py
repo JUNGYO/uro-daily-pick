@@ -21,7 +21,12 @@ def main():
         required = ["/rpc/set_paper_feedback", "/rpc/delete_own_account", "/rpc/replace_daily_recommendations",
                     "/rpc/fulltext_queue_status", "/rpc/publish_institution_summary", "/rpc/catalog_backfill_status", "/email_deliveries",
                     "/rpc/search_papers", "/rpc/search_papers_v2", "/rpc/search_journals", "/rpc/reader_paper", "/rpc/reader_daily", "/rpc/update_reader_state", "/rpc/preview_papers",
-                    "/rpc/search_notifications", "/rpc/project_papers", "/rpc/project_members", "/rpc/admin_integrity_review", "/rpc/admin_summary_issues"]
+                    "/rpc/search_notifications", "/rpc/project_papers", "/rpc/project_members", "/rpc/admin_integrity_review", "/rpc/admin_summary_issues",
+                    "/rpc/search_library", "/rpc/project_papers_v2", "/rpc/research_workspace", "/rpc/research_references",
+                    "/rpc/save_research_workspace", "/rpc/save_research_reference", "/rpc/research_topics", "/rpc/save_research_topic",
+                    "/rpc/research_export_snapshot", "/rpc/request_research_extraction", "/rpc/claim_research_extractions",
+                    "/rpc/finish_research_extraction", "/rpc/fail_research_extraction",
+                    "/rpc/record_research_export", "/rpc/research_document_exports"]
         missing = [path for path in required if path not in paths]
         if missing:
             raise SystemExit("Missing database contracts: " + ", ".join(missing))

@@ -72,6 +72,10 @@ const db = {
   summary_issues: [],
   project_notes: [],
   collection_members: [],
+  research_workspaces: [],
+  research_reference_entries: [],
+  research_topic_entries: [],
+  research_document_exports: [],
   profiles: [
     {
       id: "reader",
@@ -132,6 +136,172 @@ const db = {
     },
   ],
 };
+const researchScenario = scenario.startsWith("research-");
+const researchColumns = [
+  { id: "population", label: "Population", instruction: "Describe study participants" },
+  { id: "outcome", label: "Outcome", instruction: "Extract the principal outcome" },
+];
+function ensureResearchReference(collectionId, paperId) {
+  const existing = db.research_reference_entries.find(
+    (r) => r.collection_id === collectionId && r.paper_id === paperId,
+  );
+  if (existing) return existing;
+  const paper = db.papers.find((p) => p.id === paperId);
+  if (!paper) return null;
+  const note = db.project_notes.find((n) => n.collection_id === collectionId && n.paper_id === paperId);
+  const row = {
+    id: Math.max(0, ...db.research_reference_entries.map((r) => r.id)) + 1,
+    collection_id: collectionId,
+    paper_id: paperId,
+    bibliography: Object.fromEntries(["pmid", "title", "authors", "journal", "pub_date", "doi", "volume", "issue", "pages"].map((key) => [key, paper[key] ?? ""])),
+    auto_values: {}, user_values: {}, evidence: {}, note: note?.note || "", tags: note?.tags || [],
+    revision: 0, extraction_status: "not_requested", source_content_hash: null, extracted_at: null,
+    created_at: new Date(Date.now() + paperId * 60000).toISOString(),
+  };
+  db.research_reference_entries.push(row);
+  return row;
+}
+if (researchScenario) {
+  db.papers = Array.from({ length: 26 }, (_, i) => ({
+    ...papers[i % papers.length], id: i + 1, pmid: String(52345000 + i),
+    title: `Research study ${String(i + 1).padStart(2, "0")}`,
+    doi: `10.0000/research-${i + 1}`, fulltext_available: i !== 25,
+  }));
+  db.collections[0].name = "Research fixture project";
+  if (scenario === "research-reader") db.collections[0].user_id = "project-owner";
+  db.reader_states = db.papers.map((p, i) => ({
+    user_id: "reader", paper_id: p.id, saved: i !== 0,
+    reading_state: i === 2 ? "read" : i === 3 ? "reading" : "unread",
+    note: i === 0 ? "Unsaved needle memo" : `Reading journal entry ${i + 1}`,
+    tags: i === 0 ? ["unsaved-needle"] : ["review"],
+    updated_at: new Date(Date.now() + i * 60000).toISOString(),
+  }));
+  db.feedbacks = [{ user_id: "reader", paper_id: 5, action: "like" }];
+  db.collection_papers = db.papers.map((p) => ({
+    collection_id: 1, paper_id: p.id, added_at: new Date(Date.now() + p.id * 60000).toISOString(),
+  }));
+  db.project_notes = db.papers.map((p) => ({
+    collection_id: 1, paper_id: p.id,
+    note: p.id === 1 ? "Project needle rationale" : `Team entry ${p.id}`,
+    tags: p.id === 1 ? ["special-cohort"] : ["team"], updated_by: "reader",
+  }));
+  db.research_workspaces = [{ collection_id: 1, question: "", template: "general", columns: researchColumns, revision: 0 }];
+  for (const p of db.papers) {
+    const ref = ensureResearchReference(1, p.id);
+    if (p.fulltext_available) Object.assign(ref, {
+      auto_values: { population: `Automatic cohort ${p.id}`, outcome: `Source outcome ${p.id}` },
+      evidence: { population: ["p-0000001"], outcome: ["table-0000002"] },
+      source_content_hash: "a".repeat(64), extracted_at: new Date().toISOString(), extraction_status: "complete",
+    });
+  }
+}
+let researchConflict = scenario === "research-conflict";
+function researchRpc(name, args) {
+  const result = (data) => ({ data: structuredClone(data), error: null });
+  const error = (code, message) => ({ data: null, error: { code, message } });
+  const readOnly = scenario === "research-reader";
+  const ref = db.research_reference_entries.find((r) => r.id === args.p_id);
+  const collectionId = ["save_research_reference", "request_research_extraction"].includes(name) ? ref?.collection_id : args.p_collection_id ?? args.p_id;
+  const project = db.collections.find((p) => p.id === collectionId);
+  if (name.startsWith("save_") || name.startsWith("delete_") || name.startsWith("request_") || name.startsWith("add_")) {
+    if (readOnly) return error("42501", "Project editor required");
+  }
+  const workspace = db.research_workspaces.find((w) => w.collection_id === collectionId) || {
+    collection_id: collectionId, question: "", template: "general", columns: researchColumns, revision: 0,
+  };
+  if (name === "research_workspace") return result({ workspace, can_edit: !readOnly });
+  if (name === "save_research_workspace") {
+    if (researchConflict) {
+      researchConflict = false; workspace.revision += 1; workspace.question = "A collaborator saved a newer question";
+    }
+    if (args.p_expected_revision !== workspace.revision) return error("40001", "Workspace changed; reload before saving");
+    Object.assign(workspace, { question: args.p_question, template: args.p_template, columns: args.p_columns, revision: workspace.revision + 1 });
+    if (!db.research_workspaces.includes(workspace)) db.research_workspaces.push(workspace);
+    for (const r of db.research_reference_entries.filter((r) => r.collection_id === collectionId && r.extraction_status !== "not_requested")) r.extraction_status = "stale";
+    return result(workspace);
+  }
+  if (name === "research_references") {
+    const q = (args.p_query || "").toLowerCase(), page = args.p_page || 0;
+    const matches = db.research_reference_entries.filter((r) => r.collection_id === collectionId &&
+      (!q || `${JSON.stringify(r.bibliography)} ${r.note} ${r.tags.join(" ")}`.toLowerCase().includes(q))).sort((a, b) => b.id - a.id);
+    return result({ items: matches.slice(page * 20, (page + 1) * 20), total: matches.length, page, can_edit: !readOnly });
+  }
+  if (name === "add_research_reference") return result(ensureResearchReference(collectionId, args.p_paper_id));
+  if (name === "save_research_reference") {
+    if (!ref || ref.revision !== args.p_expected_revision) return error("40001", "Reference changed; reload before saving");
+    Object.assign(ref, { user_values: args.p_user_values, note: args.p_note, tags: args.p_tags, revision: ref.revision + 1 });
+    const note = db.project_notes.find((n) => n.collection_id === ref.collection_id && n.paper_id === ref.paper_id);
+    if (note) Object.assign(note, { note: ref.note, tags: ref.tags });
+    return result(ref);
+  }
+  if (name === "research_topics") {
+    const page = args.p_page || 0;
+    const matches = db.research_topic_entries.filter((t) => t.collection_id === collectionId &&
+      (!args.p_section || args.p_section === "all" || t.section === args.p_section));
+    return result({ items: matches.slice(page * 20, (page + 1) * 20).map((t) => ({ ...t, references: db.research_reference_entries.filter((r) => t.reference_ids.includes(r.id)).map((r) => ({ id: r.id, bibliography: r.bibliography })) })), total: matches.length, page });
+  }
+  if (name === "save_research_topic") {
+    let topic = db.research_topic_entries.find((t) => t.id === args.p_id);
+    if (topic && topic.revision !== args.p_expected_revision) return error("40001", "Topic changed; reload before saving");
+    if (!topic) {
+      topic = { id: Math.max(0, ...db.research_topic_entries.map((t) => t.id)) + 1, collection_id: args.p_collection_id, revision: 0 };
+      db.research_topic_entries.push(topic);
+    }
+    Object.assign(topic, { section: args.p_section, title: args.p_title, body: args.p_body, reference_ids: args.p_reference_ids, cell_links: args.p_cell_links || [], revision: topic.revision + 1 });
+    return result(topic);
+  }
+  if (name === "delete_research_topic") {
+    const topic = db.research_topic_entries.find((t) => t.id === args.p_id);
+    if (!topic || topic.revision !== args.p_expected_revision) return error("40001", "Topic changed; reload before deleting");
+    db.research_topic_entries = db.research_topic_entries.filter((t) => t !== topic);
+    return result(null);
+  }
+  if (name === "request_research_extraction") {
+    if (!ref) return error("42501", "Project editor required");
+    const paper = db.papers.find((p) => p.id === ref.paper_id);
+    ref.extraction_status = paper?.fulltext_available ? "queued" : "waiting_source";
+    if (paper?.fulltext_available) setTimeout(() => {
+      ref.auto_values = Object.fromEntries(workspace.columns.map((c) => [c.id, `Refreshed ${c.label} from original`]));
+      ref.evidence = Object.fromEntries(workspace.columns.map((c) => [c.id, ["p-0000001"]]));
+      ref.source_content_hash = "b".repeat(64); ref.extracted_at = new Date().toISOString(); ref.extraction_status = "complete";
+    }, 100);
+    return result({ status: ref.extraction_status });
+  }
+  if (name === "research_export_snapshot") {
+    const snapshot = structuredClone({
+      project: { id: project.id, name: project.name }, workspace,
+      references: db.research_reference_entries.filter((r) => r.collection_id === collectionId),
+      topics: db.research_topic_entries.filter((t) => t.collection_id === collectionId),
+    });
+    return crypto.subtle.digest("SHA-256", new TextEncoder().encode(JSON.stringify(snapshot))).then((hash) => result({
+      ...snapshot, generated_at: new Date().toISOString(),
+      export_fingerprint: [...new Uint8Array(hash)].map((b) => b.toString(16).padStart(2, "0")).join(""),
+      revision_manifest: {
+        references: snapshot.references.map((r) => ({ id: r.id, revision: r.revision })),
+        topics: snapshot.topics.map((t) => ({ id: t.id, revision: t.revision })),
+      },
+    }));
+  }
+  if (name === "record_research_export") {
+    const existing = db.research_document_exports.find((e) => e.export_id === args.p_export_id);
+    const row = {
+      export_id: args.p_export_id, collection_id: collectionId, created_by: "reader", format: args.p_format,
+      workspace_revision: args.p_workspace_revision, fingerprint: args.p_fingerprint, manifest: args.p_manifest,
+      reference_count: args.p_manifest.references.length, topic_count: args.p_manifest.topics.length, url: args.p_url ?? null,
+    };
+    if (existing) {
+      const { created_at: _created, ...payload } = existing;
+      return JSON.stringify(payload) === JSON.stringify(row) ? result(existing) : error("23505", "Export identifier already used");
+    }
+    row.created_at = new Date().toISOString(); db.research_document_exports.push(row); return result(row);
+  }
+  if (name === "research_document_exports") {
+    const page = args.p_page || 0;
+    const matches = db.research_document_exports.filter((e) => e.collection_id === collectionId && e.created_by === "reader").slice().reverse();
+    return result({ items: matches.slice(page * 20, (page + 1) * 20), total: matches.length, page });
+  }
+  return undefined;
+}
 if (scenario === "search-filters") {
   const dates = [
     "2025-01-10",
@@ -241,7 +411,8 @@ function query(table) {
     payload,
     single = false,
     filters = [],
-    range = null;
+    range = null,
+    orderBy = null;
   const q = {
     select() {
       return q;
@@ -267,7 +438,8 @@ function query(table) {
       );
       return q;
     },
-    order() {
+    order(key, options = {}) {
+      orderBy = [key, options.ascending !== false];
       return q;
     },
     limit(n) {
@@ -318,6 +490,10 @@ function query(table) {
                   : null;
               if (existing) {
                 Object.assign(existing, row);
+                if (table === "project_notes") {
+                  const ref = ensureResearchReference(row.collection_id, row.paper_id);
+                  if (ref) Object.assign(ref, { note: row.note, tags: row.tags, revision: ref.revision + 1 });
+                }
                 return existing;
               }
               const inserted = {
@@ -327,6 +503,11 @@ function query(table) {
                 ...row,
               };
               db[table].push(inserted);
+              if (table === "collection_papers") ensureResearchReference(row.collection_id, row.paper_id);
+              if (table === "project_notes") {
+                const ref = ensureResearchReference(row.collection_id, row.paper_id);
+                if (ref) Object.assign(ref, { note: row.note, tags: row.tags, revision: ref.revision + 1 });
+              }
               return inserted;
             });
           }
@@ -334,12 +515,16 @@ function query(table) {
             rows.forEach((row) => Object.assign(row, payload));
           if (action === "delete")
             db[table] = db[table].filter((row) => !rows.includes(row));
+          if (orderBy) {
+            const [key, ascending] = orderBy;
+            rows.sort((a, b) => (ascending ? 1 : -1) * String(a[key] ?? "").localeCompare(String(b[key] ?? "")));
+          }
           if (
             ["collection_papers", "reader_states", "feedbacks"].includes(table)
           )
             rows = rows.map((row) => ({
               ...row,
-              paper: papers.find((p) => p.id === row.paper_id),
+              paper: db.papers.find((p) => p.id === row.paper_id),
             }));
           if (range) rows = rows.slice(...range);
           return {
@@ -399,6 +584,20 @@ export const supabase = {
       });
       if (scenario === "error")
         return { error: { message: "Simulated API outage" } };
+      if (/^(research_|save_research_|add_research_|delete_research_|request_research_|record_research_)/.test(name)) {
+        const research = researchRpc(name, args);
+        if (research !== undefined) return research;
+      }
+      if (name === "search_library") {
+        const term = (args.p_query || "").trim().toLowerCase(), tab = args.p_tab || "all", page = args.p_page || 0;
+        const matches = db.papers.filter((p) => {
+          const s = state(p.id), liked = db.feedbacks.some((f) => f.paper_id === p.id && f.user_id === "reader" && f.action === "like");
+          if (!s.paper_id && !liked) return false;
+          if (tab === "saved" && !s.saved || tab === "liked" && !liked || ["read", "reading"].includes(tab) && s.reading_state !== tab || tab === "notes" && !s.note?.trim() && !s.tags?.length) return false;
+          return !term || `${p.title} ${p.pmid} ${p.doi} ${s.note || ""} ${(s.tags || []).join(" ")}`.toLowerCase().includes(term);
+        }).sort((a, b) => String(state(b.id).updated_at || "").localeCompare(String(state(a.id).updated_at || "")) || b.id - a.id);
+        return { data: { items: matches.slice(page * 20, (page + 1) * 20).map((p) => ({ ...card(p), note: state(p.id).note || "", tags: state(p.id).tags || [], saved: !!state(p.id).saved, reading_state: state(p.id).reading_state || "unread" })), total: matches.length, page } };
+      }
       if (name === "preview_papers")
         return { data: db.papers.filter(ready).slice(0, 3) };
       if (name === "reader_daily" && args.p_day && args.p_day !== today)
@@ -562,9 +761,11 @@ export const supabase = {
           })),
         };
       if (name === "project_invitations") return { data: [] };
-      if (name === "project_papers") {
+      if (name === "project_papers" || name === "project_papers_v2") {
+        const term = (args.p_query || "").trim().toLowerCase(), page = args.p_page || 0;
         const items = db.collection_papers
           .filter((c) => c.collection_id === args.p_id)
+          .sort((a, b) => String(b.added_at || "").localeCompare(String(a.added_at || "")) || b.paper_id - a.paper_id)
           .map((c) => ({
             ...card(db.papers.find((p) => p.id === c.paper_id)),
             ...db.project_notes.find(
@@ -572,8 +773,8 @@ export const supabase = {
                 n.collection_id === c.collection_id &&
                 n.paper_id === c.paper_id,
             ),
-          }));
-        return { data: { items, total: items.length, can_edit: true } };
+          })).filter((p) => !term || `${p.title} ${p.pmid} ${p.doi} ${p.note || ""} ${(p.tags || []).join(" ")}`.toLowerCase().includes(term));
+        return { data: { items: items.slice(page * 20, (page + 1) * 20), total: items.length, page, can_edit: scenario !== "research-reader" } };
       }
       if (name === "project_recommendations")
         return {

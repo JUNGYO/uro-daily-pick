@@ -1,7 +1,10 @@
 """Summarize Z8-held articles through the existing Spark SSH tunnel."""
 import hashlib
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 from http.client import IncompleteRead
 import json
+import os
 from pathlib import Path
 import re
 import time
@@ -16,10 +19,48 @@ MODEL = "nvidia/Qwen3.8-27B-NVFP4"
 MODEL_LABEL = "spark/" + MODEL + ".evidence-v1"
 ENDPOINT = "http://127.0.0.1:18000"
 OPENER = build_opener(ProxyHandler({}), NoRedirect())
+_INFERENCE_DIRECTORY = ContextVar("literature_inference_directory", default=None)
 
 
 class SummaryBudgetExpired(Exception):
     """End this run cleanly; the original and partial evidence remain on Z8."""
+
+
+@contextmanager
+def literature_inference_scope(directory):
+    """Use the shared literature lock for each chat request, without holding it between chunks."""
+    token = _INFERENCE_DIRECTORY.set(Path(directory))
+    try:
+        yield
+    finally:
+        _INFERENCE_DIRECTORY.reset(token)
+
+
+@contextmanager
+def literature_inference_lock(directory, deadline=None):
+    """Serialize only this literature service's processes; never touch the research runtime."""
+    root = Path(directory).resolve()
+    path = root / "literature-inference.lock"
+    if path.resolve().parent != root:
+        raise ValueError("Inference lock must remain in the literature state directory")
+    with path.open("a+b") as handle:
+        if os.fstat(handle.fileno()).st_size == 0:
+            handle.write(b"0")
+            handle.flush()
+        while True:
+            remaining_timeout(deadline)
+            try:
+                handle.seek(0)
+                if os.name == "nt":
+                    import msvcrt
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                else:
+                    import fcntl
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except OSError:
+                time.sleep(remaining_timeout(deadline, 0.25))
+        yield  # Closing the handle releases the process-owned lock on either platform.
 
 
 def remaining_timeout(deadline, maximum=600):
@@ -64,7 +105,9 @@ def chat(system, content, schema=None, deadline=None):
     if schema: payload["response_format"]={"type":"json_schema","json_schema":{"name":"paper_summary","schema":schema,"strict":True}}
     for attempt in range(3):
         try:
-            result=local_request("/v1/chat/completions",payload,timeout=remaining_timeout(deadline))
+            directory = _INFERENCE_DIRECTORY.get()
+            with literature_inference_lock(directory, deadline) if directory is not None else nullcontext():
+                result=local_request("/v1/chat/completions",payload,timeout=remaining_timeout(deadline))
             candidate=result["choices"][0]
             if candidate.get("finish_reason") != "stop": raise ValueError("Incomplete Spark response")
             return candidate["message"]["content"]

@@ -19,6 +19,7 @@ function View() {
   return <div>{auth.loading ? "Loading" : auth.error || auth.profile?.name || "Signed out"}</div>;
 }
 it("does not expose the previous account profile after an auth change", async () => {
+  sessionStorage.setItem("uro-research-draft:first:42", "private draft");
   let resolveFirst;
   const first = new Promise((resolve) => {
     resolveFirst = resolve;
@@ -48,20 +49,30 @@ it("does not expose the previous account profile after an auth change", async ()
   await waitFor(() => expect(mock.from).toHaveBeenCalled());
   await act(async () => mock.listener("SIGNED_IN", { user: { id: "second" } }));
   expect(await screen.findByText("Second reader")).toBeVisible();
+  expect(sessionStorage.getItem("uro-research-draft:first:42")).toBeNull();
+  sessionStorage.setItem("uro-research-draft:second:99", "new private draft");
   await act(async () => resolveFirst({ data: { id: "first", name: "First reader" } }));
   expect(screen.queryByText("First reader")).not.toBeInTheDocument();
   await act(async () => mock.listener("SIGNED_OUT", null));
   expect(await screen.findByText("Signed out")).toBeVisible();
+  expect(sessionStorage.getItem("uro-research-draft:second:99")).toBeNull();
 });
 
 it("keeps device-only identity through INITIAL_SESSION and clears it on sign out", async () => {
   cleanup();
   const online = vi.spyOn(navigator, "onLine", "get").mockReturnValue(false);
   localStorage.setItem("uro-offline-active", "offline-reader");
-  localStorage.setItem("uro-offline:offline-reader", "[{\"id\":1}]");
-  localStorage.setItem("uro-profile:offline-reader", JSON.stringify({id:"offline-reader",name:"Device reader"}));
+  localStorage.setItem("uro-offline:offline-reader", '[{"id":1}]');
+  localStorage.setItem(
+    "uro-profile:offline-reader",
+    JSON.stringify({ id: "offline-reader", name: "Device reader" }),
+  );
   try {
-    render(<AuthProvider><View /></AuthProvider>);
+    render(
+      <AuthProvider>
+        <View />
+      </AuthProvider>,
+    );
     expect(await screen.findByText("Device reader")).toBeVisible();
     await act(async () => mock.listener("INITIAL_SESSION", null));
     expect(screen.getByText("Device reader")).toBeVisible();
