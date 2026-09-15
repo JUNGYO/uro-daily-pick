@@ -16,11 +16,21 @@ const summary = (page) =>
   page.getByRole("region", { name: "본문 기반 세 줄 요약" });
 
 for (const width of [1440, 390, 320]) {
-  test(`continuous reading at ${width}px opens all five summaries in four selections`, async ({
+  test(`original reading layout at ${width}px keeps all five summaries accessible`, async ({
     page,
   }, info) => {
     await page.setViewportSize({ width, height: width === 1440 ? 1000 : 844 });
     await page.goto("/uro-daily-pick/");
+    if (width < 768) {
+      await expect(selected(page)).toHaveCount(0);
+      await page.screenshot({
+        path: info.outputPath(`daily-list-${width}.png`),
+        fullPage: true,
+      });
+      await page
+        .getByRole("button", { name: /Personalized treatment/ })
+        .click();
+    }
     await expect(summary(page).locator("ol>li")).toHaveCount(3);
     await expect(selected(page)).toContainText("Personalized treatment");
     await expect(
@@ -48,7 +58,7 @@ for (const width of [1440, 390, 320]) {
       await expect(
         page.getByRole("button", { name: "읽음", exact: true }),
       ).toHaveAttribute("aria-pressed", "true");
-      await expect(page.locator(".today-position")).toContainText(
+      await expect(page.locator(".today-position").first()).toContainText(
         `${i + 1}편 읽음`,
       );
       if (i < 4)
@@ -73,6 +83,7 @@ test("mobile Q&A stays inline; saved state and undo belong to the correct articl
 }, info) => {
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto("/uro-daily-pick/");
+  await page.getByRole("button", { name: /Personalized treatment/ }).click();
   await page
     .getByRole("button", { name: "내 서재에 저장", exact: true })
     .click();
@@ -88,7 +99,7 @@ test("mobile Q&A stays inline; saved state and undo belong to the correct articl
   ).toHaveAttribute("aria-pressed", "false");
   await page.locator(".today-study > summary").click();
   await expect(
-    page.getByRole("heading", { name: "이 연구의 주요 한계는 무엇인가요?" }),
+    page.getByRole("heading", { name: "Q. 이 연구의 주요 한계는 무엇인가요?" }),
   ).toBeVisible();
   await expect(summary(page).locator("ol>li")).toHaveCount(3);
   await expect(
@@ -105,11 +116,7 @@ test("mobile Q&A stays inline; saved state and undo belong to the correct articl
   await expect(
     page.getByRole("button", { name: "다음 논문", exact: true }),
   ).toHaveCount(0);
-  await page.keyboard.press("Escape");
-  await expect(
-    page.getByRole("button", { name: "논문 목록", exact: true }),
-  ).toBeFocused();
-  await page.getByRole("button", { name: "논문 목록", exact: true }).click();
+
   await page.getByRole("button", { name: /Imaging surveillance/ }).click();
   await expect(selected(page)).toContainText("PMID 12345674");
   await expect(

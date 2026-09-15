@@ -6,7 +6,7 @@ import { useResource } from "../components/ReaderUI";
 
 // One day's bounded recommendation queue. Detail requests are deduplicated and only
 // the adjacent article is prefetched; private state never enters persistent storage.
-export function useDailyReader(uid, day, requestedPmid) {
+export function useDailyReader(uid, day, requestedPmid, active = true) {
   const queue = useResource(
     async () => ({ uid, day, cards: await rpc("reader_daily", { p_day: day }) }),
     [uid, day],
@@ -15,7 +15,9 @@ export function useDailyReader(uid, day, requestedPmid) {
   const currentSession = useRef(session);
   currentSession.current = session;
   const [states, setStates] = useState({});
+  const [opinions, setOpinions] = useState({});
   const [reasons, setReasons] = useState({});
+  const [scores, setScores] = useState({});
   const [notice, setNotice] = useState(null);
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
@@ -45,7 +47,9 @@ export function useDailyReader(uid, day, requestedPmid) {
 
   useEffect(() => {
     setStates({});
+    setOpinions({});
     setReasons({});
+    setScores({});
     setNotice(null);
   }, [session]);
   useEffect(() => {
@@ -54,7 +58,7 @@ export function useDailyReader(uid, day, requestedPmid) {
     checked(
       supabase
         .from("recommendations")
-        .select("paper_id,reasons")
+        .select("paper_id,reasons,score")
         .eq("user_id", uid)
         .eq("rec_date", day)
         .in(
@@ -64,7 +68,10 @@ export function useDailyReader(uid, day, requestedPmid) {
         .limit(5),
     )
       .then((rows) => {
-        if (live) setReasons(Object.fromEntries((rows || []).map((r) => [r.paper_id, r.reasons])));
+        if (live) {
+          setReasons(Object.fromEntries((rows || []).map((r) => [r.paper_id, r.reasons])));
+          setScores(Object.fromEntries((rows || []).map((r) => [r.paper_id, r.score])));
+        }
       })
       .catch(() => {}); // The server's recommendation explanation remains available.
     return () => {
@@ -83,12 +90,14 @@ export function useDailyReader(uid, day, requestedPmid) {
     }
     if (currentSession.current !== session) return;
     if (values.state) setStates((previous) => ({ ...previous, [paperId]: values.state }));
+    if (values.opinion !== undefined) setOpinions((previous) => ({ ...previous, [paperId]: values.opinion }));
     detail.setData((previous) => (previous?.paper?.id === paperId ? { ...previous, ...values } : previous));
   }
 
   useEffect(() => {
     const data = detail.data;
     if (
+      !active ||
       busy ||
       lock.current ||
       !data?.paper ||
@@ -110,7 +119,7 @@ export function useDailyReader(uid, day, requestedPmid) {
         lock.current = false;
         setBusy(false);
       });
-  }, [detail.data?.paper?.id, busy]);
+  }, [detail.data?.paper?.id, busy, active]);
 
   async function commit(paperId, patch, opinion, previous, message) {
     if (lock.current) return;
@@ -168,7 +177,9 @@ export function useDailyReader(uid, day, requestedPmid) {
     selected,
     detail,
     states,
+    opinions,
     reasons,
+    scores,
     change,
     opinion,
     undo,

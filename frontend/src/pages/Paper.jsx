@@ -324,7 +324,7 @@ export default function Paper() {
                   </select>
                 </label>
                 <p>
-                  <Link to="/collections">프로젝트 관리</Link>
+                  <Link to="/projects">프로젝트 관리</Link>
                 </p>
                 <div className="reader-actions">
                   <button

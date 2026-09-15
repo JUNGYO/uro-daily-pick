@@ -30,7 +30,8 @@ const Paper = resilientLazy(() => import("./pages/Paper"));
 const Compare = resilientLazy(() => import("./pages/Compare"));
 const Library = resilientLazy(() => import("./pages/Library"));
 const Preview = resilientLazy(() => import("./pages/Preview"));
-const Collections = resilientLazy(() => import("./pages/Projects"));
+const Collections = resilientLazy(() => import("./pages/Collections"));
+const Projects = resilientLazy(() => import("./pages/Projects"));
 const Settings = resilientLazy(() => import("./pages/Settings"));
 const Login = resilientLazy(() => import("./pages/Login"));
 const Onboarding = resilientLazy(() => import("./pages/Onboarding"));
@@ -56,7 +57,11 @@ function ProtectedRoute({ children, onboarding = false }) {
     );
   if (!user)
     return <Navigate to={"/login?next=" + encodeURIComponent(location.pathname + location.search)} replace />;
-  if (user.offline && (!location.pathname.startsWith("/papers/") && !(location.pathname === "/library" && location.search.includes("tab=offline"))))
+  if (
+    user.offline &&
+    !location.pathname.startsWith("/papers/") &&
+    !(location.pathname === "/library" && location.search.includes("tab=offline"))
+  )
     return <Navigate to="/library?tab=offline" replace />;
   if (!profile) return <ErrorNotice message="Your profile is unavailable." onRetry={retry} />;
   if (!onboarding && !profile.onboarding_done)
@@ -93,14 +98,14 @@ function Layout({ children }) {
   const isAdmin = ADMIN_EMAILS.includes(user?.email?.trim().toLowerCase());
   const links = [
     { to: "/", icon: Newspaper, label: "오늘 읽기" },
-    { to: "/discover", icon: Network, label: "문헌 탐색" },
-    { to: "/library", icon: FolderOpen, label: "내 서재" },
+    { to: "/insights", icon: Network, label: "Insights" },
+    { to: "/collections", icon: FolderOpen, label: "Collections" },
     { to: "/settings", icon: SettingsIcon, label: "내 설정" },
     ...(isAdmin ? [{ to: "/admin", icon: BarChart3, label: "관리자" }] : []),
   ];
 
   return (
-    <div className="h-dvh bg-bg text-text1 flex flex-col overflow-hidden">
+    <div className="app-layout h-dvh bg-bg text-text1 flex flex-col overflow-hidden">
       <a
         href="#main-content"
         className="sr-only focus:not-sr-only focus:absolute focus:z-[100] focus:bg-white focus:p-3"
@@ -160,6 +165,11 @@ function Layout({ children }) {
       </header>
 
       {logoutError && <ErrorNotice message={logoutError} onRetry={logout} />}
+      <nav aria-label="문헌·연구 도구" className="research-navigation">
+        <NavLink to="/discover">문헌 탐색</NavLink>
+        <NavLink to="/library">내 서재</NavLink>
+        <NavLink to="/projects">연구 프로젝트</NavLink>
+      </nav>
       <main id="main-content" tabIndex={-1} className="flex-1 min-h-0 overflow-hidden pb-16 md:pb-0">
         {children}
       </main>
@@ -249,6 +259,7 @@ export default function App() {
                         <Route path="/library" element={<Library />} />
                         <Route path="/insights" element={<Insights />} />
                         <Route path="/collections" element={<Collections />} />
+                        <Route path="/projects" element={<Projects />} />
                         <Route path="/settings" element={<Settings />} />
                         <Route path="/admin" element={<Admin />} />
                         <Route path="/fulltext/:pmid" element={<FullText />} />

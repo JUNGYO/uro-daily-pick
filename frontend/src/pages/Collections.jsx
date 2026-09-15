@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from "react";
+import { Link, Navigate, useLocation } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/auth";
 import { checked, normalizePaper } from "../lib/data";
@@ -7,6 +8,14 @@ import FullTextLink from "../components/FullTextLink";
 import { FolderOpen, Plus, Trash2, ExternalLink } from "lucide-react";
 
 export default function Collections() {
+  const location = useLocation();
+  // Keep links shared by the previous project workspace release working.
+  if (new URLSearchParams(location.search).has("project"))
+    return <Navigate to={"/projects" + location.search} replace />;
+  return <CollectionList />;
+}
+
+function CollectionList() {
   const { user } = useAuth();
   const [collections, setCollections] = useState([]);
   const [activeId, setActiveId] = useState(null);
@@ -88,6 +97,10 @@ export default function Collections() {
           <div>
             <h1 className="page-title mb-2">Collections</h1>
             <p className="help-text mb-6">Keep papers together for your next research question.</p>
+            <div className="flex flex-wrap gap-4 text-sm text-accent mb-5">
+              <Link to="/library?tab=liked">관심 표시한 논문</Link>
+              <Link to="/projects">공동 연구·메모·공유 관리</Link>
+            </div>
           </div>
           <button className="btn-primary gap-2" onClick={() => setCreating(true)}>
             <Plus size={18} />
@@ -194,7 +207,7 @@ export default function Collections() {
             <FolderOpen className="mx-auto mb-4 text-accent" />
             <h2 className="section-title">Your reading list starts here</h2>
             <p className="help-text">
-              Create a collection, or like a paper in Daily Pick to save it automatically.
+              Create a collection and add papers, or open your previously saved collections.
             </p>
           </div>
         )}

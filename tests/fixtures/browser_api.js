@@ -294,7 +294,7 @@ function query(table) {
             rows.forEach((row) => Object.assign(row, payload));
           if (action === "delete")
             db[table] = db[table].filter((row) => !rows.includes(row));
-          if (["collection_papers", "reader_states"].includes(table))
+          if (["collection_papers", "reader_states", "feedbacks"].includes(table))
             rows = rows.map((row) => ({
               ...row,
               paper: papers.find((p) => p.id === row.paper_id),

@@ -25,6 +25,16 @@ export default function Library() {
   const r = useResource(async () => {
     if (tab === "offline") return cachedPapers(user.id).map((p) => ({ paper: p }));
     if (tab === "searches") return rpc("search_notifications");
+    if (tab === "liked")
+      return checked(
+        supabase
+          .from("feedbacks")
+          .select("paper:papers(" + columns + ")")
+          .eq("user_id", user.id)
+          .eq("action", "like")
+          .order("created_at", { ascending: false })
+          .range(page * 20, page * 20 + 19),
+      );
     let q = supabase
       .from("reader_states")
       .select("*,paper:papers(" + columns + ")")
@@ -44,7 +54,7 @@ export default function Library() {
   return (
     <ReaderPage title="내 서재" description="저장한 문헌과 메모를 다시 열고, 연구에 활용하세요.">
       <div className="reader-actions">
-        <Link className="btn-secondary" to="/collections">
+        <Link className="btn-secondary" to="/projects">
           프로젝트·공동 서재
         </Link>
         <Link className="btn-secondary" to="/insights">
@@ -68,6 +78,7 @@ export default function Library() {
       <div className="reader-tabs">
         {[
           ["saved", "저장"],
+          ["liked", "관심 있음"],
           ["reading", "읽는 중"],
           ["read", "읽음"],
           ["searches", "새 문헌 알림"],
