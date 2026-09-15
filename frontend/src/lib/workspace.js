@@ -26,6 +26,31 @@ export function searchArgs(params) {
     p_integrity: params.get("integrity") || "current",
   };
 }
+export function searchDateFields(params) {
+  const to = params.get("to") || (params.get("until") ? `${params.get("until")}-12-31` : "");
+  return {
+    from: params.get("from") || (params.get("year") ? `${params.get("year")}-01-01` : ""),
+    to: to === "3000-12-31" ? "" : to,
+  };
+}
+export function searchArgsV2(params) {
+  const { p_year, p_until, ...args } = searchArgs(params);
+  const dates = searchDateFields(params);
+  const from = dates.from || "2000-01-01",
+    to = dates.to || "3000-12-31";
+  for (const date of [from, to]) {
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(date) ||
+      !Number.isFinite(Date.parse(date)) ||
+      new Date(date).toISOString().slice(0, 10) !== date ||
+      date < "2000-01-01" ||
+      date > "3000-12-31"
+    )
+      throw new Error("발행일은 2000년 1월 1일 이후의 올바른 날짜로 입력해 주세요.");
+  }
+  if (from > to) throw new Error("시작일은 종료일보다 늦을 수 없습니다.");
+  return { ...args, p_journal: args.p_journal.trim(), p_from: from, p_to: to };
+}
 export function paperLink(p) {
   return "/papers/" + encodeURIComponent(p.pmid);
 }

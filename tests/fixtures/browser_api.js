@@ -132,6 +132,46 @@ const db = {
     },
   ],
 };
+if (scenario === "search-filters") {
+  const dates = [
+    "2025-01-10",
+    "2025-01-20",
+    "2025-01-09",
+    "2025-01-21",
+    "2025-01-15",
+  ];
+  const titles = [
+    "Prostate boundary start",
+    "Prostate boundary end",
+    "Prostate before interval",
+    "Prostate after interval",
+    "Prostate other journal",
+  ];
+  db.papers = papers.map((p, i) => ({
+    ...p,
+    title: titles[i],
+    pub_date: dates[i],
+    journal: i === 4 ? "European Urology Oncology" : "European Urology",
+  }));
+  db.papers.push(
+    ...Array.from({ length: 21 }, (_, i) => ({
+      ...papers[0],
+      id: 100 + i,
+      pmid: String(22345670 + i),
+      title: `Prostate interval article ${i + 1}`,
+      pub_date: "2025-01-15",
+    })),
+  );
+  db.saved_searches = [
+    {
+      id: 1,
+      name: "Legacy journal search",
+      query: "boundary",
+      enabled: true,
+      filters: { year: 2025, until: 2025, journal: "European Urology" },
+    },
+  ];
+}
 if (scenario === "ai-regression") {
   Object.assign(papers[0], {
     title: "DNA mismatch repair in Veterans Affairs",
@@ -294,7 +334,9 @@ function query(table) {
             rows.forEach((row) => Object.assign(row, payload));
           if (action === "delete")
             db[table] = db[table].filter((row) => !rows.includes(row));
-          if (["collection_papers", "reader_states", "feedbacks"].includes(table))
+          if (
+            ["collection_papers", "reader_states", "feedbacks"].includes(table)
+          )
             rows = rows.map((row) => ({
               ...row,
               paper: papers.find((p) => p.id === row.paper_id),
@@ -449,7 +491,20 @@ export const supabase = {
           });
         return { data: null };
       }
-      if (name === "search_papers") {
+      if (name === "search_journals") {
+        const term = (args.p_query || "").toLowerCase();
+        const journals = new Set();
+        for (const p of db.papers) {
+          if (p.journal.toLowerCase().includes(term)) journals.add(p.journal);
+        }
+        return {
+          data: [...journals]
+            .sort((a, b) => a.localeCompare(b))
+            .slice(0, 30)
+            .map((name) => ({ name })),
+        };
+      }
+      if (name === "search_papers" || name === "search_papers_v2") {
         const term = (args.p_query || "")
           .replace(/^https?:\/\/(dx\.)?doi\.org\//i, "")
           .toLowerCase();
@@ -471,7 +526,24 @@ export const supabase = {
         if (args.p_state === "pending")
           matches = matches.filter((p) => !ready(p));
         if (args.p_journal)
-          matches = matches.filter((p) => p.journal === args.p_journal);
+          matches = matches.filter(
+            (p) => p.journal.toLowerCase() === args.p_journal.toLowerCase(),
+          );
+        const from = args.p_from || `${args.p_year || 2000}-01-01`,
+          to = args.p_to || `${args.p_until || 3000}-12-31`;
+        matches = matches.filter((p) => p.pub_date >= from && p.pub_date <= to);
+        if (args.p_type)
+          matches = matches.filter((p) => p.study_type === args.p_type);
+        if (args.p_integrity === "retracted")
+          matches = matches.filter((p) => p.integrity_status === "retracted");
+        else if (args.p_integrity !== "all")
+          matches = matches.filter((p) => p.integrity_status !== "retracted");
+        if (args.p_sort !== "relevance")
+          matches.sort(
+            (a, b) =>
+              (args.p_sort === "oldest" ? 1 : -1) *
+              (a.pub_date.localeCompare(b.pub_date) || a.id - b.id),
+          );
         const page = args.p_page || 0;
         return {
           data: {

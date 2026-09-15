@@ -172,7 +172,10 @@ for (const width of [1440, 390]) {
     await expect(
       page.getByRole("link", { name: /Recent paper without/ }),
     ).toHaveCount(0);
-    if (width < 768) await page.getByRole("button", { name: /Personalized treatment/ }).click();
+    if (width < 768)
+      await page
+        .getByRole("button", { name: /Personalized treatment/ })
+        .click();
     const titles = [
       /Personalized treatment/,
       /Long-term outcomes/,
@@ -210,7 +213,7 @@ test("discovery saves queries and exports a bounded comparison", async ({
   page,
 }) => {
   await page.goto("/uro-daily-pick/discover");
-  await page.getByLabel("제목·주제·PMID·DOI").fill("prostate");
+  await page.getByLabel("키워드·PMID·DOI").fill("prostate");
   await page.getByRole("button", { name: "검색", exact: true }).click();
   await page.getByRole("button", { name: "검색 저장·새 결과 알림" }).click();
   await expect(page.getByText(/검색을 저장했습니다/)).toBeVisible();
