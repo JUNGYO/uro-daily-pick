@@ -36,6 +36,17 @@ export function AuthProvider({ children }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
       if (offlineMode && _event !== "SIGNED_OUT") return;
+      // Also handles account deletion and sign-out initiated outside the header.
+      if (_event === "SIGNED_OUT") {
+        try {
+          const uid = currentUser.current || localStorage.getItem("uro-offline-active");
+          if (uid) {
+            localStorage.removeItem("uro-offline:" + uid);
+            localStorage.removeItem("uro-profile:" + uid);
+          }
+          localStorage.removeItem("uro-offline-active");
+        } catch { /* Storage failure must not prevent session termination. */ }
+      }
       authEvents += 1;
       apply(session);
     });
