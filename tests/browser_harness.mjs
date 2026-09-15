@@ -19,6 +19,7 @@ const compiler = await context({
     "import.meta.env.BASE_URL": JSON.stringify("/uro-daily-pick/"),
     "import.meta.env.VITE_EMAIL_AUTH_READY": JSON.stringify("false"),
     "import.meta.env.VITE_EMAIL_DELIVERY_READY": JSON.stringify("false"),
+    "import.meta.env.VITE_GOOGLE_CLIENT_ID": JSON.stringify(""),
     "import.meta.env.VITE_FULLTEXT_ORIGIN": JSON.stringify(
       "https://articles.example.test",
     ),

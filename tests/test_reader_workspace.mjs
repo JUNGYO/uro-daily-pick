@@ -5,13 +5,37 @@ import {createHash} from 'node:crypto';
 const db=new PGlite();
 const a='00000000-0000-0000-0000-000000000001',b='00000000-0000-0000-0000-000000000002',c='00000000-0000-0000-0000-000000000003';
 async function user(id){await db.exec('RESET ROLE');await db.query("SELECT set_config('request.jwt.claim.sub',$1,false)",[id]);await db.exec('SET ROLE authenticated')}
+async function accessContracts(){
+ return (await db.query(`SELECT jsonb_build_object(
+  'functions',(SELECT jsonb_agg(jsonb_build_object('signature',p.oid::regprocedure::text,'acl',p.proacl::text,'definition',pg_get_functiondef(p.oid)) ORDER BY p.oid::regprocedure::text)
+    FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname IN ('public','app_private') AND p.proname<>'preview_papers'),
+  'tables',(SELECT jsonb_agg(jsonb_build_object('name',c.oid::regclass::text,'acl',c.relacl::text,'rls',c.relrowsecurity) ORDER BY c.oid::regclass::text)
+    FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname IN ('public','app_private') AND c.relkind IN ('r','p')),
+  'policies',(SELECT jsonb_agg(to_jsonb(p) ORDER BY p.schemaname,p.tablename,p.policyname) FROM pg_policies p WHERE p.schemaname IN ('public','app_private'))
+ ) r`)).rows[0].r;
+}
 try{
  await db.exec(`CREATE ROLE anon;CREATE ROLE authenticated;CREATE ROLE service_role BYPASSRLS;CREATE SCHEMA auth;
  CREATE TABLE auth.users(id uuid PRIMARY KEY,email text,email_confirmed_at timestamptz,raw_user_meta_data jsonb);
  CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
  GRANT USAGE ON SCHEMA auth,public TO authenticated,anon;`);
  for(const file of (await readdir(new URL('../supabase/migrations/',import.meta.url))).filter(f=>f.endsWith('.sql')).sort()){
-  await db.exec((await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8')).replace(/^\uFEFF/,''));
+  const removingPreview=file.startsWith('024_');
+  let before;
+  if(removingPreview){
+   // Supabase's existing public catalog read also serves the enrolled worker.
+   // Simulate that grant and prove retiring the demo does not alter it.
+   await db.exec('GRANT SELECT ON public.papers TO anon');
+   assert.equal((await db.query("SELECT has_function_privilege('anon','public.preview_papers()','EXECUTE') r")).rows[0].r,true);
+   before=await accessContracts();
+  }
+  const sql=(await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8')).replace(/^\uFEFF/,'');
+  await db.exec(sql);
+  if(removingPreview){
+   assert.equal((await db.query("SELECT to_regprocedure('public.preview_papers()') r")).rows[0].r,null);
+   assert.deepEqual(await accessContracts(),before,'Demo removal must not alter other functions, table grants, or RLS policies');
+   await db.exec(sql); // Safe to reapply after an interrupted deployment check.
+  }
   console.log('applied '+file);
  }
  await db.exec(`GRANT SELECT,INSERT,UPDATE,DELETE ON public.collections,public.collection_papers,public.papers,public.profiles,public.feedbacks TO authenticated;
@@ -161,10 +185,18 @@ try{
   const summaryCounts=Object.fromEntries((await db.query('SELECT public.search_notifications() r')).rows[0].r.map(s=>[s.name,s.new_count]));
   assert.equal(summaryCounts['Summary state ready'],1);assert.equal(summaryCounts['Summary state all'],0);assert.equal(summaryCounts['Summary state pending'],0);
   await db.exec("RESET ROLE;SET ROLE anon;SELECT set_config('request.jwt.claim.sub','',false)");
-  await assert.rejects(db.query("SELECT public.search_papers('prostate')"));await db.query('SELECT public.preview_papers()');
+  await assert.rejects(db.query("SELECT public.search_papers('prostate')"));
+  await assert.rejects(db.query('SELECT public.preview_papers()'),{code:'42883'});
+  // The existing anon transport still supports token-authenticated worker RPCs.
+  await db.query("SELECT public.institution_worker_status($1,$2,'idle')",[worker,token]);
+  assert.deepEqual((await db.query('SELECT public.claim_research_extractions($1,$2,1) r',[worker,token])).rows[0].r,[]);
+  await assert.rejects(db.query("SELECT public.institution_worker_status($1,$2,'idle')",[worker,'invalid-token']),{code:'42501'});
+  assert.equal((await db.query("SELECT pmid FROM public.papers WHERE pmid='10001'")).rows.length,1);
   await assert.rejects(searchV2({p_query:'prostate'}),{code:'42501'});
   await assert.rejects(db.query('SELECT public.search_journals()'),{code:'42501'});
   await assert.rejects(db.query('SELECT public.search_notifications()'),{code:'42501'});
+  await user(a);await assert.rejects(db.query('SELECT public.preview_papers()'),{code:'42883'});
+  assert.equal((await db.query("SELECT public.reader_paper('10001') r")).rows[0].r.paper.pmid,'10001');
   await user('');await assert.rejects(searchV2(),{code:'42501'});await assert.rejects(db.query('SELECT public.search_journals()'),{code:'42501'});
-  console.log('Reader searches, inclusive date boundaries, journal autocomplete, pagination, AI boundaries, identity isolation, reader/editor sharing, revocation, reports, notifications passed');
+  console.log('Reader searches, inclusive date boundaries, journal autocomplete, pagination, AI boundaries, identity isolation, reader/editor sharing, revocation, reports, notifications, demo removal and preserved worker contracts passed');
 } catch(e){console.error(e.message,e.where||'',e.query||'');process.exitCode=1} finally {await db.close()}

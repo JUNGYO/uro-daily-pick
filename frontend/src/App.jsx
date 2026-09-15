@@ -29,7 +29,6 @@ const Discover = resilientLazy(() => import("./pages/Discover"));
 const Paper = resilientLazy(() => import("./pages/Paper"));
 const Compare = resilientLazy(() => import("./pages/Compare"));
 const Library = resilientLazy(() => import("./pages/Library"));
-const Preview = resilientLazy(() => import("./pages/Preview"));
 const Collections = resilientLazy(() => import("./pages/Collections"));
 const Projects = resilientLazy(() => import("./pages/Projects"));
 const Settings = resilientLazy(() => import("./pages/Settings"));
@@ -234,7 +233,6 @@ export default function App() {
           <Suspense fallback={<Loading />}>
             <Routes>
               <Route path="/welcome" element={<Landing />} />
-              <Route path="/preview" element={<Preview />} />
               <Route path="/privacy" element={<Privacy />} />
               <Route path="/login" element={<Login />} />
               <Route

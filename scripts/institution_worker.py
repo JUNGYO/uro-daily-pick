@@ -23,7 +23,7 @@ from urllib.request import Request, build_opener, HTTPSHandler
 
 from fulltext import FulltextUnavailable, NoRedirect, fetch_oa, parse_document
 from evidence import validate_metadata
-from local_summary import MODEL_LABEL, SummaryBudgetExpired, ensure_server, generate_summary, summary_payload
+from local_summary import MODEL_LABEL, SummaryBudgetExpired, ensure_server, generate_summary, summary_payload, literature_inference_scope
 from catalog_policy import AUTOMATIC_START_DATE
 
 SERVICE_URL = "https://vwdcqzcoovczmtzdyzbc.supabase.co"
@@ -82,14 +82,22 @@ class Service:
         if params:
             url += "?" + urlencode(params)
         payload = None if data is None else json.dumps(data, ensure_ascii=False).encode()
+        deadline = getattr(self, "research_deadline", None) if path in {
+            "rpc/claim_research_extractions", "rpc/finish_research_extraction", "rpc/fail_research_extraction"} else None
         for attempt in range(4):
+            remaining = 45 if deadline is None else min(45, deadline - time.monotonic())
+            if remaining < 1:
+                raise TimeoutError("Research service request budget expired")
             try:
                 request = Request(url, data=payload, headers={"apikey": self.config["public_key"],
                     "Content-Type": "application/json", "Accept": "application/json"})
-                with self.opener.open(request, timeout=45) as response:
+                with self.opener.open(request, timeout=remaining) as response:
                     content = response.read(2 * 1024 * 1024)
                 return json.loads(content) if content else None
             except HTTPError as error:
+                if path in ("rpc/finish_research_extraction", "rpc/fail_research_extraction") and error.code in (403, 409):
+                    from research_extraction import ResearchLeaseSuperseded
+                    raise ResearchLeaseSuperseded("Research extraction lease or source changed") from None
                 if path=="rpc/publish_institution_summary" and error.code in (400,409,422):
                     raise ValueError("Summary publication requires revalidation") from None
                 if error.code not in (408,429,500,502,503,504,520,522,524):
@@ -99,13 +107,31 @@ class Service:
             except (URLError, TimeoutError, IncompleteRead, ConnectionError, ssl.SSLError):
                 pass
             if attempt < 3:
-                time.sleep(2 ** (attempt + 1))
+                pause = 2 ** (attempt + 1)
+                if deadline is not None and deadline - time.monotonic() <= pause + 1:
+                    raise TimeoutError("Research service retry budget expired")
+                time.sleep(pause)
         raise RuntimeError("Service temporarily unavailable")
 
     def rpc(self, name, **values):
-        allowed={"institution_worker_status","publish_institution_summary","institution_cloud_archive","confirm_local_fulltext_archive","register_institution_original"}
+        allowed={"institution_worker_status","publish_institution_summary","institution_cloud_archive","confirm_local_fulltext_archive","register_institution_original",
+                 "claim_research_extractions","finish_research_extraction","fail_research_extraction"}
         if name not in allowed:
             raise ValueError("Unsupported worker RPC")
+        if name in {"claim_research_extractions","finish_research_extraction","fail_research_extraction"}:
+            from research_extraction import validate_rpc, validate_job
+            validate_rpc(name, values)
+            result = self.request("rpc/" + name, {"p_worker_id": self.config["id"], "p_token": self.token, **values})
+            if name == "claim_research_extractions":
+                if not isinstance(result, list) or len(result) > values["p_limit"]:
+                    raise ValueError("Invalid research claim result")
+                for job in result:
+                    validate_job(job)
+            elif name == "finish_research_extraction" and result is not True:
+                raise ValueError("Research completion not confirmed")
+            elif name == "fail_research_extraction" and result is not None:
+                raise ValueError("Invalid research failure receipt")
+            return result
         if name=="register_institution_original" and (
                 set(values)!={"p_pmid","p_doi","p_title","p_source"}
                 or set(values["p_source"])!={"content_hash","summary_source_hash","characters","section_count","source_url"}):
@@ -396,8 +422,9 @@ def run(directory, node, seconds, phase="all", requested_pmid=None):
                 expected_hash = hashlib.sha256(("fulltext\n"+paper["title"]+"\n"+document["content_text"]).encode()).hexdigest()
                 summary = json.loads(summary_path.read_text(encoding="utf-8")) if summary_path.exists() else None
                 if not summary or summary.get("summary_source_hash") != expected_hash or summary.get("summary_model") != MODEL_LABEL:
-                    summary = (generate_summary(paper,document,deadline=deadline,cache_path=spool/(pmid+".notes.json"))
-                               if phase=="summarize" else generate_summary(paper,document))
+                    with literature_inference_scope(directory):
+                        summary = (generate_summary(paper,document,deadline=deadline,cache_path=spool/(pmid+".notes.json"))
+                                   if phase=="summarize" else generate_summary(paper,document))
                     save_json(summary_path,summary)
                 operation="publication"
                 service.rpc("publish_institution_summary", **summary_payload(paper, document, summary))
@@ -437,7 +464,7 @@ def main():
     parser.add_argument("--node", type=Path)
     parser.add_argument("--enroll", action="store_true")
     parser.add_argument("--max-seconds", type=int, default=3300)
-    parser.add_argument("--phase",choices=["all","collect","summarize","figures"],default="all")
+    parser.add_argument("--phase",choices=["all","collect","summarize","figures","research"],default="all")
     parser.add_argument("--pmid",help="Explicitly requested paper; bypasses the automatic publication cutoff")
     args = parser.parse_args()
     if args.pmid and not re.fullmatch(r"\d{1,12}",args.pmid):
@@ -448,7 +475,10 @@ def main():
     if not args.node or not 60 <= args.max_seconds <= 3600:
         parser.error("A Node executable and 60..3600 second runtime are required")
     try:
-        if args.phase=="figures":
+        if args.phase=="research":
+            from research_extraction import run_research_queue
+            run_research_queue(args.state_dir,args.max_seconds)
+        elif args.phase=="figures":
             from article_images import run_image_queue
             run_image_queue(args.state_dir,args.node,args.max_seconds,args.pmid)
         else:

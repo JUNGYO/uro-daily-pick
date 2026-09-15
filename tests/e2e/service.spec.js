@@ -12,15 +12,22 @@ test.beforeEach(async ({ page }) => {
       : route.abort(),
   );
 });
-test("public summary trial opens directly from the welcome page", async ({
+test("welcome and sign-in have no public summary trial", async ({
   page,
 }) => {
   await page.goto("/uro-daily-pick/welcome?scenario=signed-out");
-  await page.getByRole("button", { name: "요약 체험하기" }).click();
-  await expect(page).toHaveURL(/\/preview$/);
-  await expect(
-    page.getByRole("heading", { name: "본문 기반 세 줄 요약" }).first(),
-  ).toBeVisible();
+  await expect(page.getByRole("button", { name: /요약 체험/ })).toHaveCount(0);
+  await expect(page.locator('a[href$="/preview"]')).toHaveCount(0);
+  await page.getByRole("button", { name: "Sign In", exact: true }).click();
+  await expect(page).toHaveURL(/\/login$/);
+  await expect(page.getByRole("link", { name: /요약 체험/ })).toHaveCount(0);
+  await expect(page.getByText(/공개 요약/)).toHaveCount(0);
+});
+test("removed preview address no longer serves anonymous summaries", async ({ page }) => {
+  await page.goto("/uro-daily-pick/preview?scenario=signed-out");
+  await expect(page).toHaveURL(/\/login\?next=/);
+  await expect(page.getByRole("heading", { name: "본문 기반 세 줄 요약" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeVisible();
 });
 for (const viewport of [
   { width: 1440, height: 1000 },
@@ -30,7 +37,7 @@ for (const viewport of [
   test(`all pages render at ${viewport.width}px without overflow or accessibility violations`, async ({
     page,
   }, testInfo) => {
-    // This case visits 17 routes and runs a complete axe audit on each.
+    // This case visits 16 routes and runs a complete axe audit on each.
     test.setTimeout(60000);
     await page.setViewportSize(viewport);
     const errors = [];
@@ -42,7 +49,6 @@ for (const viewport of [
       "papers/12345670?tab=study",
       "library",
       "compare?pmids=12345670,12345671",
-      "preview",
       "settings",
       "collections",
       "projects",

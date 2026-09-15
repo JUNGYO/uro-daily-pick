@@ -26,14 +26,8 @@ export default function Landing() {
         </p>
         <div className="flex items-center justify-center gap-3">
           <button
-            onClick={() => navigate("/preview")}
-            className="h-12 px-8 bg-accent text-white rounded-xl text-[0.889rem] font-semibold hover:bg-[#0066D6] transition-colors"
-          >
-            요약 체험하기
-          </button>
-          <button
             onClick={() => navigate("/login")}
-            className="h-12 px-8 border border-border text-text2 rounded-xl text-[0.889rem] font-medium hover:bg-hover transition-colors"
+            className="h-12 px-8 bg-accent text-white rounded-xl text-[0.889rem] font-semibold hover:bg-[#0066D6] transition-colors"
           >
             Sign In
           </button>
