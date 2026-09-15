@@ -22,6 +22,8 @@ export function useDailyReader(uid, day, requestedPmid, active = true) {
   const [busy, setBusy] = useState(false);
   const lock = useRef(false);
   const automaticWrite = useRef(null);
+  const manualWrite = useRef(false);
+  const [automaticRevision, setAutomaticRevision] = useState(0);
   const cards = queue.data?.uid === uid && queue.data?.day === day ? queue.data.cards : [];
   const index = Math.max(
     0,
@@ -145,7 +147,6 @@ export function useDailyReader(uid, day, requestedPmid, active = true) {
     const paperId = data.paper.id;
     session.opened.add(paperId);
     lock.current = true;
-    setBusy(true);
     automaticWrite.current = rpc("update_reader_state", {
       p_paper_id: paperId,
       p_patch: { reading_state: "reading" },
@@ -155,19 +156,20 @@ export function useDailyReader(uid, day, requestedPmid, active = true) {
       .finally(() => {
         automaticWrite.current = null;
         lock.current = false;
-        setBusy(false);
+        setAutomaticRevision((n) => n + 1);
       });
-  }, [detail.data?.paper?.id, busy, active]);
+  }, [detail.data?.paper?.id, busy, active, automaticRevision]);
 
   async function commit(paperId, patch, opinion, previous, message) {
     // Retain a click that arrives between rendering and the automatic reading marker.
     // The initiating paper ID and patch are captured before this wait.
-    if (automaticWrite.current) await automaticWrite.current;
-    if (lock.current) return;
-    lock.current = true;
+    if (manualWrite.current) return;
+    manualWrite.current = true;
     setBusy(true);
     setNotice(null);
     try {
+      if (automaticWrite.current) await automaticWrite.current;
+      lock.current = true;
       if (opinion !== undefined) {
         await rpc("reader_opinion", { p_paper_id: paperId, p_action: opinion });
         updateCached(paperId, { opinion });
@@ -181,6 +183,7 @@ export function useDailyReader(uid, day, requestedPmid, active = true) {
       if (currentSession.current === session)
         setNotice({ message: e.message || "저장하지 못했습니다. 다시 시도해 주세요.", error: true });
     } finally {
+      manualWrite.current = false;
       lock.current = false;
       setBusy(false);
     }
