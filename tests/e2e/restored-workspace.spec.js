@@ -111,7 +111,7 @@ test("original menus, collections and insights coexist with research tools", asy
     page.getByRole("heading", { name: "Journal club", exact: true }),
   ).toBeVisible();
   await page.getByRole("link", { name: "문헌 탐색", exact: true }).click();
-  await expect(page.getByLabel("제목·주제·PMID·DOI")).toBeVisible();
+  await expect(page.getByLabel("키워드·PMID·DOI")).toBeVisible();
   await page
     .getByRole("link", { name: "내 설정", exact: true })
     .filter({ visible: true })
