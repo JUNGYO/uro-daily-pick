@@ -21,6 +21,9 @@ from urllib.request import build_opener, HTTPRedirectHandler, HTTPSHandler, Requ
 
 MAX_FILE_BYTES = 12 * 1024 * 1024
 MAX_TEXT_CHARS = 2_000_000
+MAX_IMAGE_BYTES = 20 * 1024 * 1024
+ASSET = re.compile(r"[0-9a-f]{64}\Z")
+IMAGE_TYPES = {'image/png','image/jpeg','image/webp','image/gif','image/tiff','image/bmp'}
 PMID = re.compile(r"[1-9][0-9]{0,11}\Z")
 
 
@@ -108,10 +111,53 @@ class Archive:
                 # Return plain text only. Never return publisher HTML or local paths.
                 return {"pmid": pmid, "title": str(paper.get("title") or "Article " + pmid)[:2000],
                         "doi": str(paper.get("doi") or "")[:500], "content_text": text,
-                        "content_hash": doc["content_hash"], "format": "extracted_text"}
+                        "content_hash": doc["content_hash"], "format": "extracted_text",
+                        **self.figures(pmid,doc['content_hash'])}
             except (OSError, ValueError, TypeError, KeyError):
                 found_invalid = True
         raise ViewerError(503 if found_invalid else 404, "document_unavailable" if found_invalid else "not_found")
+
+    def figures(self, pmid, content_hash):
+        path=self.roots[0]/(pmid+'.images.json')
+        try:
+            if path.is_symlink() or path.resolve(strict=True)!=path: raise ValueError('Invalid manifest')
+            with path.open('rb') as stream: raw=stream.read(MAX_FILE_BYTES+1)
+            if len(raw)>MAX_FILE_BYTES: raise ValueError('Large manifest')
+            manifest=json.loads(raw)
+            if manifest.get('content_hash')!=content_hash: raise ValueError('Stale figure manifest')
+            figures=[]
+            for item in manifest['figures']:
+                if not re.fullmatch(r'figure-[1-9][0-9]*',item.get('key','')): raise ValueError('Invalid figure')
+                ready=(item.get('status')=='ready' and ASSET.fullmatch(item.get('asset_id',''))
+                    and item.get('content_type') in IMAGE_TYPES)
+                figures.append({'key':item['key'],'label':str(item.get('label',''))[:120],
+                    'caption':str(item.get('caption',''))[:12000],
+                    'status':'ready' if ready else 'pending',
+                    **({'asset_id':item['asset_id'],'content_type':item['content_type']} if ready else {})})
+            return {'figures':figures,'figure_status':'complete' if manifest.get('status')=='complete' and all(f['status']=='ready' for f in figures) else 'partial'}
+        except (OSError,ValueError,TypeError,KeyError):
+            return {'figures':[],'figure_status':'pending'}
+
+    def image(self, pmid, asset_id):
+        if not ASSET.fullmatch(asset_id): raise ViewerError(404,'not_found')
+        article=self.read(pmid)
+        figure=next((f for f in article['figures'] if f.get('asset_id')==asset_id and f['status']=='ready'),None)
+        if not figure: raise ViewerError(404,'not_found')
+        folder=self.roots[0]/(pmid+'.images')
+        path=folder/asset_id
+        try:
+            if folder.is_symlink() or folder.resolve(strict=True)!=folder or path.is_symlink() or path.resolve(strict=True)!=path:
+                raise ValueError('Invalid image path')
+            with path.open('rb') as stream: data=stream.read(MAX_IMAGE_BYTES+1)
+            if not 12<=len(data)<=MAX_IMAGE_BYTES or hashlib.sha256(data).hexdigest()!=asset_id:
+                raise ValueError('Image integrity mismatch')
+            signatures={'image/png':data.startswith(b'\x89PNG\r\n\x1a\n'),
+                'image/jpeg':data.startswith(b'\xff\xd8\xff'), 'image/gif':data[:6] in (b'GIF87a',b'GIF89a'),
+                'image/webp':data[:4]==b'RIFF' and data[8:12]==b'WEBP',
+                'image/tiff':data[:4] in (b'II*\x00',b'MM\x00*'), 'image/bmp':data[:2]==b'BM'}
+            if not signatures.get(figure['content_type']): raise ValueError('Invalid image type')
+            return data,figure['content_type']
+        except (OSError,ValueError): raise ViewerError(503,'image_unavailable') from None
 
 
 class WindowLimit:
@@ -177,11 +223,12 @@ class ViewerHandler(BaseHTTPRequestHandler):
     def send_error(self, code, message=None, explain=None):
         self.reply(code, {"error": "request_rejected"})
 
-    def reply(self, status, value=None):
-        body = json.dumps(value, ensure_ascii=False).encode("utf-8") if value is not None else b""
+    def reply(self, status, value=None, content_type=None):
+        body = value if content_type else json.dumps(value, ensure_ascii=False).encode("utf-8") if value is not None else b""
         self.close_connection = True
         self.send_response(status)
-        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Type", content_type or "application/json; charset=utf-8")
+        if content_type=='image/tiff': self.send_header('Content-Disposition','attachment; filename="figure.tiff"')
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "private, no-store, max-age=0")
         self.send_header("Pragma", "no-cache")
@@ -203,7 +250,7 @@ class ViewerHandler(BaseHTTPRequestHandler):
             self.wfile.write(body)
 
     def article_path(self):
-        match = re.fullmatch(r"/v1/fulltext/([1-9][0-9]{0,11})", self.path)
+        match = re.fullmatch(r"/v1/fulltext/([1-9][0-9]{0,11})(?:/images/([0-9a-f]{64}))?", self.path)
         if not match:
             raise ViewerError(404, "not_found")
         if self.headers.get_all("Origin") != [self.server.origin]:
@@ -212,7 +259,7 @@ class ViewerHandler(BaseHTTPRequestHandler):
             raise ViewerError(400, "request_rejected")
         if not self.server.limit.allow():
             raise ViewerError(429, "try_later")
-        return match[1]
+        return match[1],match[2]
 
     def do_OPTIONS(self):
         try:
@@ -230,13 +277,17 @@ class ViewerHandler(BaseHTTPRequestHandler):
             self.reply(200, {"status": "ok"})
             return
         try:
-            pmid = self.article_path()
+            pmid,asset_id = self.article_path()
             values = self.headers.get_all("Authorization", [])
             if (len(values) != 1 or not values[0].startswith("Bearer ")
                     or not re.fullmatch(r"[A-Za-z0-9_.-]{20,8192}", values[0][7:])):
                 raise ViewerError(401, "sign_in_required")
             self.server.identity.authorize(values[0][7:])
-            self.reply(200, self.server.archive.read(pmid))
+            if asset_id:
+                data,kind=self.server.archive.image(pmid,asset_id)
+                self.reply(200,data,content_type=kind)
+            else:
+                self.reply(200, self.server.archive.read(pmid))
         except ViewerError as error:
             self.reply(error.status, {"error": error.code})
         except (OSError, ValueError, TypeError):
@@ -254,7 +305,8 @@ def main():
     identity = SupabaseIdentity(config["supabase_url"], config["public_key"],
                                 config["owner_email"], config["owner_id"])
     https_origin(config["origin"])
-    if args.access_report:
+    report_path = args.access_report or (Path(config['startup_access_report']) if config.get('startup_access_report') else None)
+    if report_path:
         result = {"archive_readable": False, "archive_read_only": True, "private_paths_denied": True}
         for root in archive.roots:
             for path in root.glob("*.json"):
@@ -276,10 +328,26 @@ def main():
                 result["private_paths_denied"] = False
             except PermissionError:
                 pass
-        args.access_report.write_text(json.dumps(result), encoding="utf-8")
+        # When figures have been collected, verify their inherited archive access
+        # under the dedicated reader identity as part of release upgrades.
+        result['images_readable'] = True
+        for manifest in archive.roots[0].glob('*.images.json'):
+            pmid = manifest.name.split('.')[0]
+            if not PMID.fullmatch(pmid): continue
+            try:
+                article = archive.read(pmid)
+                figure = next((f for f in article['figures'] if f['status']=='ready'),None)
+                if not figure: continue
+                archive.image(pmid,figure['asset_id'])
+                break
+            except ViewerError:
+                result['images_readable'] = False
+                break
+        report_path.write_text(json.dumps(result), encoding="utf-8")
         if not all(result.values()):
             raise SystemExit(1)
-        return
+        if args.access_report:
+            return
     if args.check:
         print("Viewer configuration valid")
         return

@@ -66,7 +66,7 @@ def main():
         from institution_worker import Service
         service = Service(state)
         service.status("running")
-        for phase in ("collect", "summarize"):
+        for phase in ("collect", "summarize", "figures"):
             output = (state / (phase + ".log")).open("a", encoding="utf-8", buffering=1)
             logs.append(output)
             output.write(f"\n{datetime.now(timezone.utc).isoformat()} {phase} started\n")

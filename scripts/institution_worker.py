@@ -7,12 +7,14 @@ import json
 import os
 from pathlib import Path
 import re
+import queue
 import secrets
 import sqlite3
 import ssl
 import subprocess
 import sys
 import time
+import threading
 import uuid
 from difflib import SequenceMatcher
 from urllib.error import HTTPError, URLError
@@ -130,27 +132,59 @@ class Service:
 
 
 class Browser:
-    def __init__(self, node, directory):
+    def __init__(self, node, directory, profile="browser-profile"):
         self.process = subprocess.Popen([str(node), str(Path(__file__).with_name("browser_fulltext.cjs"))],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-            text=True, encoding="utf-8", env={**os.environ, "URO_BROWSER_PROFILE": str(directory / "browser-profile")},
+            text=True, encoding="utf-8", env={**os.environ, "URO_BROWSER_PROFILE": str(directory / profile)},
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        self.responses = queue.Queue()
+        def receive():
+            try:
+                for line in self.process.stdout:
+                    self.responses.put(line)
+            except (OSError,ValueError):
+                pass
+            finally:
+                self.responses.put(None)
+        self.reader = threading.Thread(target=receive,daemon=True)
+        self.reader.start()
+
+    def response(self, budget_ms):
+        try:
+            line = self.responses.get(timeout=budget_ms/1000 + 15)
+        except queue.Empty:
+            self.kill()
+            raise TimeoutError('Browser response time limit exceeded') from None
+        if not line:
+            raise OSError('Browser stopped before returning a response')
+        return json.loads(line)
+
+    def kill(self):
+        if self.process.poll() is not None: return
+        if os.name == 'nt':
+            subprocess.run(['taskkill.exe','/PID',str(self.process.pid),'/T','/F'],
+                stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=False)
+        else:
+            self.process.kill()
+        self.process.wait(timeout=10)
 
     def read(self, paper, budget_ms=240000):
         self.process.stdin.write(json.dumps({"pmid":paper["pmid"], "doi":paper["doi"], "budget_ms":budget_ms}) + "\n")
         self.process.stdin.flush()
-        line = self.process.stdout.readline()
-        if not line:
-            raise RuntimeError("Browser stopped before returning an article")
-        return json.loads(line)
+        return self.response(budget_ms)
 
     def close(self):
-        self.process.stdin.close()
+        try: self.process.stdin.close()
+        except (OSError,ValueError): pass
         try:
             self.process.wait(timeout=15)
         except subprocess.TimeoutExpired:
-            self.process.terminate()
-            self.process.wait(timeout=10)
+            self.kill()
+
+    def image(self, url, budget_ms=20000):
+        self.process.stdin.write(json.dumps({"operation":"image","url":url,"budget_ms":budget_ms}) + "\n")
+        self.process.stdin.flush()
+        return self.response(budget_ms)
 
 
 def parsed_result(paper, result):
@@ -305,8 +339,13 @@ def run(directory, node, seconds, phase="all"):
                                 raise ValueError("Incomplete OA body")
                             (spool/(pmid+".xml")).write_bytes(content)
                         except (FulltextUnavailable,HTTPError,URLError,TimeoutError,ValueError,IncompleteRead,ConnectionError,ssl.SSLError):
+                            if browser is not None and browser.process.poll() is not None:
+                                browser.close();browser=None
                             if browser is None: browser=Browser(node,directory)
-                            result=browser.read(paper,budget_ms=max(1000,min(240000,int((deadline-time.monotonic())*1000))))
+                            try:
+                                result=browser.read(paper,budget_ms=max(1000,min(240000,int((deadline-time.monotonic())*1000))))
+                            except OSError:
+                                result={'status':'retryable_error','reason':'browser_response_unavailable'}
                             document=parsed_result(paper,result)
                     if document is None:
                         status = result.get("status") if result.get("status") in STATES else "parse_failed"
@@ -372,7 +411,7 @@ def main():
     parser.add_argument("--node", type=Path)
     parser.add_argument("--enroll", action="store_true")
     parser.add_argument("--max-seconds", type=int, default=3300)
-    parser.add_argument("--phase",choices=["all","collect","summarize"],default="all")
+    parser.add_argument("--phase",choices=["all","collect","summarize","figures"],default="all")
     args = parser.parse_args()
     if args.enroll:
         print(json.dumps(enroll(args.state_dir)))
@@ -380,7 +419,11 @@ def main():
     if not args.node or not 60 <= args.max_seconds <= 3600:
         parser.error("A Node executable and 60..3600 second runtime are required")
     try:
-        run(args.state_dir, args.node, args.max_seconds,args.phase)
+        if args.phase=="figures":
+            from article_images import run_image_queue
+            run_image_queue(args.state_dir,args.node,args.max_seconds)
+        else:
+            run(args.state_dir, args.node, args.max_seconds,args.phase)
     except Exception as error:
         reason = str(error)[:160] if isinstance(error, RuntimeError) else type(error).__name__
         print(f"Institution worker failed: {reason}; pending documents are preserved", flush=True)
