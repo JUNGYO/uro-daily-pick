@@ -228,7 +228,7 @@ class ErrorBoundary extends Component {
 
 export default function App() {
   return (
-    <BrowserRouter basename={import.meta.env.BASE_URL.replace(/\/$/, "") || "/"}>
+    <BrowserRouter useTransitions={false} basename={import.meta.env.BASE_URL.replace(/\/$/, "") || "/"}>
       <ErrorBoundary>
         <AuthProvider>
           <Suspense fallback={<Loading />}>

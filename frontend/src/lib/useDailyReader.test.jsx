@@ -48,6 +48,7 @@ test("a save accepted during automatic reading waits and stays with its original
     initialProps: { pmid: "1" },
   });
   await waitFor(() => expect(releaseReading).toBeTypeOf("function"));
+  expect(result.current.busy).toBe(false);
   let saving;
   act(() => {
     saving = result.current.change({ saved: true }, "saved");

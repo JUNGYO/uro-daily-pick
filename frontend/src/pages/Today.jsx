@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import {
   Bookmark,
@@ -114,7 +114,7 @@ export default function Today() {
       focusList.current = false;
     }
   }, [p?.pmid, active]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     function keydown(e) {
       if (e.key === "Escape" && mobile && active) {
         e.preventDefault();
