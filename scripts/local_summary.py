@@ -12,7 +12,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, build_opener, ProxyHandler
 
 from fulltext import NoRedirect
-from evidence import source_blocks, numbered_source, validate_evidence, validate_metadata, DETAIL_FIELDS, BASE_FIELDS
+from evidence import source_blocks, numbered_source, validate_evidence, validate_metadata, numeric_values, DETAIL_FIELDS, BASE_FIELDS
 from summarize_papers import PROMPT, validate_summary
 
 MODEL = "nvidia/Qwen3.8-27B-NVFP4"
@@ -167,14 +167,8 @@ def generate_summary(paper, document, deadline=None, cache_path=None):
             if any(not re.search(r"[가-힣]",line) for line in summary["summary_ko"].splitlines()):
                 raise ValueError("Korean summary required")
             # A result may not introduce an unsupported number into the public summary.
-            normalized_body=re.sub(r"(?<=\d),(?=\d)","",body)
-            for number,word in enumerate(['zero','one','two','three','four','five','six','seven','eight','nine','ten',
-                    'eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen','twenty']):
-                normalized_body=re.sub(r'\b'+word+r'\b',str(number),normalized_body,flags=re.I)
             output=json.dumps({key:summary[key] for key in ['summary_ko','structured_data','qa_data']},ensure_ascii=False)
-            number_pattern=r"(?<![\d.])\d+(?:\.\d+)?(?![\d.])"
-            numbers=set(re.findall(number_pattern,re.sub(r"(?<=\d),(?=\d)","",output)))
-            if not numbers.issubset(set(re.findall(number_pattern,normalized_body))):
+            if not numeric_values(output).issubset(numeric_values(body, source=True)):
                 raise ValueError("Unsupported summary number")
             return {**summary,**support,"summary_model":MODEL_LABEL,
                 "summary_source_hash":hashlib.sha256(("fulltext\n"+paper["title"]+"\n"+body).encode()).hexdigest()}
