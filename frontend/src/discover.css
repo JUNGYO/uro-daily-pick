@@ -1,0 +1,111 @@
+.discover-search {
+  margin: 24px 0;
+  padding: 20px;
+  border: 1px solid #d6dfe8;
+  border-radius: 10px;
+  background: #fff;
+}
+.discover-primary-fields,
+.discover-advanced-fields {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+}
+.discover-search label,
+.discover-journal {
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  min-width: 0;
+}
+.discover-search input,
+.discover-search select {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+.discover-dates {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+.discover-dates legend {
+  font-size: 14px;
+  margin-bottom: 6px;
+}
+.discover-dates > div {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 18px;
+}
+.discover-dates label {
+  font-size: 13px;
+  color: #536173;
+}
+.discover-dates p {
+  margin: 6px 0 0;
+}
+.discover-search .reader-actions {
+  margin-bottom: 0;
+}
+.discover-search [role="alert"] {
+  color: #9c2511;
+}
+.discover-search details {
+  border-top: 1px solid #d6dfe8;
+  margin-bottom: 0;
+}
+.discover-journal {
+  position: relative;
+}
+.discover-journal-options {
+  position: absolute;
+  top: 76px;
+  left: 0;
+  right: 0;
+  z-index: 20;
+  background: #fff;
+  border: 1px solid #bbc9d6;
+  border-radius: 6px;
+  box-shadow: 0 6px 20px #17314922;
+  max-height: 280px;
+  overflow-y: auto;
+}
+.discover-journal-options p {
+  font-size: 14px;
+  padding: 8px 12px;
+}
+.discover-journal-options ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.discover-journal-options li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 44px;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-size: 14px;
+  overflow-wrap: anywhere;
+}
+.discover-journal-options li:hover,
+.discover-journal-options li[aria-selected="true"] {
+  background: #eaf2fb;
+}
+@media (max-width: 640px) {
+  .discover-search {
+    padding: 16px;
+  }
+  .discover-primary-fields,
+  .discover-advanced-fields {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+@media (max-width: 380px) {
+  .discover-dates > div {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 10px;
+  }
+}
