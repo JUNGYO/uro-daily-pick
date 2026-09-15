@@ -67,6 +67,9 @@ it("keeps device-only identity through INITIAL_SESSION and clears it on sign out
     expect(screen.getByText("Device reader")).toBeVisible();
     await act(async () => mock.listener("SIGNED_OUT", null));
     expect(await screen.findByText("Signed out")).toBeVisible();
+    expect(localStorage.getItem("uro-offline:offline-reader")).toBeNull();
+    expect(localStorage.getItem("uro-profile:offline-reader")).toBeNull();
+    expect(localStorage.getItem("uro-offline-active")).toBeNull();
   } finally {
     cleanup();
     online.mockRestore();
