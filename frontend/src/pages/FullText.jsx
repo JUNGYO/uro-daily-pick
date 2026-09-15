@@ -1,5 +1,6 @@
+import { safeReturn } from "../lib/workspace";
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { readOriginal } from "../lib/fulltext";
 import ArticleFigure from "../components/ArticleFigure";
@@ -7,6 +8,9 @@ import { ErrorNotice, Loading } from "../components/Status";
 
 export default function FullText() {
   const { pmid } = useParams();
+  const location = useLocation();
+  const expectedHash = new URLSearchParams(location.search).get("source");
+  const [locatorError, setLocatorError] = useState("");
   const { user } = useAuth();
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
@@ -45,14 +49,41 @@ export default function FullText() {
   }, [pmid, user.id, retry]);
   // Clear previous content immediately on a route or authenticated identity change.
   const article = result?.userId === user.id && result?.pmid === pmid ? result.article : null;
+  useEffect(() => {
+    setLocatorError("");
+    if (!article || !location.hash) return;
+    if (expectedHash && article.content_hash !== expectedHash) {
+      setLocatorError("요약 생성 이후 원문이 변경됐습니다. 이전 근거 위치로 이동하지 않았습니다.");
+      return;
+    }
+    const id = location.hash.slice(1);
+    if (!/^(p|table|figure)-[0-9]{7}$/.test(id)) return;
+    setTab("body");
+    const frame = requestAnimationFrame(() => {
+      const target = document.getElementById(id);
+      if (target) {
+        target.scrollIntoView({ block: "center" });
+        target.focus({ preventScroll: true });
+      } else setLocatorError("해당 근거 위치를 확인하지 못했습니다. 원문 전체에서 확인해 주세요.");
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [article, location.hash, expectedHash]);
   return (
     <div className="h-full overflow-y-auto">
       <div className="page-shell max-w-4xl">
-        <Link to="/" className="text-accent underline text-sm">
-          Daily Pick으로 돌아가기
+        <Link
+          to={safeReturn(location.state?.returnTo || "/papers/" + pmid)}
+          className="text-accent underline text-sm"
+        >
+          논문 상세로 돌아가기
         </Link>
         <h1 className="page-title mt-5 break-words">{article?.title || "원문 보기"}</h1>
         <p className="help-text mt-3 mb-5">PMID {pmid}</p>
+        {locatorError && (
+          <p role="status" className="reader-notice">
+            {locatorError}
+          </p>
+        )}
         {error ? (
           <ErrorNotice message={error} onRetry={() => setRetry((n) => n + 1)} />
         ) : !article ? (
@@ -131,7 +162,45 @@ export default function FullText() {
                 className="panel whitespace-pre-wrap break-words leading-[1.85]"
                 style={{ fontSize, overflowWrap: "anywhere" }}
               >
-                {article.content_text}
+                {article.blocks?.length
+                  ? article.blocks.map((block) => (
+                      <p
+                        key={block.id}
+                        id={block.id}
+                        tabIndex={-1}
+                        className={
+                          location.hash === "#" + block.id &&
+                          (!expectedHash || article.content_hash === expectedHash)
+                            ? "reader-evidence"
+                            : "mb-4"
+                        }
+                      >
+                        {block.text}
+                        {block.id.startsWith("figure-") &&
+                          (() => {
+                            const number = block.text.match(/^\s*Fig(?:ure)?[.]?\s+(\d+)/i)?.[1];
+                            const figure = article.figures.find(
+                              (f) => f.label.match(/Fig(?:ure)?[.]?\s*(\d+)/i)?.[1] === number,
+                            );
+                            return number && figure ? (
+                              <button
+                                className="btn-secondary block mt-3"
+                                onClick={() => {
+                                  setTab("figures");
+                                  requestAnimationFrame(() => {
+                                    const target = document.getElementById("figure-view-" + figure.key);
+                                    target?.scrollIntoView({ block: "center" });
+                                    target?.focus({ preventScroll: true });
+                                  });
+                                }}
+                              >
+                                이 그림 보기
+                              </button>
+                            ) : null;
+                          })()}
+                      </p>
+                    ))
+                  : article.content_text}
               </article>
             </div>
             <div id="figures-panel" role="tabpanel" aria-labelledby="figures-tab" hidden={tab !== "figures"}>

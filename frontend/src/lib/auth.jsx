@@ -14,9 +14,15 @@ export function AuthProvider({ children }) {
   const [revision, setRevision] = useState(0);
   const currentUser = useRef(null);
   const profileRequest = useRef(0);
+  useEffect(() => {
+    const reconnect = () => setRevision((n) => n + 1);
+    window.addEventListener("online", reconnect);
+    return () => window.removeEventListener("online", reconnect);
+  }, []);
 
   useEffect(() => {
     let disposed = false,
+      offlineMode = false,
       authEvents = 0;
     setAuthLoading(true);
     const apply = (session) => {
@@ -29,9 +35,24 @@ export function AuthProvider({ children }) {
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (offlineMode && _event !== "SIGNED_OUT") return;
       authEvents += 1;
       apply(session);
     });
+    // Offline identity only opens device summaries. It is never an API credential.
+    try {
+      const uid = localStorage.getItem("uro-offline-active");
+      if (!navigator.onLine && uid && JSON.parse(localStorage.getItem("uro-offline:" + uid) || "[]").length) {
+        offlineMode = true;
+        apply({ user: { id: uid, offline: true } });
+        return () => {
+          disposed = true;
+          subscription.unsubscribe();
+        };
+      }
+    } catch {
+      /* Continue to login when device storage is unavailable. */
+    }
     withTimeout(supabase.auth.getSession())
       .then(({ data, error }) => {
         if (error) throw error;
@@ -51,7 +72,21 @@ export function AuthProvider({ children }) {
 
   const loadProfile = useCallback(async (uid) => {
     const request = ++profileRequest.current;
-    const data = await withTimeout(checked(supabase.from("profiles").select("*").eq("id", uid).single()));
+    let data;
+    if (!navigator.onLine && localStorage.getItem("uro-offline:" + uid)) {
+      data = JSON.parse(localStorage.getItem("uro-profile:" + uid) || "null");
+    } else {
+      data = await withTimeout(checked(supabase.from("profiles").select("*").eq("id", uid).single()));
+      try {
+        if (data)
+          localStorage.setItem(
+            "uro-profile:" + uid,
+            JSON.stringify({ id: data.id, name: data.name, onboarding_done: data.onboarding_done }),
+          );
+      } catch {
+        /* Storage limits must not break a valid login. */
+      }
+    }
     if (!data) throw new Error("Profile is unavailable.");
     if (currentUser.current === uid && request === profileRequest.current) setProfile(data);
     return data;

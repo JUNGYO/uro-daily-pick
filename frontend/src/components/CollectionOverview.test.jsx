@@ -18,7 +18,7 @@ it("separates citation records from acquisition and summarizes only acquired ori
     "4 / 9편",
   );
   expect(screen.getByText("원문 미확보")).toHaveTextContent("91편");
-  expect(screen.getByText("원문 확보 후 요약 대기")).toHaveTextContent("5편");
+  expect(screen.getByText("원문 확보·요약 미제공")).toHaveTextContent("5편");
   expect(document.body).not.toHaveTextContent(/Qwen|Spark|Z8|전체 목록|1866|메타데이터/);
 });
 
@@ -40,7 +40,7 @@ it("reports capacity pause separately from processing health and hides machine n
       />
     </>,
   );
-  expect(screen.getByRole("meter", { name: "문헌 정보 저장공간 사용률" })).toHaveAttribute(
+  expect(screen.getByRole("meter", { name: "서비스 DB 사용량 사용률" })).toHaveAttribute(
     "aria-valuenow",
     "100",
   );

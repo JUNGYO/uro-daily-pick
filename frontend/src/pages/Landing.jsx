@@ -29,7 +29,7 @@ export default function Landing() {
             onClick={() => navigate("/login")}
             className="h-12 px-8 bg-accent text-white rounded-xl text-[0.889rem] font-semibold hover:bg-[#0066D6] transition-colors"
           >
-            Get Started
+            요약 체험하기
           </button>
           <button
             onClick={() => navigate("/login")}

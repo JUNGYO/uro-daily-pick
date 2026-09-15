@@ -1,25 +1,51 @@
-import { BrowserRouter, Routes, Route, Navigate, NavLink, useNavigate } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate, NavLink, useNavigate, useLocation } from "react-router-dom";
 import { lazy, Suspense, Component, useState } from "react";
 import { AuthProvider, useAuth } from "./lib/auth";
 import { Loading, ErrorNotice } from "./components/Status";
 export { useAuth } from "./lib/auth";
+import "./reader.css";
+import { safeReturn } from "./lib/workspace";
 import { supabase } from "./lib/supabase";
-const DailyPick = lazy(() => import("./pages/DailyPick"));
-const Collections = lazy(() => import("./pages/Collections"));
-const Settings = lazy(() => import("./pages/Settings"));
-const Login = lazy(() => import("./pages/Login"));
-const Onboarding = lazy(() => import("./pages/Onboarding"));
-const ResetPassword = lazy(() => import("./pages/ResetPassword"));
-const Landing = lazy(() => import("./pages/Landing"));
-const Insights = lazy(() => import("./pages/Insights"));
-const Admin = lazy(() => import("./pages/Admin"));
-const Privacy = lazy(() => import("./pages/Privacy"));
-const FullText = lazy(() => import("./pages/FullText"));
+function resilientLazy(load) {
+  return lazy(() =>
+    load().catch((error) => {
+      const key = "uro-chunk-retry";
+      const previous = Number(sessionStorage.getItem(key) || 0);
+      if (
+        /dynamically imported|Loading chunk|module script/i.test(error.message) &&
+        Date.now() - previous > 60000 &&
+        navigator.onLine
+      ) {
+        sessionStorage.setItem(key, String(Date.now()));
+        window.location.reload();
+        return new Promise(() => {});
+      }
+      throw error;
+    }),
+  );
+}
+const DailyPick = resilientLazy(() => import("./pages/Today"));
+const Discover = resilientLazy(() => import("./pages/Discover"));
+const Paper = resilientLazy(() => import("./pages/Paper"));
+const Compare = resilientLazy(() => import("./pages/Compare"));
+const Library = resilientLazy(() => import("./pages/Library"));
+const Preview = resilientLazy(() => import("./pages/Preview"));
+const Collections = resilientLazy(() => import("./pages/Projects"));
+const Settings = resilientLazy(() => import("./pages/Settings"));
+const Login = resilientLazy(() => import("./pages/Login"));
+const Onboarding = resilientLazy(() => import("./pages/Onboarding"));
+const ResetPassword = resilientLazy(() => import("./pages/ResetPassword"));
+const Landing = resilientLazy(() => import("./pages/Landing"));
+const Insights = resilientLazy(() => import("./pages/Insights"));
+const Admin = resilientLazy(() => import("./pages/Admin"));
+const Privacy = resilientLazy(() => import("./pages/Privacy"));
+const FullText = resilientLazy(() => import("./pages/FullText"));
 import { Newspaper, FolderOpen, Settings as SettingsIcon, LogOut, Network, BarChart3 } from "lucide-react";
 
 const ADMIN_EMAILS = ["crazyslime@gmail.com"];
 
 function ProtectedRoute({ children, onboarding = false }) {
+  const location = useLocation();
   const { user, profile, loading, error, retry } = useAuth();
   if (loading) return <Loading text="Preparing your workspace…" />;
   if (error)
@@ -28,10 +54,17 @@ function ProtectedRoute({ children, onboarding = false }) {
         <ErrorNotice message={error} onRetry={retry} />
       </div>
     );
-  if (!user) return <Navigate to="/welcome" replace />;
+  if (!user)
+    return <Navigate to={"/login?next=" + encodeURIComponent(location.pathname + location.search)} replace />;
+  if (user.offline && (!location.pathname.startsWith("/papers/") && !(location.pathname === "/library" && location.search.includes("tab=offline"))))
+    return <Navigate to="/library?tab=offline" replace />;
   if (!profile) return <ErrorNotice message="Your profile is unavailable." onRetry={retry} />;
-  if (!onboarding && !profile.onboarding_done) return <Navigate to="/onboarding" replace />;
-  if (onboarding && profile.onboarding_done) return <Navigate to="/" replace />;
+  if (!onboarding && !profile.onboarding_done)
+    return (
+      <Navigate to={"/onboarding?next=" + encodeURIComponent(location.pathname + location.search)} replace />
+    );
+  if (onboarding && profile.onboarding_done)
+    return <Navigate to={safeReturn(new URLSearchParams(location.search).get("next"))} replace />;
   return children;
 }
 
@@ -45,6 +78,9 @@ function Layout({ children }) {
     setLoggingOut(true);
     try {
       const { error } = await supabase.auth.signOut();
+      localStorage.removeItem("uro-offline:" + user.id);
+      localStorage.removeItem("uro-profile:" + user.id);
+      localStorage.removeItem("uro-offline-active");
       if (error) throw error;
       navigate("/login", { replace: true });
     } catch {
@@ -56,11 +92,11 @@ function Layout({ children }) {
 
   const isAdmin = ADMIN_EMAILS.includes(user?.email?.trim().toLowerCase());
   const links = [
-    { to: "/", icon: Newspaper, label: "Daily Pick" },
-    { to: "/insights", icon: Network, label: "Insights" },
-    { to: "/collections", icon: FolderOpen, label: "Collections" },
-    { to: "/settings", icon: SettingsIcon, label: "Settings" },
-    ...(isAdmin ? [{ to: "/admin", icon: BarChart3, label: "Admin" }] : []),
+    { to: "/", icon: Newspaper, label: "오늘 읽기" },
+    { to: "/discover", icon: Network, label: "문헌 탐색" },
+    { to: "/library", icon: FolderOpen, label: "내 서재" },
+    { to: "/settings", icon: SettingsIcon, label: "내 설정" },
+    ...(isAdmin ? [{ to: "/admin", icon: BarChart3, label: "관리자" }] : []),
   ];
 
   return (
@@ -139,12 +175,12 @@ function Layout({ children }) {
             to={to}
             end={to === "/"}
             className={({ isActive }) =>
-              `flex flex-col items-center justify-center gap-0.5 py-2 px-3 min-w-[64px] transition-colors
+              `flex flex-col items-center justify-center gap-0.5 py-2 px-1 min-w-0 flex-1 transition-colors
                ${isActive ? "text-accent" : "text-text3"}`
             }
           >
             <Icon size={20} />
-            <span className="text-[0.611rem] font-medium">{label}</span>
+            <span className="text-[12px] font-medium">{label}</span>
           </NavLink>
         ))}
       </nav>
@@ -165,12 +201,12 @@ class ErrorBoundary extends Component {
       return (
         <div className="min-h-screen flex items-center justify-center bg-bg">
           <div className="text-center">
-            <p className="text-[1rem] text-text1 mb-2">Something went wrong</p>
+            <p className="text-[1rem] text-text1 mb-2">화면을 불러오지 못했습니다</p>
             <button
               onClick={() => window.location.reload()}
               className="h-10 px-5 bg-accent text-white rounded-lg text-[0.889rem] font-medium"
             >
-              Reload
+              다시 불러오기
             </button>
           </div>
         </div>
@@ -188,6 +224,7 @@ export default function App() {
           <Suspense fallback={<Loading />}>
             <Routes>
               <Route path="/welcome" element={<Landing />} />
+              <Route path="/preview" element={<Preview />} />
               <Route path="/privacy" element={<Privacy />} />
               <Route path="/login" element={<Login />} />
               <Route
@@ -206,6 +243,10 @@ export default function App() {
                     <Layout>
                       <Routes>
                         <Route path="/" element={<DailyPick />} />
+                        <Route path="/discover" element={<Discover />} />
+                        <Route path="/papers/:pmid" element={<Paper />} />
+                        <Route path="/compare" element={<Compare />} />
+                        <Route path="/library" element={<Library />} />
                         <Route path="/insights" element={<Insights />} />
                         <Route path="/collections" element={<Collections />} />
                         <Route path="/settings" element={<Settings />} />

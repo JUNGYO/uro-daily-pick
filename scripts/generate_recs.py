@@ -66,7 +66,7 @@ def get_catalog_papers():
     # Import time is not publication freshness. Backfilled bodies must become
     # candidates, while unready papers still supply existing feedback signals.
     papers = paginate(lambda path, params: sb("GET", path, params=params), "papers", {
-        "select": "id,pmid,title,abstract,authors,journal,pub_date,mesh_terms,keywords,paper_type,study_type,fulltext_available,summary_basis,summary_ko,summary_source_hash,summary_model,summarized_at",
+        "select": "id,pmid,title,abstract,authors,journal,pub_date,mesh_terms,keywords,paper_type,study_type,summary_review_required,integrity_status,fulltext_available,summary_basis,summary_ko,summary_source_hash,summary_model,summarized_at",
         "order": "pub_date.desc,id",
         "fulltext_available": "eq.true",
         "pub_date": "gte."+AUTOMATIC_START_DATE,
@@ -352,7 +352,7 @@ def main():
         skip_types = {"letter", "comment", "erratum", "editorial"}
         scored = []
         for paper in papers:
-            if not automatic_paper(paper) or not has_fulltext_summary(paper):
+            if paper.get("integrity_status")=="retracted" or paper.get("summary_review_required") or not automatic_paper(paper) or not has_fulltext_summary(paper):
                 continue
             if paper["id"] in seen_ids:
                 continue

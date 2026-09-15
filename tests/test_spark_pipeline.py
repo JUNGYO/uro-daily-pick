@@ -81,8 +81,9 @@ class SparkPipelineTests(unittest.TestCase):
                 with self.assertRaises(spark.SummaryBudgetExpired):
                     spark.generate_summary(paper,document,cache_path=cache)
             self.assertEqual(json.loads(cache.read_text())["notes"],["Previously extracted facts."])
-            with patch.object(spark,"chat",return_value="Source facts.") as chat, \
-                 patch.object(spark,"validate_summary",return_value=derived(paper,document)):
+            with patch.object(spark,"chat",return_value="{}") as chat, \
+                 patch.object(spark,"validate_summary",return_value=derived(paper,document)), \
+                 patch.object(spark,"validate_evidence",return_value={}):
                 result=spark.generate_summary(paper,document,cache_path=cache)
             self.assertEqual(chat.call_count,chunks)  # remaining chunks plus final summary
             self.assertEqual(result["summary_source_hash"],derived(paper,document)["summary_source_hash"])

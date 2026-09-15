@@ -19,7 +19,9 @@ def main():
         response.raise_for_status()
         paths = response.json().get("paths", {})
         required = ["/rpc/set_paper_feedback", "/rpc/delete_own_account", "/rpc/replace_daily_recommendations",
-                    "/rpc/fulltext_queue_status", "/rpc/publish_institution_summary", "/rpc/catalog_backfill_status", "/email_deliveries"]
+                    "/rpc/fulltext_queue_status", "/rpc/publish_institution_summary", "/rpc/catalog_backfill_status", "/email_deliveries",
+                    "/rpc/search_papers", "/rpc/reader_paper", "/rpc/reader_daily", "/rpc/update_reader_state", "/rpc/preview_papers",
+                    "/rpc/search_notifications", "/rpc/project_papers", "/rpc/project_members", "/rpc/admin_integrity_review", "/rpc/admin_summary_issues"]
         missing = [path for path in required if path not in paths]
         if missing:
             raise SystemExit("Missing database contracts: " + ", ".join(missing))

@@ -53,7 +53,7 @@ export default function ArticleFigure({ figure, pmid, userId }) {
   const url = result?.userId === userId && result?.assetId === figure.asset_id ? result.url : null;
   const preview = figure.content_type !== "image/tiff";
   return (
-    <figure ref={box} className="panel mb-5 min-w-0">
+    <figure ref={box} id={"figure-view-" + figure.key} tabIndex={-1} className="panel mb-5 min-w-0">
       <figcaption className="mb-3">
         <h3 className="font-semibold text-text1">{figure.label || "그림"}</h3>
         <p className="text-sm text-text2 mt-2 leading-relaxed break-words">{figure.caption}</p>

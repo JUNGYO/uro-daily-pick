@@ -22,6 +22,7 @@ from urllib.parse import urlencode, urlsplit, urlunsplit
 from urllib.request import Request, build_opener, HTTPSHandler
 
 from fulltext import FulltextUnavailable, NoRedirect, fetch_oa, parse_document
+from evidence import validate_metadata
 from local_summary import MODEL_LABEL, SummaryBudgetExpired, ensure_server, generate_summary, summary_payload
 from catalog_policy import AUTOMATIC_START_DATE
 
@@ -112,8 +113,10 @@ class Service:
         if name=="publish_institution_summary":
             if (set(values)!={"p_pmid","p_doi","p_title","p_source","p_summary"}
                     or set(values["p_source"])!={"content_hash","characters","section_count","source_url"}
-                    or set(values["p_summary"])!={"summary_ko","structured_data","clinical_relevance","qa_data","summary_model","summary_source_hash"}):
+                    or set(values["p_summary"]) not in ({"summary_ko","structured_data","clinical_relevance","qa_data","summary_model","summary_source_hash"},{"summary_ko","structured_data","clinical_relevance","qa_data","summary_model","summary_source_hash","evidence","research_details"})):
                 raise ValueError("Only derived summary fields may be published")
+        if name=="publish_institution_summary" and "evidence" in values["p_summary"]:
+            validate_metadata(values["p_summary"]["evidence"],values["p_summary"].get("research_details"))
         return self.request("rpc/" + name, {"p_worker_id": self.config["id"], "p_token": self.token, **values})
 
     def status(self, state, pmid=None, status=None):

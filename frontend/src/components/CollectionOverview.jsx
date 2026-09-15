@@ -78,13 +78,13 @@ export default function CollectionOverview({ catalog }) {
           원문 미확보 <strong className="text-text1">{count(difference(metadata, originals))}편</strong>
         </span>
         <span>
-          원문 확보 후 요약 대기{" "}
+          원문 확보·요약 미제공{" "}
           <strong className="text-text1">{count(difference(originals, summaries))}편</strong>
         </span>
       </div>
       <div className="border-t border-border pt-4">
         <div className="flex flex-wrap items-center justify-between gap-2">
-          <h3 className="text-sm font-medium text-text1">문헌 정보 저장공간</h3>
+          <h3 className="text-sm font-medium text-text1">서비스 DB 사용량</h3>
           <span className="text-xs text-text2">
             {storageKnown
               ? (used / 1048576).toFixed(1) + " / " + (budget / 1048576).toFixed(0) + " MiB"
@@ -94,12 +94,12 @@ export default function CollectionOverview({ catalog }) {
         {storageKnown && (
           <div
             role="meter"
-            aria-label="문헌 정보 저장공간 사용률"
+            aria-label="서비스 DB 사용량 사용률"
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={Math.min(100, (100 * used) / budget)}
             aria-valuetext={
-              (used / 1048576).toFixed(1) + " MiB 사용, 운영 한도 " + (budget / 1048576).toFixed(0) + " MiB"
+              (used / 1048576).toFixed(1) + " MiB 사용, 신규 등록 중단 기준 " + (budget / 1048576).toFixed(0) + " MiB"
             }
             className="h-2 bg-hover rounded-full overflow-hidden mt-3"
           >
@@ -113,10 +113,11 @@ export default function CollectionOverview({ catalog }) {
           {paused
             ? "새 문헌 정보 등록이 일시 중지되었습니다. 저장공간 확보가 필요합니다."
             : storageKnown
-              ? "운영 한도 내에서 새 문헌 정보를 등록합니다."
+              ? "새 문헌 정보는 등록 중단 기준에 도달할 때까지 등록합니다."
               : "저장공간 상태를 확인하고 있습니다."}
         </p>
       </div>
+      <p className="text-xs text-text2 mt-3">DB 전체 사용량에는 서지 정보·초록·요약·사용자 데이터와 인덱스가 포함됩니다. 원문·그림은 제외됩니다. 표시 기준은 요금제 용량과 별개인 신규 등록 중단 기준입니다.</p>
       <details className="mt-4 border-t border-border pt-3 text-sm text-text2">
         <summary className="cursor-pointer min-h-10 flex items-center">기존 문헌 정보 보관 현황</summary>
         <dl className="grid grid-cols-2 gap-2 pb-2">

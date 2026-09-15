@@ -4,6 +4,10 @@ Uses the existing Supabase login, never a supplied email or a worker credential.
 Run with a dedicated OS identity that can read only the article archive and this
 release. There are no file uploads, directory listings, or general proxy routes.
 """
+import sys
+from pathlib import Path
+sys.path.insert(0,str(Path(__file__).resolve().parent))
+from evidence import source_blocks
 import argparse
 from collections import deque
 import hashlib
@@ -111,7 +115,7 @@ class Archive:
                 # Return plain text only. Never return publisher HTML or local paths.
                 return {"pmid": pmid, "title": str(paper.get("title") or "Article " + pmid)[:2000],
                         "doi": str(paper.get("doi") or "")[:500], "content_text": text,
-                        "content_hash": doc["content_hash"], "format": "extracted_text",
+                        "content_hash": doc["content_hash"], "format": "extracted_text", "blocks": source_blocks(text),
                         **self.figures(pmid,doc['content_hash'])}
             except (OSError, ValueError, TypeError, KeyError):
                 found_invalid = True
