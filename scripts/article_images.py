@@ -266,9 +266,9 @@ def collect_images(directory, pmid, record, browser=None, deadline=None):
         if package: package.close()
 
 
-def run_image_queue(directory, node, seconds):
+def run_image_queue(directory, node, seconds, requested_pmid=None):
     import msvcrt
-    from institution_worker import Browser
+    from institution_worker import Browser, Service
     directory=Path(directory)
     lock=(directory/'figures.lock').open('a+b')
     if not lock.tell(): lock.write(b'0');lock.flush()
@@ -279,10 +279,16 @@ def run_image_queue(directory, node, seconds):
     browser=None
     attempted=set()
     try:
-        for root in (directory/'documents',directory/'cloud-archive'):
+        roots=(directory/'documents',directory/'cloud-archive')
+        local_pmids=sorted({path.stem for root in roots for path in root.glob('*.json') if path.stem.isdigit()})
+        # Legacy local archives have no publication date. Resolve scope against
+        # the citation catalog before opening a document or a publisher browser.
+        allowed={requested_pmid} if requested_pmid else Service(directory).automatic_figure_pmids(local_pmids)
+        print(f'Figure queue: {len(allowed)} eligible local papers',flush=True)
+        for root in roots:
             for path in sorted(root.glob('*.json'),key=lambda p:p.stat().st_mtime,reverse=True):
                 if time.monotonic()>=deadline: return
-                if not path.stem.isdigit() or path.stem in attempted: continue
+                if path.stem not in allowed or path.stem in attempted: continue
                 attempted.add(path.stem)
                 try:
                     record=json.loads(path.read_text(encoding='utf-8'))

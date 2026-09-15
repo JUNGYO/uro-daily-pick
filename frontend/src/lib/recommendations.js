@@ -2,6 +2,7 @@ import { supabase } from "./supabase";
 import { checked, kstDate, normalizeRec, stringList, withTimeout, allRows } from "./data";
 import { keywordMatches, paperMatchesKeyword } from "./keywords";
 import { hasFulltextSummary } from "./summary";
+import { AUTOMATIC_START_DATE, automaticPaper, recentPaper } from "./catalogPolicy";
 
 export async function getDailyPicks(userId, day) {
   const stored = await withTimeout(
@@ -15,7 +16,9 @@ export async function getDailyPicks(userId, day) {
     ),
   );
   const historical = day !== kstDate();
-  const valid = (stored || []).filter((rec) => rec.paper && (historical || hasFulltextSummary(rec.paper)));
+  const valid = (stored || []).filter(
+    (rec) => rec.paper && (historical || (automaticPaper(rec.paper) && hasFulltextSummary(rec.paper))),
+  );
   if (historical || valid.length >= 5) {
     const feedback = valid.length
       ? await checked(
@@ -48,6 +51,7 @@ export async function getDailyPicks(userId, day) {
           .select("*")
           .eq("fulltext_available", true)
           .eq("summary_basis", "fulltext")
+          .gte("pub_date", AUTOMATIC_START_DATE)
           .order("pub_date", { ascending: false })
           .order("id"),
       ),
@@ -103,6 +107,7 @@ export function rankPapers(papers, profile, seen = new Set(), alerts = []) {
         abstract = (paper.abstract || "").toLowerCase();
       if (
         !hasFulltextSummary(paper) ||
+        !automaticPaper(paper) ||
         seen.has(paper.id) ||
         ["letter", "editorial", "comment", "erratum"].includes(paper.paper_type) ||
         /^(re:|reply to|letter to|erratum|editorial|comment on)/i.test(title)
@@ -146,5 +151,10 @@ export function rankPapers(papers, profile, seen = new Set(), alerts = []) {
       if (Number.isFinite(age)) score += Math.max(0, 1 - Math.max(0, age) / 30);
       return score > 0 ? [{ paper, score, terms, alert: matchedAlert }] : [];
     })
-    .sort((a, b) => b.score - a.score || b.paper.id - a.paper.id);
+    .sort(
+      (a, b) =>
+        Number(recentPaper(b.paper)) - Number(recentPaper(a.paper)) ||
+        b.score - a.score ||
+        b.paper.id - a.paper.id,
+    );
 }

@@ -352,7 +352,12 @@ export const supabase = {
       return {
         data: {
           catalog_papers: 5,
-          qwen_summaries: 5,
+          automatic_papers: 4,
+          originals_acquired: 3,
+          summaries_ready: 2,
+          undated_papers: 0,
+          archived_papers: 1,
+          qwen_summaries: 4,
           awaiting_qwen: 0,
           oldest_publication: "1937-11-01",
           newest_publication: "2026-09-14",

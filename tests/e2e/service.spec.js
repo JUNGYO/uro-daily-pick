@@ -195,11 +195,26 @@ for (const width of [1440, 390]) {
 test("admin remains usable when catalog fails and retries that section", async ({ page }) => {
   await page.goto("admin?scenario=admin-partial-error");
   await expect(page.getByRole("heading", {name:"Admin Dashboard"})).toBeVisible();
-  const catalog = page.getByRole("region", {name:"전체 문헌 수집"});
+  const catalog = page.getByRole("region", {name:"문헌 처리 현황"});
   await expect(catalog.getByRole("alert")).toBeVisible();
-  await expect(page.getByRole("region", {name:"원문 수집 상태"})).toContainText("Z8 원문 등록 5편");
+  await expect(page.getByRole("region", {name:"자동 처리 상태"})).toBeVisible();
   await expect(page.getByText("Total Users", {exact:true})).toBeVisible();
   await catalog.getByRole("button", {name:"다시 시도"}).click();
   await expect(catalog.getByRole("alert")).toHaveCount(0);
-  await expect(catalog).toContainText("전체 목록 5편");
+  await expect(catalog).toContainText("문헌 정보 등록");
+  await expect(catalog).toContainText("본문 요약 완료");
+});
+
+test("mobile admin distinguishes metadata, originals and summaries with accurate progress", async ({ page }) => {
+  await page.setViewportSize({width:390,height:844});
+  await page.goto("admin?scenario=admin");
+  const panel=page.getByRole("region",{name:"문헌 처리 현황"});
+  await expect(panel.getByRole("meter",{name:"등록 문헌 중 원문 확보율"})).toHaveAttribute("aria-valuenow","75");
+  await expect(panel.getByRole("meter",{name:"확보 원문 중 요약 완료율"})).toHaveAttribute("aria-valuetext","2 / 3편");
+  await expect(panel).toContainText("원문 확보 후 요약 대기 1편");
+  await expect(page.getByRole("region",{name:"Admin content"})).not.toContainText(/Z8|Spark|Qwen|전체 목록|1866|메타데이터/);
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+  await page.screenshot({path:"../tmp/admin-mobile-since-2000.png",fullPage:true});
+  await page.setViewportSize({width:1440,height:1000});
+  await page.screenshot({path:"../tmp/admin-desktop-since-2000.png",fullPage:true});
 });

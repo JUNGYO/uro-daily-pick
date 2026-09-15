@@ -23,6 +23,7 @@ from urllib.request import Request, build_opener, HTTPSHandler
 
 from fulltext import FulltextUnavailable, NoRedirect, fetch_oa, parse_document
 from local_summary import MODEL_LABEL, SummaryBudgetExpired, ensure_server, generate_summary, summary_payload
+from catalog_policy import AUTOMATIC_START_DATE
 
 SERVICE_URL = "https://vwdcqzcoovczmtzdyzbc.supabase.co"
 PUBLIC_KEY = "sb_publishable_FwZC-M2lO2nvh3MFbqf6nA_K8jMXNdw"
@@ -101,9 +102,13 @@ class Service:
         raise RuntimeError("Service temporarily unavailable")
 
     def rpc(self, name, **values):
-        allowed={"institution_worker_status","publish_institution_summary","institution_cloud_archive","confirm_local_fulltext_archive"}
+        allowed={"institution_worker_status","publish_institution_summary","institution_cloud_archive","confirm_local_fulltext_archive","register_institution_original"}
         if name not in allowed:
             raise ValueError("Unsupported worker RPC")
+        if name=="register_institution_original" and (
+                set(values)!={"p_pmid","p_doi","p_title","p_source"}
+                or set(values["p_source"])!={"content_hash","summary_source_hash","characters","section_count","source_url"}):
+            raise ValueError("Only acquisition metadata may be published")
         if name=="publish_institution_summary":
             if (set(values)!={"p_pmid","p_doi","p_title","p_source","p_summary"}
                     or set(values["p_source"])!={"content_hash","characters","section_count","source_url"}
@@ -114,11 +119,19 @@ class Service:
     def status(self, state, pmid=None, status=None):
         self.rpc("institution_worker_status", p_state=state, p_pmid=pmid, p_status=status)
 
-    def candidates(self):
+    def register_original(self, paper, document):
+        body=document["content_text"]
+        self.rpc("register_institution_original",p_pmid=str(paper["pmid"]),p_doi=paper.get("doi"),p_title=paper["title"],
+            p_source={"content_hash":document["content_hash"],"characters":len(body),
+                "section_count":len(document["sections"]),"source_url":document["source_url"],
+                "summary_source_hash":hashlib.sha256(("fulltext\n"+paper["title"]+"\n"+body).encode()).hexdigest()})
+
+    def candidates(self, pmid=None):
         rows = []
         last_id = 0
         while True:
-            page = self.request("papers", params={"select":"id,pmid,doi,title,pub_date,paper_type",
+            page = self.request("papers", params={"select":"id,pmid,doi,title,pub_date,paper_type,fulltext_available",
+                **({"pmid":"eq."+pmid} if pmid else {"pub_date":"gte."+AUTOMATIC_START_DATE}),
                 "or":f"(fulltext_available.eq.false,summary_source_hash.is.null,summarized_at.is.null,summary_model.is.null,summary_model.neq.{MODEL_LABEL},structured_data.is.null,qa_data.is.null)", "order":"id.asc",
                 "id":f"gt.{last_id}", "limit":1000})
             rows.extend(page)
@@ -129,6 +142,14 @@ class Service:
             if not isinstance(next_id, int) or next_id <= last_id:
                 raise ValueError("Candidate cursor did not advance")
             last_id = next_id
+
+    def automatic_figure_pmids(self, pmids):
+        allowed=set()
+        for start in range(0,len(pmids),100):
+            rows=self.request('papers',params={'select':'pmid','pub_date':'gte.'+AUTOMATIC_START_DATE,
+                'pmid':'in.('+','.join(pmids[start:start+100])+')','limit':100})
+            allowed.update(str(row['pmid']) for row in rows)
+        return allowed
 
 
 class Browser:
@@ -257,7 +278,7 @@ def archive_legacy_bodies(service, directory, deadline):
     print(f"Legacy archive: {count} bodies moved to Z8 with hashes verified",flush=True)
 
 
-def run(directory, node, seconds, phase="all"):
+def run(directory, node, seconds, phase="all", requested_pmid=None):
     if phase not in ("all","collect","summarize"):
         raise ValueError("Unknown worker phase")
     import msvcrt
@@ -290,7 +311,7 @@ def run(directory, node, seconds, phase="all"):
         if phase!="collect":
             ensure_server(directory)
             archive_legacy_bodies(service,directory,deadline)
-        papers = service.candidates()
+        papers = service.candidates(requested_pmid) if requested_pmid else service.candidates()
         # Finish already acquired bodies before spending time on publisher access.
         cached={path.name.split(".")[0] for folder in (spool,directory/"cloud-archive",directory/"sources")
                 for path in folder.glob("*.json")}
@@ -324,6 +345,7 @@ def run(directory, node, seconds, phase="all"):
                 if phase=="summarize" and document is None:
                     continue
                 if phase=="collect" and document is not None:
+                    if not paper.get("fulltext_available"): service.register_original(paper,document)
                     continue
                 if document is None:
                     cached_source=directory/"sources"/(pmid+".browser.json")
@@ -358,6 +380,7 @@ def run(directory, node, seconds, phase="all"):
                         continue
                     if result: (spool / (pmid + ".html")).write_text(result["html"], encoding="utf-8")
                     save_json(document_path,{"doi":paper["doi"],"title":paper["title"],"document":document})
+                if not paper.get("fulltext_available"): service.register_original(paper,document)
                 if phase=="collect":
                     db.execute("INSERT OR REPLACE INTO collection_attempts VALUES(?,?,?)", (pmid,"ready",0))
                     db.commit()
@@ -412,7 +435,10 @@ def main():
     parser.add_argument("--enroll", action="store_true")
     parser.add_argument("--max-seconds", type=int, default=3300)
     parser.add_argument("--phase",choices=["all","collect","summarize","figures"],default="all")
+    parser.add_argument("--pmid",help="Explicitly requested paper; bypasses the automatic publication cutoff")
     args = parser.parse_args()
+    if args.pmid and not re.fullmatch(r"\d{1,12}",args.pmid):
+        parser.error("PMID must contain 1..12 digits")
     if args.enroll:
         print(json.dumps(enroll(args.state_dir)))
         return
@@ -421,9 +447,9 @@ def main():
     try:
         if args.phase=="figures":
             from article_images import run_image_queue
-            run_image_queue(args.state_dir,args.node,args.max_seconds)
+            run_image_queue(args.state_dir,args.node,args.max_seconds,args.pmid)
         else:
-            run(args.state_dir, args.node, args.max_seconds,args.phase)
+            run(args.state_dir, args.node, args.max_seconds,args.phase,args.pmid)
     except Exception as error:
         reason = str(error)[:160] if isinstance(error, RuntimeError) else type(error).__name__
         print(f"Institution worker failed: {reason}; pending documents are preserved", flush=True)

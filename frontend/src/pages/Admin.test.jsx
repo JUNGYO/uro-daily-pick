@@ -19,7 +19,15 @@ function response(name) {
       name === "admin_stats"
         ? { total_papers: 138225, total_users: 9 }
         : name === "admin_catalog_status"
-          ? { catalog_papers: 138225, qwen_summaries: 427, awaiting_qwen: 137798 }
+          ? {
+              catalog_papers: 138225,
+              automatic_papers: 90000,
+              originals_acquired: 500,
+              summaries_ready: 427,
+              archived_papers: 48225,
+              qwen_summaries: 427,
+              awaiting_qwen: 89573,
+            }
           : name === "admin_fulltext_status"
             ? { local_bodies: 427, ready_summaries: 427, workers: [] }
             : [],
@@ -42,13 +50,13 @@ it("keeps successful panels visible and retries only the failed catalog", async 
   );
   render(<Admin />);
   expect(await screen.findByText("138225")).toBeVisible();
-  const catalog = within(screen.getByRole("region", { name: "전체 문헌 수집" }));
+  const catalog = within(screen.getByRole("region", { name: "문헌 처리 현황" }));
   expect(await catalog.findByRole("alert")).toBeVisible();
-  expect(catalog.queryByText(/전체 목록 0/)).not.toBeInTheDocument();
+  expect(catalog.queryByText(/문헌 정보 등록/)).not.toBeInTheDocument();
   failed = false;
   const count = mock.rpc.mock.calls.length;
   fireEvent.click(catalog.getByRole("button", { name: "다시 시도" }));
-  expect(await catalog.findByText(/전체 목록 138225/)).toBeVisible();
+  expect(await catalog.findByText("90,000")).toBeVisible();
   expect(mock.rpc.mock.calls.length).toBe(count + 1);
   expect(catalog.queryByRole("alert")).not.toBeInTheDocument();
 });
@@ -64,7 +72,7 @@ it("bounds a hanging request while other panels finish and aborts it", async () 
   await act(async () => {
     vi.advanceTimersByTime(15001);
   });
-  expect(within(screen.getByRole("region", { name: "전체 문헌 수집" })).getByRole("alert")).toHaveTextContent(
+  expect(within(screen.getByRole("region", { name: "문헌 처리 현황" })).getByRole("alert")).toHaveTextContent(
     "조회 시간이 초과",
   );
   expect(mock.signals.some((signal) => signal.aborted)).toBe(true);

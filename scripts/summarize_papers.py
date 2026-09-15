@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 import requests
 from common import supabase_headers
 from common import get_json, paginate, patch_fields
+from catalog_policy import AUTOMATIC_START_DATE
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
@@ -151,7 +152,7 @@ def main():
         raise SystemExit("SUMMARY_BATCH_SIZE must be 0..10000 (0 drains queue); SUMMARY_MAX_SECONDS must be 60..3600")
     deadline = time.monotonic() + seconds
     papers = paginate(sb_get, "papers", {"select": "id,pmid,title,abstract,summary_ko,summary_basis,summary_source_hash,summary_model,summarized_at",
-        "order": "fetched_at.desc,id", **({"pmid": f"eq.{pmid}"} if pmid else {})}, size=100)
+        "order": "fetched_at.desc,id", **({"pmid": f"eq.{pmid}"} if pmid else {"pub_date":"gte."+AUTOMATIC_START_DATE})}, size=100)
     if pmid and not papers:
         raise SystemExit("The requested PMID is not in the catalog")
     fulltexts = {}
