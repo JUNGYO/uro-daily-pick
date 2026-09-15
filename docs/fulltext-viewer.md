@@ -24,6 +24,12 @@ is read-only. Explicit denies for the new identity protect private workspaces;
 existing users' permissions are preserved. It does not update the collection or
 Spark tasks. Inspect an existing viewer identity before rerunning an installation.
 
+Stage `viewer_account_rights.ps1` beside the installer. It grants only the dedicated
+viewer account the batch-logon right required by its scheduled task. Existing deny
+policies are checked and left intact; no administrator membership is granted. The
+installer verifies local health before reporting successful installation, rather
+than treating task registration as proof that the server started.
+
 Only after local authorization tests and the installed identity checks pass should
 an HTTPS proxy expose this loopback service. Tailscale Funnel is one supported
 transport: readers need no Tailscale account or client. The endpoint is publicly

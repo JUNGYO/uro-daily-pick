@@ -114,13 +114,19 @@ class Service:
 
     def candidates(self):
         rows = []
+        last_id = 0
         while True:
-            page = self.request("papers", params={"select":"pmid,doi,title,pub_date,paper_type",
-                "or":f"(fulltext_available.eq.false,summary_source_hash.is.null,summarized_at.is.null,summary_model.is.null,summary_model.neq.{MODEL_LABEL},structured_data.is.null,qa_data.is.null)", "order":"pub_date.desc,id",
-                "offset":len(rows), "limit":1000})
+            page = self.request("papers", params={"select":"id,pmid,doi,title,pub_date,paper_type",
+                "or":f"(fulltext_available.eq.false,summary_source_hash.is.null,summarized_at.is.null,summary_model.is.null,summary_model.neq.{MODEL_LABEL},structured_data.is.null,qa_data.is.null)", "order":"id.asc",
+                "id":f"gt.{last_id}", "limit":1000})
             rows.extend(page)
             if len(page) < 1000:
+                rows.sort(key=lambda paper: paper.get("pub_date") or "", reverse=True)
                 return rows
+            next_id = page[-1].get("id")
+            if not isinstance(next_id, int) or next_id <= last_id:
+                raise ValueError("Candidate cursor did not advance")
+            last_id = next_id
 
 
 class Browser:
@@ -376,7 +382,8 @@ def main():
     try:
         run(args.state_dir, args.node, args.max_seconds,args.phase)
     except Exception as error:
-        print(f"Institution worker failed: {type(error).__name__}; pending documents are preserved", flush=True)
+        reason = str(error)[:160] if isinstance(error, RuntimeError) else type(error).__name__
+        print(f"Institution worker failed: {reason}; pending documents are preserved", flush=True)
         raise SystemExit(1) from None
 
 
