@@ -156,6 +156,24 @@ test("shared readers cannot edit research data, while personal exports remain av
   await expect(panel.getByRole("button", {name: "연구 표 CSV", exact: true})).toBeEnabled();
 });
 
+test("closing research refreshes a previously displayed project note after a research edit", async ({page}) => {
+  for (const closeWith of ["return button", "browser back"]) {
+    await page.goto("/uro-daily-pick/projects?scenario=research-documents&project=1");
+    const card = page.locator("article.reader-card").filter({has: page.getByRole("link", {name: "Research study 25", exact: true})});
+    await expect(card.locator('textarea[name="note"]')).toHaveValue("Team entry 25");
+    await page.getByRole("button", {name: "연구 정리", exact: true}).click();
+    await workspace(page).getByRole("button", {name: "선행연구 표", exact: true}).click();
+    const row = researchRow(page, "Research study 25");
+    await row.locator("td").last().locator("textarea").fill("Updated research design rationale");
+    await row.getByRole("button", {name: "문헌 수정 저장", exact: true}).click();
+    await expect(row.getByRole("button", {name: "문헌 수정 저장", exact: true})).toBeDisabled();
+    if (closeWith === "browser back") await page.goBack();
+    else await workspace(page).getByRole("button", {name: "프로젝트로 돌아가기", exact: true}).click();
+    await expect(card.locator('textarea[name="note"]')).toBeVisible();
+    await expect(card.locator('textarea[name="note"]')).toHaveValue("Updated research design rationale");
+  }
+});
+
 test("research controls and mobile reference cards fit a 320 pixel viewport", async ({page}, testInfo) => {
   await page.setViewportSize({width: 320, height: 900});
   await openResearch(page);
@@ -164,8 +182,24 @@ test("research controls and mobile reference cards fit a 320 pixel viewport", as
     await panel.getByRole("button", {name: tab, exact: true}).click();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
     expect(await panel.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+    if (tab === "연구 질문·추출 항목") {
+      await panel.locator(".research-question").evaluate((element) => element.scrollIntoView({block: "start"}));
+      await page.screenshot({path: testInfo.outputPath("research-mobile-question.png"), fullPage: true});
+    }
+    if (tab === "서론·고찰 논점") {
+      await panel.getByRole("button", {name: "논점 추가", exact: true}).click();
+      await panel.locator(".research-topic-editor").evaluate((element) => element.scrollIntoView({block: "start"}));
+      await page.screenshot({path: testInfo.outputPath("research-mobile-topic.png"), fullPage: true});
+      await panel.getByRole("button", {name: "논점 작성 취소", exact: true}).click();
+    }
+    if (tab === "연구 자료 내보내기") {
+      await panel.locator(".research-export").evaluate((element) => element.scrollIntoView({block: "start"}));
+      await page.screenshot({path: testInfo.outputPath("research-mobile-export.png"), fullPage: true});
+    }
   }
   await panel.getByRole("button", {name: "선행연구 표", exact: true}).click();
-  await page.locator(".reader-scroll").evaluate((element) => {element.scrollTop = 0;});
+  await panel.evaluate((element) => element.scrollIntoView({block: "start"}));
+  await page.screenshot({path: testInfo.outputPath("research-mobile-workspace.png"), fullPage: true});
+  await page.locator(".research-table tbody tr").first().evaluate((element) => element.scrollIntoView({block: "start"}));
   await page.screenshot({path: testInfo.outputPath("research-mobile.png"), fullPage: true});
 });

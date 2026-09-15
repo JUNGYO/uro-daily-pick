@@ -46,7 +46,7 @@ export default function Projects() {
             suggestions: await rpc("project_recommendations", { p_id: id }),
           }
         : null,
-    [id, page, query],
+    [id, page, query, researchOpen],
   );
   const project = r.data?.projects.find((x) => x.id === id),
     owner = project?.user_id === user.id;
@@ -336,7 +336,7 @@ export default function Projects() {
                         <>
                           {detail.data.can_edit ? (
                             <form
-                              key={p.id + ":" + id}
+                              key={JSON.stringify([p.id, id, p.note || "", p.tags || []])}
                               onSubmit={(e) => {
                                 e.preventDefault();
                                 const f = new FormData(e.currentTarget);

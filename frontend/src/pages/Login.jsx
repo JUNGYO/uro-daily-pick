@@ -103,7 +103,7 @@ export default function Login() {
         >
           {!emailAuthReady && (
             <p role="status" className="text-sm text-text2 mb-6">
-              기존 이메일 계정으로 로그인하세요. 공개 요약은 로그인 없이 확인할 수 있습니다.
+              기존 이메일 계정으로 로그인하세요.
             </p>
           )}
           {mode !== "forgot" && (
@@ -210,9 +210,6 @@ export default function Login() {
           </form>
 
           <div className="mt-4 text-center">
-            <Link to="/preview" className="block mb-3 text-accent underline">
-              공개 요약 체험
-            </Link>
             <Link to="/privacy" className="block mb-3 text-xs text-accent underline">
               Privacy & research use
             </Link>

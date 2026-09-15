@@ -598,8 +598,6 @@ export const supabase = {
         }).sort((a, b) => String(state(b.id).updated_at || "").localeCompare(String(state(a.id).updated_at || "")) || b.id - a.id);
         return { data: { items: matches.slice(page * 20, (page + 1) * 20).map((p) => ({ ...card(p), note: state(p.id).note || "", tags: state(p.id).tags || [], saved: !!state(p.id).saved, reading_state: state(p.id).reading_state || "unread" })), total: matches.length, page } };
       }
-      if (name === "preview_papers")
-        return { data: db.papers.filter(ready).slice(0, 3) };
       if (name === "reader_daily" && args.p_day && args.p_day !== today)
         return { data: [] };
       if (name === "reader_daily")

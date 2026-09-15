@@ -84,7 +84,8 @@ it("keeps email sign-in and safe return without reviving the removed OAuth provi
   expect(screen.queryByText(/카카오|kakao/i)).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Sign up" })).not.toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Forgot password?" })).not.toBeInTheDocument();
-  expect(screen.getByRole("link", { name: "공개 요약 체험" })).toHaveAttribute("href", "/preview");
+  expect(screen.queryByRole("link", { name: /요약 체험/ })).not.toBeInTheDocument();
+  expect(screen.queryByText(/공개 요약/)).not.toBeInTheDocument();
   const user = userEvent.setup();
   await user.type(screen.getByLabelText("Email"), "reader@example.test");
   await user.type(screen.getByLabelText("Password"), "existing-password");
