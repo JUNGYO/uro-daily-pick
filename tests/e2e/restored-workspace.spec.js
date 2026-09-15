@@ -94,14 +94,22 @@ test("original menus, collections and insights coexist with research tools", asy
   await expect(
     page.getByRole("heading", { name: "Research Insights" }),
   ).toBeVisible();
-  await expect(page.getByRole("heading", { name: /Reading Activity/ })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Research Topics", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Study Types", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: /Reading Activity/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Research Topics", exact: true }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Study Types", exact: true }),
+  ).toBeVisible();
   await page.getByRole("link", { name: "연구 프로젝트", exact: true }).click();
   await expect(page.getByLabel("새 프로젝트 이름")).toBeVisible();
   await page.goto("/uro-daily-pick/collections?project=1");
   await expect(page).toHaveURL(/\/projects\?project=1$/);
-  await expect(page.getByRole("heading", { name: "Journal club", exact: true })).toBeVisible();
+  await expect(
+    page.getByRole("heading", { name: "Journal club", exact: true }),
+  ).toBeVisible();
   await page.getByRole("link", { name: "문헌 탐색", exact: true }).click();
   await expect(page.getByLabel("제목·주제·PMID·DOI")).toBeVisible();
   await page
@@ -136,4 +144,28 @@ test("like remains separate from saving and is discoverable in the library", asy
   await expect(
     page.getByRole("link", { name: /Personalized treatment/ }),
   ).toBeVisible();
+});
+
+test("expanded study details and existing list opinions survive paper navigation", async ({
+  page,
+}) => {
+  await page.goto("/uro-daily-pick/");
+  await page.locator(".today-study > summary").click();
+  await page.getByRole("button", { name: "다음 논문", exact: true }).click();
+  await expect(page.locator(".today-study")).toHaveAttribute("open", "");
+  await expect(
+    page.getByRole("heading", { name: /Q\. 이 연구의 주요 한계/ }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "관심 있음", exact: true }).click();
+  await expect(
+    page.getByRole("button", { name: "관심 있음", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  await page.getByRole("link", { name: "내 서재", exact: true }).click();
+  await page
+    .getByRole("link", { name: "오늘 읽기", exact: true })
+    .filter({ visible: true })
+    .click();
+  await expect(
+    page.getByRole("button", { name: /Long-term outcomes/ }),
+  ).toContainText("관심 있음");
 });

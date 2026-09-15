@@ -74,6 +74,26 @@ export function useDailyReader(uid, day, requestedPmid, active = true) {
         }
       })
       .catch(() => {}); // The server's recommendation explanation remains available.
+    checked(
+      supabase
+        .from("feedbacks")
+        .select("paper_id,action")
+        .eq("user_id", uid)
+        .in(
+          "paper_id",
+          cards.map((p) => p.id),
+        )
+        .limit(5),
+    )
+      .then((rows) => {
+        // A late initial read must not overwrite an opinion changed in this session.
+        if (live)
+          setOpinions((previous) => ({
+            ...Object.fromEntries((rows || []).map((row) => [row.paper_id, row.action])),
+            ...previous,
+          }));
+      })
+      .catch(() => {});
     return () => {
       live = false;
     };

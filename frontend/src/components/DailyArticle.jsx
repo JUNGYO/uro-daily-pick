@@ -58,7 +58,7 @@ function Highlight({ text, terms }) {
   return text.split(re).map((part, i) => (i % 2 ? <mark key={i}>{part}</mark> : part));
 }
 
-export default function DailyArticle({ rec, reason, canRead, returnTo, titleRef }) {
+export default function DailyArticle({ rec, reason, canRead, returnTo, titleRef, studyOpen, setStudyOpen }) {
   const p = rec.paper;
   const evidence = (claim) => <EvidenceLinks paper={p} claim={claim} canRead={canRead} returnTo={returnTo} />;
   const facts = FIELDS.map(([key, label]) => [
@@ -126,7 +126,11 @@ export default function DailyArticle({ rec, reason, canRead, returnTo, titleRef 
       <IntegrityNotice paper={p} />
       <SummaryContent paper={p} evidence={evidence} abstract={false} facts={false} />
       {(facts.length > 0 || qa.length > 0) && (
-        <details className="today-study">
+        <details
+          className="today-study"
+          open={studyOpen}
+          onToggle={(e) => setStudyOpen(e.currentTarget.open)}
+        >
           <summary>
             Details &amp; Q&amp;A <span>· 연구 상세</span>
           </summary>

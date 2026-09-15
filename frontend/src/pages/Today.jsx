@@ -46,6 +46,7 @@ export default function Today() {
     active,
   );
   const [shareMessage, setShareMessage] = useState("");
+  const [studyOpen, setStudyOpen] = useState(false);
   const scrollRef = useRef(null),
     titleRef = useRef(null),
     queueRef = useRef(null),
@@ -324,6 +325,8 @@ export default function Today() {
                         canRead={data.access?.can_read}
                         returnTo={returnTo}
                         titleRef={titleRef}
+                        studyOpen={studyOpen}
+                        setStudyOpen={setStudyOpen}
                       />
                     )}
                     {readCount === r.cards.length && (
