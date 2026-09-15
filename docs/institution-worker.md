@@ -25,3 +25,21 @@ Initial runs migrate legacy bodies: flush each complete JSON record to state/clo
 Logs: %LOCALAPPDATA%/UroDailyPick/state/worker.log (status, PMID and counts). Originals, parsed files and retry state stay in this private directory. Get-ScheduledTaskInfo -TaskName UroDailyPick-Institution-Fulltext reports task errors; the admin page shows storage counts and heartbeat. Disable this task to pause; set its database enabled field false to revoke access.
 
 The worker now includes every catalog paper with a missing/stale summary or a model other than the configured Qwen. There is no publication/import date filter. It reuses hash-verified originals from state/cloud-archive when replacing older Gemini summaries. Cached originals are prioritized; existing summaries remain visible until a validated replacement is published. Historical metadata collection runs independently through catalog-backfill.yml, with migration 012 providing durable progress and administrator counts.
+
+## Figure preservation
+
+The existing controller starts independent `collect`, `summarize` and `figures`
+subprocesses. The figure queue scans all retained originals, including legacy
+archives, without a date filter or model requests. Publisher HTML supplies figure
+captions and high-resolution image links. JATS figures use the current official
+[PMC media dataset](https://pmc.ncbi.nlm.nih.gov/tools/pmcaws/) with article identity
+checks and Europe PMC's supplementary-file API as a fallback. The browser reuses
+the existing installed Chrome runtime with a separate profile so collection and
+figure downloads do not lock each other out.
+
+Image bytes and manifests stay under the configured local state directory outside
+OneDrive; no image bytes or original bodies are published to Supabase. A partial
+download is checkpointed per figure and retried after one hour. Existing complete
+manifests skip downloads. Each image is limited to 20 MiB; writes preserve at least
+1 GiB free space. `figures.log` records progress without article text or credentials.
+Missing access is left pending, and does not block collection or summarization.

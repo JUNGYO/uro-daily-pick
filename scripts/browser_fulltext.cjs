@@ -10,6 +10,31 @@ const publisherHosts = ['doi.org', 'dx.doi.org', 'linkinghub.elsevier.com', 'www
   'sciencedirect.com', 'link.springer.com', 'www.nature.com', 'nature.com',
   'onlinelibrary.wiley.com', 'jamanetwork.com', 'www.bmj.com'];
 const allowedHost = (host) => publisherHosts.includes(host) || host.endsWith('.onlinelibrary.wiley.com');
+const imageHosts = ['ars.els-cdn.com','media.springernature.com','static-content.springer-cdn.com',
+  'pmc.ncbi.nlm.nih.gov','cdn.ncbi.nlm.nih.gov','www.ncbi.nlm.nih.gov','www.ebi.ac.uk','europepmc.org'];
+const allowedImage = value => {
+  try { const url=new URL(value); return url.protocol==='https:' && !url.username && !url.password &&
+    (!url.port || url.port==='443') && (allowedHost(url.hostname)||imageHosts.includes(url.hostname)); }
+  catch { return false; }
+};
+
+async function readImage(context, job) {
+  if (!allowedImage(job.url)) return {status:'unsupported'};
+  const page=await context.newPage();
+  const timer=setTimeout(()=>void page.close().catch(()=>{}),Math.min(30000,job.budget_ms||20000));
+  try {
+    await page.route('**/*', route=>allowedImage(route.request().url()) ? route.continue() : route.abort());
+    const response=await page.goto(job.url,{waitUntil:'load',timeout:20000});
+    if (!response || response.status()!==200) return {status:'unavailable'};
+    const type=response.headers()['content-type']||'';
+    if (!/^image\/(png|jpeg|gif|webp|tiff|bmp)(?:;|$)/i.test(type)) return {status:'unsupported'};
+    if (Number(response.headers()['content-length']||0)>20*1024*1024) return {status:'unsupported'};
+    const bytes=await response.body();
+    if (bytes.length>20*1024*1024) return {status:'unsupported'};
+    return {status:'downloaded',data:bytes.toString('base64')};
+  } catch { return {status:'unavailable'}; }
+  finally { clearTimeout(timer);await page.close().catch(()=>{}); }
+}
 const selectorsFor = (host) => host.includes('sciencedirect.com') ? ['#body']
   : host.includes('springer.com') || host.includes('nature.com') ? ['.c-article-body']
   : host.includes('wiley.com') ? ['.article-section__full', '.article__body', '#article__content']
@@ -118,10 +143,10 @@ async function main() {
       let job;
       try { job=JSON.parse(line); }
       catch { process.stdout.write(JSON.stringify({status:'parse_failed',reason:'invalid_job'})+'\n'); continue; }
-      const result=await readArticle(context,job);
+      const result=job.operation==='image' ? await readImage(context,job) : await readArticle(context,job);
       process.stdout.write(JSON.stringify({pmid:job.pmid,...result})+'\n');
     }
   } finally { await context.close(); }
 }
 if (require.main === module) main().catch(() => { console.error('Browser worker failed'); process.exitCode=1; });
-module.exports={allowedHost,selectorsFor,readArticle};
+module.exports={allowedHost,selectorsFor,readArticle,allowedImage,readImage};

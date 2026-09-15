@@ -20,10 +20,11 @@ export default function Privacy() {
         <section>
           <h2 className="section-title">Paper summaries</h2>
           <p>
-            New summaries are generated from full articles using Spark. Some earlier full-text summaries were
-            generated with Google Gemini. The summary identifies its source basis. AI output can omit context
-            or contain errors; check the original paper for figures, methods, and interpretation. This service
-            is a research reading aid and does not provide patient-specific advice.
+            New summaries are generated from full articles using the configured model. Some earlier full-text
+            summaries were generated with Google Gemini. The summary identifies its source basis. AI output
+            can omit context or contain errors; check the original paper for figures, methods, and
+            interpretation. This service is a research reading aid and does not provide patient-specific
+            advice.
           </p>
         </section>
         <section>
@@ -39,12 +40,13 @@ export default function Privacy() {
           <h2 className="section-title">Use journal access responsibly</h2>
           <p>
             Publisher links may require your institution's subscription. Access to this app does not grant
-            journal access. Original article files remain on the operator's Z8 workstation, and Spark receives
-            article text for inference. Accounts explicitly authorized by the operator can read stored article
-            text in this app through an encrypted connection to Z8. The article server validates your Supabase
-            login and returns text without browser caching. Supabase stores derived summaries and necessary
-            metadata. Do not enter patient information into your profile, keywords, alerts, or collection
-            names.
+            journal access. Original article files and figures remain in the operator's private archive, and
+            the configured model receives article text for inference. Accounts explicitly authorized by the
+            operator can read stored article text and figures in this app through an encrypted connection to
+            the archive. The article server validates your Supabase login and returns content without browser
+            caching. Images you choose to download remain on your device. Supabase stores derived summaries
+            and necessary metadata. Do not enter patient information into your profile, keywords, alerts, or
+            collection names.
           </p>
         </section>
         <Link to="/settings" className="inline-block text-accent underline">

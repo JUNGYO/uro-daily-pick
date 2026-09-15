@@ -107,6 +107,46 @@ class ViewerTests(unittest.TestCase):
         self.identity.authorize.assert_not_called()
         self.assertEqual(json.loads(self.request("/health", headers={})[2]), {"status": "ok"})
 
+    def add_figure(self):
+        image = b'\x89PNG\r\n\x1a\n' + b'synthetic local image'
+        asset = hashlib.sha256(image).hexdigest()
+        folder = self.root / 'documents/12345.images'
+        folder.mkdir()
+        (folder / asset).write_bytes(image)
+        manifest = {'content_hash': self.document['document']['content_hash'], 'status': 'complete',
+                    'source_url': 'https://publisher.example/private', 'figures': [
+                        {'key': 'figure-1', 'label': 'Figure 1', 'caption': 'Study flow', 'asset_id': asset,
+                         'content_type': 'image/png', 'status': 'ready', 'local_path': 'private-path'}]}
+        (self.root / 'documents/12345.images.json').write_text(json.dumps(manifest))
+        return asset, image
+
+    def test_image_uses_owner_auth_and_no_store_without_exposing_paths(self):
+        asset, image = self.add_figure()
+        path = '/v1/fulltext/12345/images/' + asset
+        status, headers, body = self.request(path)
+        self.assertEqual((status, body), (200, image))
+        self.assertEqual(headers['Content-Type'], 'image/png')
+        self.assertIn('no-store', headers['Cache-Control'])
+        article = self.request()[2]
+        self.assertNotIn(b'private', article)
+        self.assertEqual(self.request(path, headers={'Origin': ORIGIN})[0], 401)
+        self.identity.authorize.side_effect = ViewerError(403, 'access_denied')
+        self.assertEqual(self.request(path)[0], 403)
+
+    def test_corrupt_image_and_stale_manifest_fail_without_hiding_body(self):
+        asset, _ = self.add_figure()
+        path = '/v1/fulltext/12345/images/' + asset
+        (self.root / 'documents/12345.images' / asset).write_bytes(b'corrupt image')
+        self.assertEqual(self.request(path)[0], 503)
+        self.assertEqual(self.request()[0], 200)
+        self.assertEqual(self.request('/v1/fulltext/12345/images/' + '0' * 64)[0], 404)
+        manifest = self.root / 'documents/12345.images.json'
+        value = json.loads(manifest.read_text())
+        value['content_hash'] = 'old-body'
+        manifest.write_text(json.dumps(value))
+        self.assertEqual(json.loads(self.request()[2])['figures'], [])
+        self.assertEqual(self.request(path)[0], 404)
+
 
 class IdentityTests(unittest.TestCase):
     def setUp(self):

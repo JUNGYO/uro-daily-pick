@@ -1,7 +1,7 @@
 import { afterEach, expect, test, vi } from "vitest";
 vi.mock("./supabase", () => ({ supabase: { auth: { getSession: vi.fn() } } }));
 import { supabase } from "./supabase";
-import { canReadOriginal, fulltextOrigin, readOriginal } from "./fulltext";
+import { canReadOriginal, fulltextOrigin, readOriginal, readOriginalImage } from "./fulltext";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -32,12 +32,10 @@ test("destinations are deployment-controlled HTTPS origins", () => {
 
 test("session must belong to current user; token stays in Authorization header", async () => {
   vi.stubEnv("VITE_FULLTEXT_ORIGIN", "https://articles.example.test");
-  const fetch = vi
-    .fn()
-    .mockResolvedValue({
-      ok: true,
-      json: async () => ({ pmid: "1234", title: "Fixture", content_text: "Body" }),
-    });
+  const fetch = vi.fn().mockResolvedValue({
+    ok: true,
+    json: async () => ({ pmid: "1234", title: "Fixture", content_text: "Body" }),
+  });
   vi.stubGlobal("fetch", fetch);
   supabase.auth.getSession.mockResolvedValue({
     data: { session: { user: { id: "owner" }, access_token: "fixture-token" } },
@@ -66,4 +64,32 @@ test("denied account and missing originals show honest errors", async () => {
   await expect(readOriginal("1234", "owner")).rejects.toThrow("권한");
   fetch.mockResolvedValue({ ok: false, status: 404 });
   await expect(readOriginal("1234", "owner")).rejects.toThrow("아직 보관");
+});
+
+test("figures require the same session and reject unsupported image data", async () => {
+  vi.stubEnv("VITE_FULLTEXT_ORIGIN", "https://articles.example.test");
+  supabase.auth.getSession.mockResolvedValue({
+    data: { session: { user: { id: "owner" }, access_token: "fixture-token" } },
+  });
+  const asset = "a".repeat(64);
+  const png = new Blob(["synthetic image"], { type: "image/png" });
+  const fetch = vi.fn().mockResolvedValue({ ok: true, headers: new Headers(), blob: async () => png });
+  vi.stubGlobal("fetch", fetch);
+  await expect(readOriginalImage("1234", asset, "different-user")).rejects.toThrow();
+  expect(fetch).not.toHaveBeenCalled();
+  expect(await readOriginalImage("1234", asset, "owner")).toBe(png);
+  expect(fetch.mock.calls[0][0]).toBe(`https://articles.example.test/v1/fulltext/1234/images/${asset}`);
+  expect(fetch.mock.calls[0][1].headers).toEqual({ Authorization: "Bearer fixture-token" });
+  fetch.mockResolvedValue({
+    ok: true,
+    headers: new Headers(),
+    blob: async () => new Blob(["markup"], { type: "image/svg+xml" }),
+  });
+  await expect(readOriginalImage("1234", asset, "owner")).rejects.toThrow();
+  fetch.mockResolvedValue({
+    ok: true,
+    headers: new Headers({ "content-length": String(21 * 1024 * 1024) }),
+    blob: vi.fn(),
+  });
+  await expect(readOriginalImage("1234", asset, "owner")).rejects.toThrow();
 });

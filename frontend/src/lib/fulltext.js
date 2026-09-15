@@ -38,6 +38,41 @@ const messages = {
 };
 
 export async function readOriginal(pmid, userId, signal) {
+  const response = await originalRequest(pmid, userId, signal);
+  const article = await response.json();
+  if (
+    article.pmid !== pmid ||
+    typeof article.content_text !== "string" ||
+    article.content_text.length > 2000000 ||
+    typeof article.title !== "string"
+  )
+    throw new Error(messages[503]);
+  const figures = Array.isArray(article.figures)
+    ? article.figures.filter(
+        (f) =>
+          f &&
+          /^figure-[1-9][0-9]*$/.test(f.key) &&
+          typeof f.caption === "string" &&
+          typeof f.label === "string" &&
+          (f.status !== "ready" ||
+            (/^[0-9a-f]{64}$/.test(f.asset_id) &&
+              /^image\/(png|jpeg|gif|webp|tiff|bmp)$/.test(f.content_type))),
+      )
+    : [];
+  return { ...article, figures, figure_status: article.figure_status || "pending" };
+}
+
+export async function readOriginalImage(pmid, assetId, userId, signal) {
+  if (!/^[0-9a-f]{64}$/.test(assetId)) throw new Error(messages[404]);
+  const response = await originalRequest(pmid, userId, signal, `/images/${assetId}`);
+  if (Number(response.headers.get("content-length") || 0) > 20 * 1024 * 1024) throw new Error(messages[503]);
+  const blob = await response.blob();
+  if (!/^image\/(png|jpeg|gif|webp|tiff|bmp)$/.test(blob.type) || blob.size > 20 * 1024 * 1024)
+    throw new Error(messages[503]);
+  return blob;
+}
+
+async function originalRequest(pmid, userId, signal, suffix = "") {
   const origin = fulltextOrigin();
   if (!origin) throw new Error("원문 연결이 아직 설정되지 않았습니다.");
   if (!/^[1-9][0-9]{0,11}$/.test(pmid)) throw new Error("올바르지 않은 논문 번호입니다.");
@@ -45,7 +80,7 @@ export async function readOriginal(pmid, userId, signal) {
   if (error || !data?.session?.access_token || data.session.user.id !== userId) {
     throw new Error(messages[401]);
   }
-  const response = await fetch(`${origin}/v1/fulltext/${pmid}`, {
+  const response = await fetch(`${origin}/v1/fulltext/${pmid}${suffix}`, {
     headers: { Authorization: `Bearer ${data.session.access_token}` },
     credentials: "omit",
     cache: "no-store",
@@ -54,14 +89,5 @@ export async function readOriginal(pmid, userId, signal) {
     signal,
   });
   if (!response.ok) throw new Error(messages[response.status] || messages[503]);
-  const article = await response.json();
-  if (
-    article.pmid !== pmid ||
-    typeof article.content_text !== "string" ||
-    article.content_text.length > 2000000 ||
-    typeof article.title !== "string"
-  ) {
-    throw new Error(messages[503]);
-  }
-  return article;
+  return response;
 }
