@@ -25,6 +25,10 @@ inputs invalidate those checkpoints. Invalid claims are repaired against bounded
 excerpts of the original; accepted claims are retained and the complete result is
 validated again before publication. Numeric values must still match their cited
 passages. Neither validation failures nor expired budgets count as completed work.
+The model returns three separate sentence strings in a schema-constrained array;
+the worker joins them into the existing three-line public summary. This prevents
+a valid JSON response containing one paragraph from repeatedly failing the
+three-line publication contract.
 Publisher page and table navigation also has a bounded article deadline. The
 controller has a final watchdog for its own child process trees, leaving committed
 documents intact and finishing before the existing scheduled task's time limit.
