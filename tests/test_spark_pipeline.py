@@ -17,6 +17,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"scripts"))
 import institution_worker as worker
 import local_summary as spark
 from evidence import BASE_FIELDS, DETAIL_FIELDS, source_blocks, validate_evidence
+from summary_wire import SourceAliases
 from check_fulltext_queue import assess
 
 BODY="The study enrolled six participants. The measured endpoint was 17. "*40
@@ -86,11 +87,13 @@ class SparkPipelineTests(unittest.TestCase):
         raw={"summary_ko":expected["summary_ko"],"structured":expected["structured_data"],
              "clinical_relevance":expected["clinical_relevance"],"qa":expected["qa_data"],
              "research_details":expected["research_details"],"evidence":expected["evidence"]["claims"]}
+        aliases=SourceAliases(source_blocks(document["content_text"]))
+        wire={**raw,"evidence":{key:aliases.encode_refs(refs) for key,refs in raw["evidence"].items()}}
         first_location=source_blocks(document["content_text"])[0]["id"]
         first_note=f"[{first_location}] The study enrolled six participants; the measured endpoint was 17."
         def reply(_system,content,schema=None,**_kwargs):
             if schema is not None:
-                return json.dumps(raw,ensure_ascii=False)
+                return json.dumps(wire,ensure_ascii=False)
             location=content.split("]",1)[0].lstrip("[")
             return f"[{location}] The study enrolled six participants; the measured endpoint was 17."
         with tempfile.TemporaryDirectory() as temporary:
@@ -103,6 +106,10 @@ class SparkPipelineTests(unittest.TestCase):
                 result=spark.generate_summary(paper,document,cache_path=cache)
             self.assertEqual(chat.call_count,chunks)  # remaining chunks plus final summary
             self.assertEqual(result["summary_source_hash"],derived(paper,document)["summary_source_hash"])
+            self.assertIn('[1]',json.loads(chat.call_args.args[1])['source'])
+            self.assertNotIn('['+first_location+']',json.loads(chat.call_args.args[1])['source'])
+            self.assertEqual(json.loads(cache.read_text())["notes"][0],first_note)
+            self.assertEqual(chat.call_args.args[2]['$defs']['source_id']['enum'],list(range(1,len(aliases.ids)+1)))
 
     @unittest.skipUnless(os.name=="nt","Windows byte-range lock")
     def test_overlapping_scheduled_run_exits_cleanly_before_service_access(self):

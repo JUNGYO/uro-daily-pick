@@ -1,5 +1,6 @@
 """Synthetic summary scheduling: no publisher, cloud, credentials or model requests."""
 import contextlib
+from contextvars import ContextVar
 import hashlib
 import io
 import json
@@ -8,6 +9,7 @@ import runpy
 import sqlite3
 import sys
 import tempfile
+import threading
 from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
@@ -28,6 +30,7 @@ class SummaryQueueTests(unittest.TestCase):
         prepare_summary_attempts(self.db)
         self.monotonic = 1000
         self.now = 100000
+        self.main_thread = threading.get_ident()
         self.generated, self.published, self.statuses = [], [], []
         self.publish_errors = {}
         self.model_errors = {}
@@ -41,6 +44,7 @@ class SummaryQueueTests(unittest.TestCase):
             summary_deadline = None
 
             def rpc(self, name, **values):
+                outer.assertEqual(threading.get_ident(), outer.main_thread)
                 outer.assertEqual(name, "publish_institution_summary")
                 pmid = values["p_pmid"]
                 if pmid in outer.publish_errors:
@@ -48,6 +52,7 @@ class SummaryQueueTests(unittest.TestCase):
                 outer.published.append(values)
 
             def status(self, *args):
+                outer.assertEqual(threading.get_ident(), outer.main_thread)
                 outer.statuses.append(args)
 
         self.service = Service()
@@ -98,6 +103,7 @@ class SummaryQueueTests(unittest.TestCase):
         return self.summary(paper, document)
 
     def run_queue(self, papers, seconds=2000, **kwargs):
+        kwargs.setdefault("concurrency", 1)
         with contextlib.redirect_stdout(io.StringIO()) as output:
             counts = run_summary_queue(self.directory, self.monotonic + seconds, self.service, self.db,
                                        papers, dependencies=self.dependencies, **kwargs)
@@ -381,6 +387,321 @@ class SummaryQueueTests(unittest.TestCase):
         archive.assert_not_called()
         browser.assert_not_called()
         run_queue.assert_called_once()
+        self.assertTrue(callable(run_queue.call_args.kwargs["refresh"]))
+        run_queue.call_args.kwargs["refresh"]()
+        self.assertEqual(service.candidates.call_args.kwargs, {"include_summary": True})
+
+    def test_two_inferences_overlap_with_thread_local_scope_and_main_thread_persistence(self):
+        papers = [self.paper(1), self.paper(2)]
+        barrier = threading.Barrier(2)
+        scope_value = ContextVar("synthetic_summary_scope", default=None)
+        inference_threads = set()
+        saved_threads = []
+
+        @contextlib.contextmanager
+        def scope(directory):
+            self.assertNotEqual(threading.get_ident(), self.main_thread)
+            token = scope_value.set(directory)
+            try:
+                yield
+            finally:
+                scope_value.reset(token)
+
+        def generate(paper, document, **kwargs):
+            self.assertEqual(scope_value.get(), self.directory)
+            inference_threads.add(threading.get_ident())
+            barrier.wait(timeout=3)
+            return self.generate(paper, document, **kwargs)
+
+        def save(path, value):
+            saved_threads.append(threading.get_ident())
+            self.assertEqual(threading.get_ident(), self.main_thread)
+            worker.save_json(path, value)
+
+        self.dependencies.update(generate_summary=generate, literature_inference_scope=scope, save_json=save)
+        counts = self.run_queue(papers, concurrency=2)
+        self.assertEqual(counts["completed"], 2)
+        self.assertEqual(len(inference_threads), 2)
+        self.assertEqual(saved_threads, [self.main_thread, self.main_thread])
+        self.assertEqual(self.db.execute("SELECT count(*) FROM attempts WHERE status='ready'").fetchone()[0], 2)
+        self.assertIsNone(scope_value.get())
+        self.assertIn("elapsed", self.output)
+
+    def test_completed_slot_refills_without_waiting_for_the_other_paper(self):
+        papers = [self.paper(i) for i in (1, 2, 3)]
+        barrier = threading.Barrier(2)
+        third_started = threading.Event()
+        lock = threading.Lock()
+        current = maximum = 0
+
+        def generate(paper, document, **kwargs):
+            nonlocal current, maximum
+            with lock:
+                current += 1
+                maximum = max(maximum, current)
+            try:
+                if paper["pmid"] in {"1", "2"}:
+                    barrier.wait(timeout=3)
+                if paper["pmid"] == "1":
+                    self.assertTrue(third_started.wait(3), "The empty slot must accept paper 3 while paper 1 is active")
+                if paper["pmid"] == "3":
+                    third_started.set()
+                return self.generate(paper, document, **kwargs)
+            finally:
+                with lock:
+                    current -= 1
+
+        self.dependencies["generate_summary"] = generate
+        self.assertEqual(self.run_queue(papers + [papers[0]], concurrency=2)["completed"], 3)
+        self.assertEqual(maximum, 2)
+        self.assertCountEqual([row[0] for row in self.generated], ["1", "2", "3"])
+
+    def test_refresh_summary_waits_until_inflight_first_summaries_are_published(self):
+        first, second, refresh_paper = self.paper(1), self.paper(2), self.paper(3, ready=True)
+        barrier = threading.Barrier(2)
+
+        def generate(paper, document, **kwargs):
+            if paper["pmid"] in {"1", "2"}:
+                barrier.wait(timeout=3)
+            else:
+                self.assertCountEqual([item["p_pmid"] for item in self.published], ["1", "2"])
+            return self.generate(paper, document, **kwargs)
+
+        self.dependencies["generate_summary"] = generate
+        counts = self.run_queue([refresh_paper, first, second], concurrency=2)
+        self.assertEqual((counts["first_completed"], counts["updated"]), (2, 1))
+
+    def test_refresh_adds_newly_acquired_originals_and_deduplicates_inflight_papers(self):
+        first, second = self.paper(1), self.paper(2)
+        refreshed = threading.Event()
+        barrier = threading.Barrier(2)
+        refresh_calls = []
+
+        def generate(paper, document, **kwargs):
+            if paper["pmid"] in {"1", "2"}:
+                barrier.wait(timeout=3)
+                self.monotonic = 1061
+                self.assertTrue(refreshed.wait(3), "Refresh should run while both inference slots are active")
+            return self.generate(paper, document, **kwargs)
+
+        def refresh():
+            self.assertEqual(threading.get_ident(), self.main_thread)
+            refresh_calls.append(self.monotonic)
+            third = self.paper(3)
+            refreshed.set()
+            return [first, second, third, third]
+
+        self.dependencies["generate_summary"] = generate
+        counts = self.run_queue([first, second], concurrency=2, refresh=refresh)
+        self.assertEqual(counts["completed"], 3)
+        self.assertEqual(refresh_calls, [1061])
+        self.assertCountEqual([row[0] for row in self.generated], ["1", "2", "3"])
+
+    def test_refresh_outage_keeps_existing_work_and_never_logs_response_content(self):
+        first, second = self.paper(1), self.paper(2)
+
+        def generate(paper, document, **kwargs):
+            self.monotonic = 1061
+            return self.generate(paper, document, **kwargs)
+
+        self.dependencies["generate_summary"] = generate
+        refresh = Mock(side_effect=RuntimeError("PRIVATE-REFRESH-RESPONSE"))
+        self.assertEqual(self.run_queue([first, second], refresh=refresh)["completed"], 2)
+        refresh.assert_called_once()
+        self.assertIn("existing queue retained", self.output)
+        self.assertNotIn("PRIVATE-REFRESH-RESPONSE", self.output)
+
+    def test_refresh_real_service_uses_fresh_bounded_deadline_and_restores_previous_value(self):
+        first, second = self.paper(1), self.paper(2)
+        service = object.__new__(worker.Service)
+        service.config = {"url": "https://example.invalid", "public_key": "synthetic"}
+        service.summary_deadline = 700  # An expired publication deadline must not poison refresh.
+        service.opener = Mock()
+        service.opener.open.return_value = contextlib.nullcontext(SimpleNamespace(read=lambda limit: b"[]"))
+        service.rpc = self.service.rpc
+        service.status = self.service.status
+        self.service = service
+
+        def generate(paper, document, **kwargs):
+            self.monotonic = 1061
+            return self.generate(paper, document, **kwargs)
+
+        self.dependencies["generate_summary"] = generate
+        with patch.object(worker.time, "monotonic", side_effect=lambda: self.monotonic):
+            self.assertEqual(self.run_queue([first, second], refresh=lambda: service.candidates(include_summary=True))["completed"], 2)
+        service.opener.open.assert_called_once()
+        self.assertEqual(service.opener.open.call_args.kwargs["timeout"], 30)
+        self.assertEqual(service.summary_deadline, 700)
+
+    def test_new_ready_cache_can_publish_while_both_inference_slots_are_busy(self):
+        first, second = self.paper(1), self.paper(2)
+        barrier = threading.Barrier(2)
+        cache_published = threading.Event()
+        original_rpc = self.service.rpc
+
+        def rpc(name, **values):
+            original_rpc(name, **values)
+            if values["p_pmid"] == "3":
+                cache_published.set()
+
+        def generate(paper, document, **kwargs):
+            barrier.wait(timeout=3)
+            self.monotonic = 1061
+            self.assertTrue(cache_published.wait(3), "A ready cache needs no inference slot")
+            return self.generate(paper, document, **kwargs)
+
+        def refresh():
+            cached = self.paper(3)
+            self.cache(cached)
+            return [first, second, cached]
+
+        self.service.rpc = rpc
+        self.dependencies["generate_summary"] = generate
+        counts = self.run_queue([first, second], concurrency=2, refresh=refresh)
+        self.assertEqual(counts["completed"], 3)
+        self.assertEqual(self.published[0]["p_pmid"], "3")
+        self.assertCountEqual([row[0] for row in self.generated], ["1", "2"])
+
+    def test_completed_summary_is_published_before_slow_metadata_refresh(self):
+        paper = self.paper(1)
+        refresh_calls = []
+
+        def generate(paper, document, **kwargs):
+            # Inference completed within its 405-second allowance; publication
+            # still has 25 seconds when the coordinator receives this result.
+            self.monotonic = 1395
+            return self.generate(paper, document, **kwargs)
+
+        def refresh():
+            self.assertEqual([row["p_pmid"] for row in self.published], ["1"])
+            refresh_calls.append(self.monotonic)
+            self.monotonic += 30
+            return []
+
+        self.dependencies["generate_summary"] = generate
+        counts = self.run_queue([paper], refresh=refresh)
+        self.assertEqual((counts["completed"], counts["failed"]), (1, 0))
+        self.assertEqual(refresh_calls, [1395])
+        self.assertEqual(self.db.execute("SELECT reason FROM summary_retry_metadata WHERE pmid='1'").fetchone(), ("ready",))
+
+    def test_inference_finishing_during_refresh_keeps_its_publication_reserve(self):
+        paper = self.paper(1)
+        refresh_started, validated = threading.Event(), threading.Event()
+        refresh_deadlines, publication_times = [], []
+        original_rpc = self.service.rpc
+
+        def generate(paper, document, **kwargs):
+            self.monotonic = 1395
+            self.assertTrue(refresh_started.wait(3))
+            return self.generate(paper, document, **kwargs)
+
+        def validate(value, paper, document):
+            result = self.validate(value, paper, document)
+            validated.set()
+            return result
+
+        def refresh():
+            refresh_deadlines.append(self.service.summary_deadline)
+            self.assertLessEqual(self.service.summary_deadline, 1404)
+            refresh_started.set()
+            self.assertTrue(validated.wait(3))
+            # Model completion races with the metadata request. The request uses
+            # its entire allowed window, but cannot consume publication time.
+            self.monotonic = self.service.summary_deadline
+            return []
+
+        def rpc(name, **values):
+            publication_times.append(self.monotonic)
+            return original_rpc(name, **values)
+
+        self.dependencies.update(generate_summary=generate, validate_cached_summary=validate)
+        self.service.rpc = rpc
+        counts = self.run_queue([paper], refresh=refresh)
+        self.assertEqual((counts["completed"], counts["failed"]), (1, 0))
+        self.assertEqual(refresh_deadlines, [1404])
+        self.assertEqual(publication_times, [1404])
+
+    def test_global_deadline_drains_two_started_papers_without_submitting_a_third(self):
+        papers = [self.paper(i) for i in (1, 2, 3)]
+        barrier = threading.Barrier(2)
+
+        def generate(paper, document, **kwargs):
+            self.generated.append((paper["pmid"], kwargs["deadline"], kwargs["cache_path"]))
+            barrier.wait(timeout=3)
+            self.monotonic = 1085
+            raise worker.SummaryBudgetExpired()
+
+        self.dependencies["generate_summary"] = generate
+        refresh = Mock(return_value=[])
+        counts = self.run_queue(papers, seconds=100, concurrency=2, refresh=refresh)
+        self.assertEqual(counts["yielded"], 2)
+        self.assertCountEqual([row[0] for row in self.generated], ["1", "2"])
+        self.assertIsNone(self.db.execute("SELECT * FROM attempts WHERE pmid='3'").fetchone())
+        refresh.assert_not_called()
+
+    def test_valid_final_cache_has_priority_within_its_tier_without_starting_inference(self):
+        first, cached = self.paper(1, "2026-01-01"), self.paper(2, "2001-01-01")
+        refreshed = self.paper(3, ready=True)
+        self.cache(cached)
+        self.cache(refreshed)
+
+        def generate(paper, document, **kwargs):
+            self.assertEqual([item["p_pmid"] for item in self.published], ["2"])
+            return self.generate(paper, document, **kwargs)
+
+        self.dependencies["generate_summary"] = generate
+        self.assertEqual(self.run_queue([refreshed, first, cached])["completed"], 3)
+        self.assertEqual([item["p_pmid"] for item in self.published], ["2", "1", "3"])
+        self.assertEqual([item[0] for item in self.generated], ["1"])
+
+    def test_invalid_cache_returns_to_fair_inference_order(self):
+        first, failed = self.paper(1), self.paper(2)
+        self.cache(failed, {**self.summary(failed), "invalid": True})
+        record_summary_attempt(self.db, "2", self.source_hash(failed), "summary_validation", self.now - 2000)
+        self.assertEqual(self.run_queue([failed, first])["completed"], 2)
+        self.assertEqual([item[0] for item in self.generated], ["1", "2"])
+
+    def test_late_finished_result_is_saved_for_publication_retry_without_cloud_request(self):
+        paper = self.paper(1)
+
+        def generate(paper, document, **kwargs):
+            self.monotonic = 1100
+            return self.generate(paper, document, **kwargs)
+
+        self.dependencies["generate_summary"] = generate
+        self.assertEqual(self.run_queue([paper], seconds=100)["failed"], 1)
+        self.assertTrue((self.directory / "documents/1.summary.json").exists())
+        self.assertEqual(self.published, [])
+
+    def test_concurrency_cannot_exceed_two(self):
+        with self.assertRaisesRegex(ValueError, "one or two"):
+            self.run_queue([], concurrency=3)
+
+    def test_fully_valid_draft_is_published_before_new_inference_and_saved_as_final(self):
+        fresh, draft = self.paper(1, '2026-01-01'), self.paper(2, '2020-01-01')
+        checkpoint = {'source_hash': 'synthetic-checkpoint', 'draft': {}}
+        worker.save_json(self.directory / 'documents/2.notes.draft.json', checkpoint)
+        validate = Mock(return_value=self.summary(draft))
+        self.dependencies['validate_draft_summary'] = validate
+
+        def generate(paper, document, **kwargs):
+            self.assertEqual([item['p_pmid'] for item in self.published], ['2'])
+            return self.generate(paper, document, **kwargs)
+
+        self.dependencies['generate_summary'] = generate
+        self.assertEqual(self.run_queue([fresh, draft])['completed'], 2)
+        validate.assert_called_once_with(checkpoint, draft, self.document)
+        self.assertEqual([item[0] for item in self.generated], ['1'])
+        self.assertTrue((self.directory / 'documents/2.summary.json').exists())
+
+    def test_invalid_partial_draft_remains_repairable_and_is_not_published_from_cache(self):
+        paper = self.paper(1)
+        path = self.directory / 'documents/1.notes.draft.json'
+        worker.save_json(path, {'source_hash': 'wrong-source', 'draft': {}})
+        self.dependencies['validate_draft_summary'] = Mock(side_effect=ValueError('Invalid draft'))
+        self.assertEqual(self.run_queue([paper])['completed'], 1)
+        self.assertEqual([item[0] for item in self.generated], ['1'])
+        self.assertTrue(path.exists())
 
 
 if __name__ == "__main__":

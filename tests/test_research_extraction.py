@@ -251,7 +251,7 @@ class ResearchExtractionTests(unittest.TestCase):
         service.opener.open.assert_not_called()
 
     def test_summary_scope_locks_each_inference_and_restores_previous_configuration(self):
-        with tempfile.TemporaryDirectory() as temporary, patch.object(spark, "literature_inference_lock") as lock, \
+        with tempfile.TemporaryDirectory() as temporary, patch.object(spark, "summary_inference_lock") as lock, \
                 patch.object(spark, "local_request", return_value={"choices": [{"finish_reason": "stop", "message": {"content": "{}"}}]}):
             lock.return_value = contextlib.nullcontext()
             with spark.literature_inference_scope(Path(temporary)):
@@ -259,6 +259,20 @@ class ResearchExtractionTests(unittest.TestCase):
             self.assertEqual(lock.call_count, 2)
             spark.chat("summary", "source")
             self.assertEqual(lock.call_count, 2)
+
+    def test_inference_telemetry_never_logs_article_model_content_or_unknown_usage(self):
+        response = {"choices": [{"finish_reason": "stop", "message": {"content": "private model answer"}}],
+                    "usage": {"prompt_tokens": 123, "completion_tokens": 45,
+                              "unexpected": "private usage detail"}}
+        output = io.StringIO()
+        with patch.object(spark, "local_request", return_value=response), contextlib.redirect_stdout(output):
+            self.assertEqual(spark.chat("private prompt", "private article"), "private model answer")
+        log = output.getvalue()
+        self.assertIn('"prompt_tokens": 123', log)
+        self.assertIn('"completion_tokens": 45', log)
+        self.assertIn('"lock_seconds":', log)
+        self.assertIn('"model_seconds":', log)
+        self.assertNotIn('private', log)
 
 
 if __name__ == "__main__":
