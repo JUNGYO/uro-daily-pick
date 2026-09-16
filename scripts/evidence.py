@@ -80,7 +80,7 @@ def validate_evidence(data,summary,body):
         raise ValueError('Each claim needs source locations')
     for key,statement in expected.items():
         refs=claims[key]
-        missing=statement.strip().lower() in ('not reported','보고되지 않음','해당 없음')
+        missing=not key.startswith('summary_') and statement.strip().lower() in ('not reported','보고되지 않음','해당 없음')
         if not isinstance(refs,list) or len(refs)>8 or (not refs and not missing) or any(not isinstance(ref,str) or ref not in blocks for ref in refs):
             raise ValueError('Invalid source location for '+key)
         if len(refs)!=len(set(refs)):
@@ -93,9 +93,9 @@ def validate_evidence(data,summary,body):
 
 
 def validate_metadata(evidence,details):
-    if not isinstance(evidence,dict) or set(evidence)!={'version','content_hash','claims'} or evidence['version']!=1 or not re.fullmatch(r'[0-9a-f]{64}',str(evidence['content_hash'])):
+    if not isinstance(evidence,dict) or set(evidence)!={'version','content_hash','claims'} or type(evidence['version']) is not int or evidence['version']!=1 or not re.fullmatch(r'[0-9a-f]{64}',str(evidence['content_hash'])):
         raise ValueError('Invalid evidence metadata')
-    if not isinstance(details,dict) or set(details)!=set(DETAIL_FIELDS) or any(not isinstance(v,str) or len(v)>1500 for v in details.values()):
+    if not isinstance(details,dict) or set(details)!=set(DETAIL_FIELDS) or any(not isinstance(v,str) or not 1<=len(v)<=1500 or '\x00' in v or any(0xd800<=ord(c)<=0xdfff for c in v) for v in details.values()):
         raise ValueError('Invalid derived details')
     if not isinstance(evidence['claims'],dict) or len(evidence['claims'])>15 or len(json.dumps(evidence))>16000:
         raise ValueError('Invalid claim metadata')

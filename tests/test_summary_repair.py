@@ -1,0 +1,241 @@
+"""Exercise real summary validation with synthetic originals and mocked model replies."""
+import copy
+import hashlib
+import json
+from pathlib import Path
+import re
+import sys
+import tempfile
+import unittest
+from unittest.mock import patch
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
+import local_summary as spark
+from evidence import BASE_FIELDS, DETAIL_FIELDS, source_blocks, validate_evidence, validate_metadata
+from summarize_papers import validate_summary
+from summary_repair import apply_repairs, claim_issues
+
+PAPER = {"title": "Synthetic prospective cohort"}
+BODY = ("Methods\nA prospective cohort enrolled 60 adults.\n"
+        "Results\nThe primary endpoint occurred in 17 participants.\n"
+        "Limitations\nFollow-up was incomplete and interpretation requires caution.")
+
+
+def draft(body=BODY):
+    blocks = source_blocks(body)
+    methods = next(b["id"] for b in blocks if "enrolled 60" in b["text"])
+    results = next(b["id"] for b in blocks if "in 17 participants" in b["text"])
+    limitations = next(b["id"] for b in blocks if "interpretation requires caution" in b["text"])
+    claims = dict.fromkeys((*BASE_FIELDS, *DETAIL_FIELDS), [])
+    claims.update(summary_1=[methods], summary_2=[results], summary_3=[limitations],
+                  sample_size=[methods], key_finding=[results], qa_1=[results])
+    return {
+        "summary_ko": "성인 60명을 대상으로 전향적 코호트 연구를 수행했다.\n주요 평가변수는 17명에서 발생했다.\n추적 관찰의 불완전성 때문에 해석에 주의가 필요하다.",
+        "structured": {**dict.fromkeys(BASE_FIELDS, "Not reported"),
+                       "sample_size": "60 adults", "key_finding": "17 participants"},
+        "clinical_relevance": 3,
+        "qa": [{"q": "주요 평가변수는 몇 명에서 발생했는가?", "a": "17명에서 발생했다."}],
+        "research_details": dict.fromkeys(DETAIL_FIELDS, "Not reported"),
+        "evidence": claims,
+    }
+
+
+def encoded(value):
+    return json.dumps(value, ensure_ascii=False)
+
+
+def result_patch(raw, key="summary_2"):
+    return {key: {"text": raw["summary_ko"].splitlines()[1], "sources": raw["evidence"][key]}}
+
+
+class SummaryRepairTests(unittest.TestCase):
+    def test_published_evidence_rejects_boolean_version_and_invalid_detail_text(self):
+        raw = draft()
+        support = validate_evidence(raw, validate_summary(encoded(raw)), BODY)
+        cases = []
+        bad = copy.deepcopy(support); bad["evidence"]["version"] = True; cases.append(bad)
+        for value in ("", "\x00", "\ud800"):
+            bad = copy.deepcopy(support); bad["research_details"]["outcome"] = value; cases.append(bad)
+        for bad in cases:
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                validate_metadata(bad["evidence"], bad["research_details"])
+
+    def test_summary_source_is_required_even_when_text_says_not_reported(self):
+        raw = draft()
+        lines = raw["summary_ko"].splitlines()
+        lines[1] = "Not reported"
+        raw["summary_ko"] = "\n".join(lines)
+        raw["evidence"]["summary_2"] = []
+        with self.assertRaises(ValueError):
+            validate_evidence(raw, validate_summary(encoded(raw)), BODY)
+        self.assertIn("summary_2", claim_issues(raw, BODY))
+
+    def test_only_wrong_citation_is_repaired_and_all_valid_claims_are_preserved(self):
+        valid = draft()
+        invalid = copy.deepcopy(valid)
+        invalid["evidence"]["summary_2"] = invalid["evidence"]["summary_1"]
+        original = copy.deepcopy(invalid)
+        with patch.object(spark, "chat", side_effect=[encoded(invalid), encoded(result_patch(valid))]) as chat:
+            result = spark.generate_summary(PAPER, {"content_text": BODY})
+        self.assertEqual(chat.call_count, 2)
+        request = json.loads(chat.call_args_list[1].args[1])
+        self.assertEqual(set(request["failed_claims"]), {"summary_2"})
+        self.assertEqual(result["summary_ko"], valid["summary_ko"])
+        self.assertEqual(result["structured_data"], valid["structured"])
+        self.assertEqual(result["qa_data"], valid["qa"])
+        self.assertEqual(result["research_details"], valid["research_details"])
+        self.assertEqual(result["evidence"]["claims"], valid["evidence"])
+        self.assertEqual(invalid, original)
+        self.assertEqual(spark.validate_cached_summary(result, PAPER, {"content_text": BODY}), result)
+
+    def test_unsupported_question_number_repairs_question_and_answer_together(self):
+        valid = draft()
+        invalid = copy.deepcopy(valid)
+        invalid["qa"][0]["q"] = "18명에서 발생했는가?"
+        self.assertEqual(set(claim_issues(invalid, BODY)), {"qa_1"})
+        repaired = {"qa_1": {**valid["qa"][0], "sources": valid["evidence"]["qa_1"]}}
+        with patch.object(spark, "chat", side_effect=[encoded(invalid), encoded(repaired)]) as chat:
+            result = spark.generate_summary(PAPER, {"content_text": BODY})
+        request = json.loads(chat.call_args_list[1].args[1])
+        self.assertEqual(set(request["failed_claims"]), {"qa_1"})
+        self.assertEqual(request["failed_claims"]["qa_1"]["question"], invalid["qa"][0]["q"])
+        self.assertEqual(result["qa_data"], valid["qa"])
+        self.assertEqual(result["summary_ko"], valid["summary_ko"])
+
+    def test_repeated_unsupported_question_is_rejected_after_bounded_repairs(self):
+        invalid = draft()
+        invalid["qa"][0]["q"] = "18명에서 발생했는가?"
+        rejected = {"qa_1": {**invalid["qa"][0], "sources": invalid["evidence"]["qa_1"]}}
+        with patch.object(spark, "chat", side_effect=[encoded(invalid), encoded(rejected), encoded(rejected)]) as chat:
+            with self.assertRaisesRegex(ValueError, "qa_1"):
+                spark.generate_summary(PAPER, {"content_text": BODY})
+        self.assertEqual(chat.call_count, 3)
+
+    def test_model_schemas_enumerate_only_original_or_supplied_excerpt_locations(self):
+        valid = draft()
+        invalid = copy.deepcopy(valid)
+        invalid["evidence"]["summary_2"] = ["p-9999999"]
+        with patch.object(spark, "chat", side_effect=[encoded(invalid), encoded(result_patch(valid))]) as chat:
+            spark.generate_summary(PAPER, {"content_text": BODY})
+        first_schema = chat.call_args_list[0].args[2]
+        self.assertEqual(set(first_schema["$defs"]["source_id"]["enum"]), {b["id"] for b in source_blocks(BODY)})
+        content = json.loads(chat.call_args_list[1].args[1])
+        excerpt_ids = set(re.findall(r"\[((?:p|table|figure)-\d{7})\]", content["source"]))
+        repair_schema = chat.call_args_list[1].args[2]
+        self.assertEqual(set(repair_schema["$defs"]["source_id"]["enum"]), excerpt_ids)
+        self.assertEqual(set(repair_schema["properties"]), {"summary_2"})
+        self.assertFalse(repair_schema["additionalProperties"])
+
+    def test_patch_cannot_change_valid_claims_or_use_an_unoffered_source_id(self):
+        valid = draft()
+        repair = result_patch(valid)
+        offered = valid["evidence"]["summary_2"]
+        invalid_cases = [
+            {**repair, "summary_1": {"text": "변경된 문장이다.", "sources": offered}},
+            {},
+            {"summary_2": {**repair["summary_2"], "sources": valid["evidence"]["summary_1"]}},
+            {"summary_2": {**repair["summary_2"], "sources": ["p-9999999"]}},
+            {"summary_2": {**repair["summary_2"], "sources": offered * 2}},
+            {"summary_2": {**repair["summary_2"], "content_text": "Synthetic extra content"}},
+        ]
+        for value in invalid_cases:
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                apply_repairs(valid, value, ["summary_2"], offered)
+        self.assertEqual(valid, draft())
+
+    def test_a_repaired_field_still_has_to_pass_numeric_and_source_validation(self):
+        valid = draft()
+        invalid = copy.deepcopy(valid)
+        invalid["evidence"]["summary_2"] = invalid["evidence"]["summary_1"]
+        fabricated = {"summary_2": {"text": "주요 평가변수는 99명에서 발생했다.",
+                                      "sources": valid["evidence"]["summary_2"]}}
+        with patch.object(spark, "chat", side_effect=[encoded(invalid), encoded(fabricated), encoded(fabricated)]) as chat:
+            with self.assertRaisesRegex(ValueError, "summary_2"):
+                spark.generate_summary(PAPER, {"content_text": BODY})
+        self.assertEqual(chat.call_count, 3)
+
+    def test_invalid_publication_shape_cannot_be_accepted_as_a_repaired_field(self):
+        valid = draft()
+        offered = valid["evidence"]["summary_2"]
+        for text in ("두 줄로\n바뀐 문장", "가" * 2001, "금지\x00문자", ""):
+            with self.subTest(text=text[:20]), self.assertRaises(ValueError):
+                apply_repairs(valid, {"summary_2": {"text": text, "sources": offered}}, ["summary_2"], offered)
+
+    def test_interrupted_repair_resumes_saved_draft_without_another_full_summary(self):
+        valid = draft()
+        invalid = copy.deepcopy(valid)
+        invalid["evidence"]["summary_2"] = invalid["evidence"]["summary_1"]
+        with tempfile.TemporaryDirectory() as temporary:
+            cache = Path(temporary) / "evidence.json"
+            with patch.object(spark, "chat", side_effect=[encoded(invalid), spark.SummaryBudgetExpired()]):
+                with self.assertRaises(spark.SummaryBudgetExpired):
+                    spark.generate_summary(PAPER, {"content_text": BODY}, cache_path=cache)
+            checkpoint = json.loads(cache.with_suffix(".draft.json").read_text(encoding="utf-8"))
+            self.assertEqual(checkpoint["draft"], invalid)
+            with patch.object(spark, "chat", return_value=encoded(result_patch(valid))) as chat:
+                result = spark.generate_summary(PAPER, {"content_text": BODY}, cache_path=cache)
+            self.assertEqual(chat.call_count, 1)
+            request = json.loads(chat.call_args.args[1])
+            self.assertEqual(set(request["failed_claims"]), {"summary_2"})
+            self.assertEqual(result["evidence"]["claims"], valid["evidence"])
+            self.assertFalse(list(Path(temporary).glob("*.pending")))
+
+    def test_stale_title_or_body_draft_is_ignored_instead_of_patching_old_claims(self):
+        invalid = draft()
+        invalid["evidence"]["summary_2"] = invalid["evidence"]["summary_1"]
+        for paper, body in (({"title": "Different synthetic title"}, BODY), (PAPER, BODY + "\nNew observation.")):
+            with self.subTest(paper=paper, body=body[-20:]), tempfile.TemporaryDirectory() as temporary:
+                cache = Path(temporary) / "evidence.json"
+                with patch.object(spark, "chat", side_effect=[encoded(invalid), spark.SummaryBudgetExpired()]):
+                    with self.assertRaises(spark.SummaryBudgetExpired):
+                        spark.generate_summary(PAPER, {"content_text": BODY}, cache_path=cache)
+                with patch.object(spark, "chat", return_value=encoded(draft(body))) as chat:
+                    result = spark.generate_summary(paper, {"content_text": body}, cache_path=cache)
+                self.assertEqual(chat.call_count, 1)
+                request = json.loads(chat.call_args.args[1])
+                self.assertEqual(request["source_type"], "fulltext")
+                self.assertNotIn("failed_claims", request)
+                self.assertEqual(result["summary_source_hash"], hashlib.sha256(("fulltext\n" + paper["title"] + "\n" + body).encode()).hexdigest())
+
+    def test_completed_cache_rechecks_provenance_and_claim_values(self):
+        with patch.object(spark, "chat", return_value=encoded(draft())):
+            result = spark.generate_summary(PAPER, {"content_text": BODY})
+        self.assertEqual(spark.validate_cached_summary(result, PAPER, {"content_text": BODY}), result)
+        cases = []
+        bad = copy.deepcopy(result); bad["summary_model"] = "spark/older-model"; cases.append(bad)
+        bad = copy.deepcopy(result); bad["summary_source_hash"] = "f" * 64; cases.append(bad)
+        bad = copy.deepcopy(result); bad["evidence"]["content_hash"] = "f" * 64; cases.append(bad)
+        bad = copy.deepcopy(result); bad["evidence"]["claims"]["summary_2"] = bad["evidence"]["claims"]["summary_1"]; cases.append(bad)
+        bad = copy.deepcopy(result); bad["summary_ko"] = bad["summary_ko"].replace("17", "99"); cases.append(bad)
+        for bad in cases:
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                spark.validate_cached_summary(bad, PAPER, {"content_text": BODY})
+        with self.assertRaises(ValueError):
+            spark.validate_cached_summary(result, {"title": "Changed title"}, {"content_text": BODY})
+        with self.assertRaises(ValueError):
+            spark.validate_cached_summary(result, PAPER, {"content_text": BODY + "\nChanged original."})
+
+    def test_missing_or_malformed_evidence_can_be_repaired_without_crashing(self):
+        valid = draft()
+        for evidence in (None, [], {**valid["evidence"], "summary_2": None}):
+            with self.subTest(evidence=evidence):
+                invalid = copy.deepcopy(valid)
+                invalid["evidence"] = evidence
+                keys = list(claim_issues(invalid, BODY))
+                repairs = {}
+                for key in keys:
+                    item = {"sources": valid["evidence"][key]}
+                    if key.startswith("summary_"):
+                        item["text"] = valid["summary_ko"].splitlines()[int(key[-1]) - 1]
+                    elif key.startswith("qa_"):
+                        item.update(valid["qa"][int(key[-1]) - 1])
+                    else:
+                        item["text"] = valid["structured"].get(key, valid["research_details"].get(key))
+                    repairs[key] = item
+                with patch.object(spark, "chat", side_effect=[encoded(invalid), encoded(repairs)]):
+                    result = spark.generate_summary(PAPER, {"content_text": BODY})
+                self.assertEqual(result["evidence"]["claims"], valid["evidence"])
+
+
+if __name__ == "__main__":
+    unittest.main()
