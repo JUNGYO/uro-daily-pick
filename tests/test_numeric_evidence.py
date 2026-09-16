@@ -99,10 +99,14 @@ class NumericEvidenceTests(unittest.TestCase):
             self.assertIn('summary_ko', local_summary.generate_summary({'title': 'Synthetic'}, {'content_text': body}))
         unsupported = copy.deepcopy(raw)
         unsupported['qa'][0]['q'] = '0.06이 보고되었는가?'
-        with patch.object(local_summary, 'chat', return_value=json.dumps(unsupported, ensure_ascii=False)) as chat:
-            with self.assertRaisesRegex(ValueError, 'Unsupported summary number'):
+        still_unsupported = {'qa_1': {**unsupported['qa'][0], 'sources': unsupported['evidence']['qa_1']}}
+        with patch.object(local_summary, 'chat', side_effect=[json.dumps(value, ensure_ascii=False)
+                for value in (unsupported, still_unsupported, still_unsupported)]) as chat:
+            with self.assertRaisesRegex(ValueError, 'qa_1'):
                 local_summary.generate_summary({'title': 'Synthetic'}, {'content_text': body})
             self.assertEqual(chat.call_count, 3)
+            for call in chat.call_args_list[1:]:
+                self.assertEqual(set(json.loads(call.args[1])['failed_claims']), {'qa_1'})
 
 
 if __name__ == '__main__':

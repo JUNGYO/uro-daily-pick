@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, Mock, patch
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/"scripts"))
 import institution_worker as worker
 import local_summary as spark
+from evidence import BASE_FIELDS, DETAIL_FIELDS, source_blocks, validate_evidence
 from check_fulltext_queue import assess
 
 BODY="The study enrolled six participants. The measured endpoint was 17. "*40
@@ -23,10 +24,16 @@ HTML=f'<article><h2>Methods</h2><p>{BODY}</p><h2>Results</h2><p>Endpoint 17.</p>
 
 
 def derived(paper,document):
-    return {"summary_ko":"연구 설계를 평가했다.\n주요 결과가 보고되었다.\n추가 검증이 필요하다.",
+    result = {"summary_ko":"연구 설계를 평가했다.\n주요 결과가 보고되었다.\n추가 검증이 필요하다.",
         "structured_data":dict.fromkeys(["study_design","sample_size","key_finding","population"],"Not reported"),
         "clinical_relevance":3,"qa_data":[{"q":"한계는?","a":"추가 검증."}],"summary_model":spark.MODEL_LABEL,
         "summary_source_hash":hashlib.sha256(("fulltext\n"+paper["title"]+"\n"+document["content_text"]).encode()).hexdigest()}
+    location = source_blocks(document["content_text"])[0]["id"]
+    claims = dict.fromkeys((*BASE_FIELDS, *DETAIL_FIELDS), [])
+    claims.update({key:[location] for key in ("summary_1", "summary_2", "summary_3", "qa_1")})
+    support = validate_evidence({"research_details":dict.fromkeys(DETAIL_FIELDS,"Not reported"),
+                                "evidence":claims}, result, document["content_text"])
+    return {**result, **support}
 
 
 class SparkPipelineTests(unittest.TestCase):
@@ -75,15 +82,24 @@ class SparkPipelineTests(unittest.TestCase):
         paper={"title":"Synthetic long article"}
         document={"content_text":BODY*30}
         chunks=(len(document["content_text"])+17999)//18000
+        expected=derived(paper,document)
+        raw={"summary_ko":expected["summary_ko"],"structured":expected["structured_data"],
+             "clinical_relevance":expected["clinical_relevance"],"qa":expected["qa_data"],
+             "research_details":expected["research_details"],"evidence":expected["evidence"]["claims"]}
+        first_location=source_blocks(document["content_text"])[0]["id"]
+        first_note=f"[{first_location}] The study enrolled six participants; the measured endpoint was 17."
+        def reply(_system,content,schema=None,**_kwargs):
+            if schema is not None:
+                return json.dumps(raw,ensure_ascii=False)
+            location=content.split("]",1)[0].lstrip("[")
+            return f"[{location}] The study enrolled six participants; the measured endpoint was 17."
         with tempfile.TemporaryDirectory() as temporary:
             cache=Path(temporary)/"evidence.json"
-            with patch.object(spark,"chat",side_effect=["Previously extracted facts.",spark.SummaryBudgetExpired()]):
+            with patch.object(spark,"chat",side_effect=[first_note,spark.SummaryBudgetExpired()]):
                 with self.assertRaises(spark.SummaryBudgetExpired):
                     spark.generate_summary(paper,document,cache_path=cache)
-            self.assertEqual(json.loads(cache.read_text())["notes"],["Previously extracted facts."])
-            with patch.object(spark,"chat",return_value="{}") as chat, \
-                 patch.object(spark,"validate_summary",return_value=derived(paper,document)), \
-                 patch.object(spark,"validate_evidence",return_value={}):
+            self.assertEqual(json.loads(cache.read_text())["notes"],[first_note])
+            with patch.object(spark,"chat",side_effect=reply) as chat:
                 result=spark.generate_summary(paper,document,cache_path=cache)
             self.assertEqual(chat.call_count,chunks)  # remaining chunks plus final summary
             self.assertEqual(result["summary_source_hash"],derived(paper,document)["summary_source_hash"])

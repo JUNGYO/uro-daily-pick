@@ -25,6 +25,7 @@ from fulltext import FulltextUnavailable, NoRedirect, fetch_oa, parse_document
 from evidence import validate_metadata
 from local_summary import MODEL_LABEL, SummaryBudgetExpired, ensure_server, generate_summary, summary_payload, literature_inference_scope
 from catalog_policy import AUTOMATIC_START_DATE
+from summary_queue import SummaryPublicationRejected
 
 SERVICE_URL = "https://vwdcqzcoovczmtzdyzbc.supabase.co"
 PUBLIC_KEY = "sb_publishable_FwZC-M2lO2nvh3MFbqf6nA_K8jMXNdw"
@@ -84,6 +85,8 @@ class Service:
         payload = None if data is None else json.dumps(data, ensure_ascii=False).encode()
         deadline = getattr(self, "research_deadline", None) if path in {
             "rpc/claim_research_extractions", "rpc/finish_research_extraction", "rpc/fail_research_extraction"} else None
+        if path in ("rpc/publish_institution_summary", "rpc/institution_worker_status"):
+            deadline = getattr(self, "summary_deadline", None)
         for attempt in range(4):
             remaining = 45 if deadline is None else min(45, deadline - time.monotonic())
             if remaining < 1:
@@ -99,7 +102,7 @@ class Service:
                     from research_extraction import ResearchLeaseSuperseded
                     raise ResearchLeaseSuperseded("Research extraction lease or source changed") from None
                 if path=="rpc/publish_institution_summary" and error.code in (400,409,422):
-                    raise ValueError("Summary publication requires revalidation") from None
+                    raise SummaryPublicationRejected("Summary publication requires revalidation") from None
                 if error.code not in (408,429,500,502,503,504,520,522,524):
                     raise RuntimeError(f"Service HTTP {error.code}") from None
             except ssl.SSLCertVerificationError:
@@ -155,12 +158,16 @@ class Service:
                 "section_count":len(document["sections"]),"source_url":document["source_url"],
                 "summary_source_hash":hashlib.sha256(("fulltext\n"+paper["title"]+"\n"+body).encode()).hexdigest()})
 
-    def candidates(self, pmid=None):
+    def candidates(self, pmid=None, include_summary=False):
         rows = []
         last_id = 0
+        selected = "id,pmid,doi,title,pub_date,paper_type,fulltext_available"
+        if include_summary:
+            selected += ",summary_basis,summary_source_hash,summarized_at,summary_model,summary_ko"
         while True:
-            page = self.request("papers", params={"select":"id,pmid,doi,title,pub_date,paper_type,fulltext_available",
+            page = self.request("papers", params={"select":selected,
                 **({"pmid":"eq."+pmid} if pmid else {"pub_date":"gte."+AUTOMATIC_START_DATE}),
+                **({"fulltext_available":"eq.true"} if include_summary and not pmid else {}),
                 "or":f"(fulltext_available.eq.false,summary_source_hash.is.null,summarized_at.is.null,summary_model.is.null,summary_model.neq.{MODEL_LABEL},structured_data.is.null,qa_data.is.null)", "order":"id.asc",
                 "id":f"gt.{last_id}", "limit":1000})
             rows.extend(page)
@@ -383,8 +390,12 @@ def run(directory, node, seconds, phase="all", requested_pmid=None):
         service.status("running")
         if phase!="collect":
             ensure_server(directory)
+        if phase == "all":
             archive_legacy_bodies(service,directory,deadline)
-        papers = service.candidates(requested_pmid) if requested_pmid else service.candidates()
+        if phase == "summarize":
+            papers = service.candidates(requested_pmid, include_summary=True)
+        else:
+            papers = service.candidates(requested_pmid) if requested_pmid else service.candidates()
         # Finish already acquired bodies before spending time on publisher access.
         cached={path.name.split(".")[0] for folder in (spool,directory/"cloud-archive",directory/"sources")
                 for path in folder.glob("*.json")}
@@ -395,6 +406,12 @@ def run(directory, node, seconds, phase="all", requested_pmid=None):
             counts = run_collection(directory, node, deadline, service, db, papers)
             print(f"Institution collect: {counts['completed']} completed, {counts['failed']} unavailable/invalid, "
                   f"{counts['deferred']} deferred", flush=True)
+            return
+        if phase == "summarize":
+            from summary_queue import run_summary_queue
+            counts = run_summary_queue(directory, deadline, service, db, papers)
+            print(f"Institution summarize: {counts['first_completed']} first summaries, {counts['updated']} refreshed, "
+                  f"{counts['failed']} failed, {counts['yielded']} yielded, {counts['deferred']} deferred", flush=True)
             return
         for paper in papers:
             if time.monotonic() >= deadline:
