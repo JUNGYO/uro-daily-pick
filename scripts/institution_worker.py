@@ -85,7 +85,7 @@ class Service:
         payload = None if data is None else json.dumps(data, ensure_ascii=False).encode()
         deadline = getattr(self, "research_deadline", None) if path in {
             "rpc/claim_research_extractions", "rpc/finish_research_extraction", "rpc/fail_research_extraction"} else None
-        if path in ("rpc/publish_institution_summary", "rpc/institution_worker_status"):
+        if path in ("papers", "rpc/publish_institution_summary", "rpc/institution_worker_status"):
             deadline = getattr(self, "summary_deadline", None)
         for attempt in range(4):
             remaining = 45 if deadline is None else min(45, deadline - time.monotonic())
@@ -409,7 +409,8 @@ def run(directory, node, seconds, phase="all", requested_pmid=None):
             return
         if phase == "summarize":
             from summary_queue import run_summary_queue
-            counts = run_summary_queue(directory, deadline, service, db, papers)
+            counts = run_summary_queue(directory, deadline, service, db, papers,
+                                       refresh=None if requested_pmid else lambda: service.candidates(include_summary=True))
             print(f"Institution summarize: {counts['first_completed']} first summaries, {counts['updated']} refreshed, "
                   f"{counts['failed']} failed, {counts['yielded']} yielded, {counts['deferred']} deferred", flush=True)
             return

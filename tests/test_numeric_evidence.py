@@ -12,6 +12,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
 from evidence import BASE_FIELDS, DETAIL_FIELDS, numeric_values, source_blocks, validate_evidence
 import local_summary
 from summarize_papers import validate_summary
+from summary_wire import SourceAliases
 
 
 def draft(body, value):
@@ -28,7 +29,95 @@ def draft(body, value):
     }
 
 
+def model_reply(value, body):
+    wire = copy.deepcopy(value)
+    aliases = SourceAliases(source_blocks(body))
+    if 'evidence' in wire:
+        wire['evidence'] = {key: aliases.encode_refs(refs) for key, refs in wire['evidence'].items()}
+    else:
+        for change in wire.values():
+            change['sources'] = aliases.encode_refs(change['sources'])
+    return json.dumps(wire, ensure_ascii=False)
+
+
 class NumericEvidenceTests(unittest.TestCase):
+    def test_source_ordinals_first_through_twentieth_are_exact_and_source_only(self):
+        ordinals = ('first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth',
+                    'eleventh', 'twelfth', 'thirteenth', 'fourteenth', 'fifteenth', 'sixteenth', 'seventeenth',
+                    'eighteenth', 'nineteenth', 'twentieth')
+        for number, ordinal in enumerate(ordinals, start=1):
+            with self.subTest(ordinal=ordinal):
+                self.assertEqual(numeric_values(ordinal.upper() + ' assessment', source=True), {Decimal(number)})
+                self.assertEqual(numeric_values(ordinal + ' assessment'), set())
+        self.assertEqual(numeric_values('third-line therapy', source=True), {Decimal(3)})
+        self.assertNotIn(Decimal(1), numeric_values('twenty-first assessment', source=True))
+
+    def test_tertiary_is_numeric_only_for_explicit_care_or_referral_centers(self):
+        for source in ('tertiary care hospital', 'TERTIARY-CARE institution',
+                       'tertiary referral center', 'tertiary referral centres'):
+            with self.subTest(source=source):
+                self.assertEqual(numeric_values(source, source=True), {Decimal(3)})
+                self.assertEqual(numeric_values(source), set())
+        for source in ('tertiary outcome', 'tertiary prevention', 'tertiary protein structure'):
+            self.assertEqual(numeric_values(source, source=True), set())
+
+    def test_only_narrow_whole_decade_phrases_supply_ten_in_the_source(self):
+        for source in ('the first decade', 'a decade', 'one decade', 'the past decade', 'the last decade'):
+            with self.subTest(source=source):
+                self.assertIn(Decimal(10), numeric_values(source, source=True))
+                self.assertEqual(numeric_values(source), set())
+        for source in ('a century', 'decades', 'two decades', 'second decade',
+                       'half a decade', 'half of the last decade', 'a quarter of a decade',
+                       'one-half a decade', 'one and a half decades', 'a fraction of one decade'):
+            with self.subTest(source=source):
+                self.assertNotIn(Decimal(10), numeric_values(source, source=True))
+
+    def test_ascii_grouping_requires_explicit_total_prose_and_exact_groups(self):
+        for source, expected in [('A total of 622 330 solid organ transplant recipients', 622330),
+                                 ('total of 1 234 567 participants', 1234567),
+                                 ('A TOTAL OF 12 345 patients', 12345)]:
+            with self.subTest(source=source):
+                self.assertEqual(numeric_values(source, source=True), {Decimal(expected)})
+                self.assertNotIn(Decimal(expected), numeric_values(source))
+        for source in ('622 330', 'Group A 622; Group B 330', 'total of 622\n330',
+                       'total of\n622 330', 'total of 622\t330', 'total of 62 33',
+                       'total of 622 330 45', 'total of 622 and 330'):
+            with self.subTest(source=source):
+                self.assertNotIn(Decimal(622330), numeric_values(source, source=True))
+        self.assertEqual(numeric_values('622 330', source=True), {Decimal(622), Decimal(330)})
+
+    def test_proven_ordinal_duration_and_total_formats_pass_the_real_evidence_path(self):
+        cases = [('The third referral institution conducted this study.', '3'),
+                 ('The study took place at a tertiary care institution.', '3'),
+                 ('The results describe the first decade of follow-up.', '10'),
+                 ('A total of 622 330 solid organ transplant recipients were included.', '622,330')]
+        for body, value in cases:
+            with self.subTest(source=body):
+                raw = draft(body, value)
+                with patch.object(local_summary, 'chat', return_value=model_reply(raw, body)) as chat:
+                    result = local_summary.generate_summary({'title': 'Synthetic source format'}, {'content_text': body})
+                self.assertEqual(chat.call_count, 1)
+                self.assertEqual(result['evidence']['claims'], raw['evidence'])
+
+    def test_source_normalization_does_not_allow_changed_quantities_rounding_or_arithmetic(self):
+        for body, value in [('The third referral institution conducted the study.', '4'),
+                            ('A tertiary care institution conducted the study.', '33'),
+                            ('The first decade was evaluated.', '100'),
+                            ('The first decade was evaluated.', '9.9'),
+                            ('A total of 622 330 patients were included.', '622,331'),
+                            ('A total of 622 330 patients were included.', '622,300'),
+                            ('A total of 622 and 330 patients were included.', '952'),
+                            ('Half a decade was evaluated.', '10')]:
+            with self.subTest(source=body, claim=value):
+                raw = draft(body, value)
+                with self.assertRaisesRegex(ValueError, 'Number absent'):
+                    validate_evidence(raw, validate_summary(json.dumps(raw)), body)
+        body = 'The first decade was evaluated.\nThe outcome was reported in a separate cohort.'
+        raw = draft(body, '10')
+        raw['evidence']['summary_1'] = [source_blocks(body)[1]['id']]
+        with self.assertRaisesRegex(ValueError, 'Number absent'):
+            validate_evidence(raw, validate_summary(json.dumps(raw)), body)
+
     def test_known_identifier_hyphens_keep_positive_version_values(self):
         for label, value in [('GPT-4o', 4), ('gpt-4o', 4), ('GPT-5', 5),
                              ('PD-1', 1), ('PD-L1', 1), ('IL-6', 6),
@@ -71,7 +160,7 @@ class NumericEvidenceTests(unittest.TestCase):
             with self.subTest(source=source, claim=claim):
                 body = 'The reported measurement was ' + source
                 raw = draft(body, claim)
-                with patch.object(local_summary, 'chat', return_value=json.dumps(raw, ensure_ascii=False)) as chat:
+                with patch.object(local_summary, 'chat', return_value=model_reply(raw, body)) as chat:
                     result = local_summary.generate_summary({'title': 'Synthetic format test'}, {'content_text': body})
                 self.assertEqual(chat.call_count, 1)
                 self.assertEqual(result['evidence']['content_hash'], hashlib.sha256(body.encode()).hexdigest())
@@ -123,12 +212,12 @@ class NumericEvidenceTests(unittest.TestCase):
         body = 'The measurement was 0.050.'
         raw = draft(body, '0.05')
         raw['qa'][0]['q'] = '0.05가 보고되었는가?'
-        with patch.object(local_summary, 'chat', return_value=json.dumps(raw, ensure_ascii=False)):
+        with patch.object(local_summary, 'chat', return_value=model_reply(raw, body)):
             self.assertIn('summary_ko', local_summary.generate_summary({'title': 'Synthetic'}, {'content_text': body}))
         unsupported = copy.deepcopy(raw)
         unsupported['qa'][0]['q'] = '0.06이 보고되었는가?'
         still_unsupported = {'qa_1': {**unsupported['qa'][0], 'sources': unsupported['evidence']['qa_1']}}
-        with patch.object(local_summary, 'chat', side_effect=[json.dumps(value, ensure_ascii=False)
+        with patch.object(local_summary, 'chat', side_effect=[model_reply(value, body)
                 for value in (unsupported, still_unsupported, still_unsupported)]) as chat:
             with self.assertRaisesRegex(ValueError, 'qa_1'):
                 local_summary.generate_summary({'title': 'Synthetic'}, {'content_text': body})

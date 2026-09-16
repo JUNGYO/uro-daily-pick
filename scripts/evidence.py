@@ -14,17 +14,35 @@ _SCIENTIFIC = re.compile(
     r'|(?:[+\-\u2212]?(?:\d+(?:\.\d+)?|\.\d+)\s*[x\u00d7]\s*)?10'
     r'(?:\s*\^\s*\{?\s*[+\-\u2212]?\d+\s*\}?|[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+))')
 _NUMBER_WORDS = ('zero','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen','twenty')
+_ORDINAL_WORDS = ('first','second','third','fourth','fifth','sixth','seventh','eighth','ninth','tenth',
+                  'eleventh','twelfth','thirteenth','fourteenth','fifteenth','sixteenth','seventeenth',
+                  'eighteenth','nineteenth','twentieth')
+_PROSE_GROUP = re.compile(r'(\b(?:a[ ]+)?total[ ]+of[ ]+)([0-9]{1,3}(?:[ ]+[0-9]{3})+)(?![0-9]|[ ]+[0-9])', re.I)
+_DECADE = re.compile(r'\b(?:first|a|one|past|last)[ ]+decade\b', re.I)
+_PARTIAL_DECADE_PREFIX = re.compile(r'\b(?:half|quarters?|thirds?|tenths?|fraction|part)(?:[ ]+of)?(?:[ ]+the)?[ ]+$', re.I)
+_TERTIARY_CARE = re.compile(r'\btertiary(?=[ -]+(?:care\b|referral[ -]+cent(?:er|re)s?\b))', re.I)
 _NUMBERED_LABEL = re.compile(r'(?<!\w)(?:GPT|gpt|PD(?:-L)?|IL)$')
 
 
 def numeric_values(text, *, source=False):
-    """Exact values only: no rounding, tolerances, or unit conversion.
+    """Exact values only: no rounding, tolerances, or general unit conversion.
 
     Claims with unsupported notation must be regenerated. Such source tokens
     cannot supply evidence for an unrelated integer or decimal. Source-only
-    number-word expansion preserves the existing zero-through-twenty rule.
+    number-word expansion also recognizes ordinals and narrowly specified prose.
     """
     if source:
+        # XML flattening may turn thousands separators into ASCII spaces. Only
+        # explicit total-of prose may join these groups; bare/table values cannot.
+        text = _PROSE_GROUP.sub(lambda match: match[1] + match[2].replace(' ', ''), text)
+        # Preserve any explicit ordinal while adding the exact decade duration.
+        # Fractional periods such as "half a decade" must not provide ten years.
+        before_decades = text
+        text = _DECADE.sub(lambda match: match[0] if _PARTIAL_DECADE_PREFIX.search(before_decades[:match.start()])
+                           else match[0] + ' (10)', text)
+        text = _TERTIARY_CARE.sub('3', text)
+        for number, word in enumerate(_ORDINAL_WORDS, start=1):
+            text = re.sub(r'(?<![\w-])'+word+r'\b', str(number), text, flags=re.I)
         for number, word in enumerate(_NUMBER_WORDS):
             text = re.sub(r'\b'+word+r'\b', str(number), text, flags=re.I)
     if _SCIENTIFIC.search(text):

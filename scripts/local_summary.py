@@ -15,7 +15,9 @@ from urllib.request import Request, build_opener, ProxyHandler
 from fulltext import NoRedirect
 from evidence import source_blocks, numbered_source, validate_evidence, validate_metadata, numeric_values, DETAIL_FIELDS, BASE_FIELDS
 from summarize_papers import PROMPT, validate_summary
-from summary_repair import claim_issues, claim_texts, repair_context, repair_schema, apply_repairs
+from summary_repair import claim_issues, claim_texts, repair_context, repair_schema, apply_repairs, numeric_repair_feedback
+from summary_wire import SourceAliases
+from inference_slots import inference_access
 
 MODEL = "nvidia/Qwen3.8-27B-NVFP4"
 MODEL_LABEL = "spark/" + MODEL + ".evidence-v1"
@@ -31,7 +33,7 @@ class SummaryBudgetExpired(Exception):
 
 @contextmanager
 def literature_inference_scope(directory):
-    """Use the shared literature lock for each chat request, without holding it between chunks."""
+    """Admit at most two summary requests, releasing access between model calls."""
     token = _INFERENCE_DIRECTORY.set(Path(directory))
     try:
         yield
@@ -41,29 +43,15 @@ def literature_inference_scope(directory):
 
 @contextmanager
 def literature_inference_lock(directory, deadline=None):
-    """Serialize only this literature service's processes; never touch the research runtime."""
-    root = Path(directory).resolve()
-    path = root / "literature-inference.lock"
-    if path.resolve().parent != root:
-        raise ValueError("Inference lock must remain in the literature state directory")
-    with path.open("a+b") as handle:
-        if os.fstat(handle.fileno()).st_size == 0:
-            handle.write(b"0")
-            handle.flush()
-        while True:
-            remaining_timeout(deadline)
-            try:
-                handle.seek(0)
-                if os.name == "nt":
-                    import msvcrt
-                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
-                else:
-                    import fcntl
-                    fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
-                break
-            except OSError:
-                time.sleep(remaining_timeout(deadline, 0.25))
-        yield  # Closing the handle releases the process-owned lock on either platform.
+    """Exclusive literature research access, compatible with older serial workers."""
+    with inference_access(directory, deadline, remaining_timeout):
+        yield
+
+
+@contextmanager
+def summary_inference_lock(directory, deadline=None):
+    with inference_access(directory, deadline, remaining_timeout, shared=True):
+        yield
 
 
 def remaining_timeout(deadline, maximum=600):
@@ -119,10 +107,19 @@ def chat(system, content, schema=None, deadline=None):
              "chat_template_kwargs":{"enable_thinking":False}}
     if schema: payload["response_format"]={"type":"json_schema","json_schema":{"name":"paper_summary","schema":schema,"strict":True}}
     for attempt in range(3):
+        waiting = time.monotonic()
+        started = None
         try:
             directory = _INFERENCE_DIRECTORY.get()
-            with literature_inference_lock(directory, deadline) if directory is not None else nullcontext():
+            with summary_inference_lock(directory, deadline) if directory is not None else nullcontext():
+                started = time.monotonic()
                 result=local_request("/v1/chat/completions",payload,timeout=remaining_timeout(deadline))
+            usage = result.get('usage', {}) if isinstance(result, dict) else {}
+            tokens = {key: value for key in ('prompt_tokens', 'completion_tokens')
+                      if type(value := usage.get(key)) is int and value >= 0} if isinstance(usage, dict) else {}
+            print('Inference metrics: ' + json.dumps({'attempt': attempt + 1,
+                  'lock_seconds': round(started - waiting, 3),
+                  'model_seconds': round(time.monotonic() - started, 3), **tokens}), flush=True)
             choices = result.get('choices') if isinstance(result, dict) else None
             if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
                 raise ValueError('Missing Spark completion')
@@ -137,6 +134,8 @@ def chat(system, content, schema=None, deadline=None):
                 raise RuntimeError(f"Spark request rejected: HTTP {error.code}") from None
         except (URLError,TimeoutError,IncompleteRead,ConnectionError):
             pass
+        print('Inference retry: ' + json.dumps({'attempt': attempt + 1,
+              'elapsed_seconds': round(time.monotonic() - waiting, 3)}), flush=True)
         if attempt<2: time.sleep(remaining_timeout(deadline,5*(attempt+1)))
     raise RuntimeError("Spark temporarily unavailable")
 
@@ -222,9 +221,19 @@ def validate_cached_summary(summary, paper, document):
     return _validated_summary(data, paper, body)
 
 
+def validate_draft_summary(checkpoint, paper, document):
+    """Promote only a source-bound, fully valid local draft, without another model call."""
+    body = document['content_text']
+    expected = hashlib.sha256((CACHE_VERSION + '\n' + paper['title'] + '\n' + body).encode()).hexdigest()
+    if not isinstance(checkpoint, dict) or checkpoint.get('source_hash') != expected:
+        raise ValueError('Stale draft source')
+    return _validated_summary(checkpoint.get('draft'), paper, body)
+
+
 def generate_summary(paper, document, deadline=None, cache_path=None):
     body = document['content_text']
     blocks = source_blocks(body)
+    aliases = SourceAliases(blocks)
     evidence_hash = hashlib.sha256((CACHE_VERSION+'\n'+paper['title']+'\n'+body).encode()).hexdigest()
     draft_path = Path(cache_path).with_suffix('.draft.json') if cache_path else None
     data = None
@@ -237,7 +246,7 @@ def generate_summary(paper, document, deadline=None, cache_path=None):
         except (OSError, ValueError, KeyError, TypeError):
             pass
     if data is None:
-        source = numbered_source(blocks)
+        source = aliases.numbered(blocks)
         if len(body) > 65000:
             notes = []
             if cache_path:
@@ -256,7 +265,7 @@ def generate_summary(paper, document, deadline=None, cache_path=None):
                     'Do not infer missing information. Maximum 1600 characters.',
                     numbered_source(blocks, start, start+18000), deadline=deadline))
                 _checkpoint(cache_path, {'source_hash': evidence_hash, 'notes': notes})
-            source = '\n\n'.join(notes)
+            source = aliases.encode_markers('\n\n'.join(notes))
             if len(source) > 65000:
                 raise ValueError('Article evidence exceeds Spark context')
         prompt = PROMPT.replace('summary_ko: exactly three Korean sentences separated by newline',
@@ -269,14 +278,15 @@ def generate_summary(paper, document, deadline=None, cache_path=None):
             'A mini review is not a systematic review unless the paper explicitly says so. '
             'Keep BPH, BPO, NMIBC and other established abbreviations in English. '
             'Include research_details with intervention, comparator, follow_up, outcome, limitations; use Not reported if absent. '
-            'Map summary_1..summary_3, all structured and research_details fields, and qa_1..qa_N to exact source IDs. '
+            'Map summary_1..summary_3, all structured and research_details fields, and qa_1..qa_N to exact integer source IDs from the bracketed labels. '
+            'Return source IDs as JSON integers, never strings. '
             'Every factual claim requires 1..8 relevant IDs; [] is allowed only for Not reported in optional details. '
             'Cite the passage containing each reported value and its study context, not merely a nearby heading. '
             'Provide 1..3 useful Korean Q&A pairs. Only include qa evidence keys for actual Q&A pairs. '
             'Describe observed comparisons cautiously; do not claim equivalence from nonsignificant results.',
             json.dumps({'title': paper['title'], 'source_type': 'fulltext', 'source': source}, ensure_ascii=False),
-            _summary_schema(blocks), deadline=deadline)
-        data = _initial_draft(raw)
+            aliases.schema(_summary_schema(blocks)), deadline=deadline)
+        data = aliases.decode_initial(_initial_draft(raw))
         # Optional schema keys can be emitted for unused QA slots. They are not claims.
         claims = claim_texts(data)
         if isinstance(data.get('evidence'), dict):
@@ -293,8 +303,11 @@ def generate_summary(paper, document, deadline=None, cache_path=None):
         source_ids = [block['id'] for block in excerpts]
         claims = claim_texts(data)
         evidence = data.get('evidence') if isinstance(data.get('evidence'), dict) else {}
-        failed = {key: {'statement': claims[key], 'sources': evidence.get(key, []), 'problem': reason}
+        failed = {key: {'statement': claims[key], 'sources': aliases.encode_refs(evidence.get(key, [])), 'problem': reason}
                   for key, reason in issues.items()}
+        numeric_feedback = numeric_repair_feedback(data, issues, body)
+        for key in failed:
+            failed[key]['numeric_feedback'] = numeric_feedback[key]
         for key in failed:
             if key.startswith('qa_'):
                 failed[key]['question'] = data['qa'][int(key[3:])-1]['q']
@@ -307,10 +320,10 @@ def generate_summary(paper, document, deadline=None, cache_path=None):
             'Summary lines and Q&A must be Korean, with established medical abbreviations kept. '
             'Each summary must be one sentence with supporting source IDs. '
             'Use Not reported and [] only for optional fields genuinely absent from the original; do not invent facts. '
-            'Return exactly the requested keys, with corrected text (or q and a for Q&A) and sources.',
-            json.dumps({'title': paper['title'], 'failed_claims': failed, 'source': numbered_source(excerpts)}, ensure_ascii=False),
-            repair_schema(issues, source_ids), deadline=deadline)
-        data = apply_repairs(data, _read_object(raw), issues, source_ids)
+            'Return exactly the requested keys, with corrected text (or q and a for Q&A) and sources as JSON integer IDs from the supplied bracketed labels.',
+            json.dumps({'title': paper['title'], 'failed_claims': failed, 'source': aliases.numbered(excerpts)}, ensure_ascii=False),
+            aliases.schema(repair_schema(issues, source_ids), source_ids), deadline=deadline)
+        data = apply_repairs(data, aliases.decode_repairs(_read_object(raw), source_ids), issues, source_ids)
         _checkpoint(draft_path, {'source_hash': evidence_hash, 'draft': data})
     raise ValueError('Summary repair exhausted')
 

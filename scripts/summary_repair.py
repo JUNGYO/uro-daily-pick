@@ -61,6 +61,75 @@ def claim_issues(data, body):
     return issues
 
 
+def _feedback_numbers(values):
+    """Bound feedback without rounding or truncating individual numeric values."""
+    result = []
+    omitted = 0
+    for value in sorted(values):
+        text = '0' if value == 0 else format(value, 'f')
+        if '.' in text:
+            text = text.rstrip('0').rstrip('.')
+        if len(result) >= 12 or len(text) > 80:
+            omitted += 1
+        else:
+            result.append(text)
+    return result, omitted
+
+
+def numeric_repair_feedback(data, issues, body):
+    """Describe failed numeric checks; never choose new citations or infer totals."""
+    statements = claim_texts(data)
+    blocks = {block['id']: block['text'] for block in source_blocks(body)}
+    evidence = data.get('evidence') if isinstance(data.get('evidence'), dict) else {}
+    try:
+        body_values = numeric_values(body, source=True)
+    except ValueError:
+        return {key: {'numeric_check': 'source_format_unsupported'} for key in issues}
+    feedback = {}
+    for key in issues:
+        if key not in statements:
+            raise ValueError('Unknown numeric feedback claim')
+        refs = evidence.get(key)
+        cited = ' '.join(blocks[ref] for ref in refs
+                         if isinstance(ref, str) and ref in blocks) if isinstance(refs, list) else ''
+        try:
+            values = numeric_values(statements[key])
+            cited_values = numeric_values(cited, source=True)
+        except ValueError:
+            feedback[key] = {'numeric_check': 'unsupported_numeric_notation',
+                             'guidance': 'Use exact supported notation; do not round or invent a replacement value.'}
+            continue
+        absent = values - cited_values
+        sets = {'absent_from_cited': absent,
+                'present_elsewhere_in_body': absent & body_values,
+                'absent_from_body': absent - body_values}
+        if key.startswith('qa_'):
+            try:
+                question = data['qa'][int(key[3:]) - 1]['q']
+                sets['question_absent_from_body'] = numeric_values(question) - body_values
+            except ValueError:
+                feedback[key] = {'numeric_check': 'unsupported_question_notation'}
+                continue
+        row = {}
+        omitted = 0
+        for name, numbers in sets.items():
+            row[name], excluded = _feedback_numbers(numbers)
+            omitted += excluded
+        if omitted:
+            row['omitted_value_count'] = omitted
+        if absent or sets.get('question_absent_from_body'):
+            row['guidance'] = ('Values listed as present elsewhere need a passage supporting the same study, population, '
+                               'outcome and time point; a numeric match alone is insufficient. Values listed as absent '
+                               'must be corrected against the original, not calculated or concatenated. '
+                               'Do not replace a supported finding with Not reported to bypass validation.')
+            if key == 'sample_size':
+                row['sample_size_guidance'] = ('When no total is explicitly stated, report the explicitly stated group '
+                                               'counts with their group labels. Never add group counts or concatenate '
+                                               'adjacent table values to create a total.')
+        feedback[key] = row
+    return feedback
+
+
 def repair_context(data, issues, body, max_characters=24000):
     """Retrieve excerpts for model review, never infer a citation solely from a number."""
     blocks = source_blocks(body)
