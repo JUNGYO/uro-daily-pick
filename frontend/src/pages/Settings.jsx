@@ -119,6 +119,7 @@ export default function Settings() {
             preferred_study_types: form.preferred_study_types || [],
             email_digest: !!form.email_digest,
             digest_frequency: form.digest_frequency || "daily",
+            personalization_enabled: form.personalization_enabled !== false,
           })
           .eq("id", user.id)
           .select()
@@ -206,6 +207,21 @@ export default function Settings() {
             values={form.preferred_journals || []}
             onChange={(preferred_journals) => setForm({ ...form, preferred_journals })}
           />
+          <fieldset className="border-t border-border pt-5 space-y-3">
+            <legend className="field-label">추천 개인화</legend>
+            <label className="flex items-center gap-3 text-sm">
+              <input
+                type="checkbox"
+                checked={form.personalization_enabled !== false}
+                onChange={(e) => setForm({ ...form, personalization_enabled: e.target.checked })}
+              />
+              열람·좋아요 기록으로 관심 주제와 유사 독자 추천 받기
+            </label>
+            <p className="help-text">
+              끄면 행동 기록을 개인화와 유사 독자 집계에 사용하지 않습니다. 직접 설정한 관심 주제·저널과 관심
+              없음 표시는 계속 반영합니다. 메모와 비공개 프로젝트는 유사 독자 추천에 사용하지 않습니다.
+            </p>
+          </fieldset>
           <fieldset className="border-t border-border pt-5 space-y-3">
             <legend className="field-label">Email digest</legend>
             {import.meta.env.VITE_EMAIL_DELIVERY_READY === "false" && (

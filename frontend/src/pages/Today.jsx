@@ -31,7 +31,7 @@ function validDay(value) {
 }
 
 export default function Today() {
-  const { user } = useAuth();
+  const { user, profile } = useAuth();
   const location = useLocation(),
     navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -44,6 +44,7 @@ export default function Today() {
     day,
     params.get("paper") || (lastSelection.day === day ? lastSelection.pmid : null),
     active,
+    profile?.personalization_enabled !== false,
   );
   const [shareMessage, setShareMessage] = useState("");
   const [studyOpen, setStudyOpen] = useState(false);

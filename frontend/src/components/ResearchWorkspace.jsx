@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { rpc } from "../lib/workspace";
 import * as exports from "../lib/researchExport";
+import ProjectLiteratureViews from "./ProjectLiteratureViews";
 import {
   googleDocsConfigured,
   prepareGoogleDocs,
@@ -126,7 +127,10 @@ export default function ResearchWorkspace({ project, onClose }) {
     [linkRows, setLinkRows] = useState([]),
     [linkPage, setLinkPage] = useState(0),
     [linkTotal, setLinkTotal] = useState(0);
+  const [literatureView, setLiteratureView] = useState("table"),
+    [literatureTarget, setLiteratureTarget] = useState(null);
   const current = useRef({}),
+    focusedLiteratureTarget = useRef(null),
     saveLock = useRef(false),
     mounted = useRef(false),
     generation = useRef(0);
@@ -135,6 +139,20 @@ export default function ResearchWorkspace({ project, onClose }) {
     !!settings && !!data && JSON.stringify(settings) !== JSON.stringify(settingsDraft(data.workspace));
   const dirty = settingsChanged || Object.keys(drafts).length > 0 || !!topic;
   current.current = { settings, drafts, topic, dirty };
+
+  useEffect(() => {
+    if (!literatureTarget || focusedLiteratureTarget.current === literatureTarget) return;
+    const id = literatureTarget.topicId
+      ? `research-topic-${literatureTarget.topicId}`
+      : literatureTarget.columnId
+        ? `research-cell-${literatureTarget.referenceId}-${literatureTarget.columnId}`
+        : `research-reference-${literatureTarget.referenceId}`;
+    const target = document.getElementById(id);
+    if (!target || (tab === "table" && literatureView !== "table")) return;
+    target.scrollIntoView?.({ block: "nearest" });
+    target.focus({ preventScroll: true });
+    focusedLiteratureTarget.current = literatureTarget;
+  }, [literatureTarget, literatureView, tab, rows, topics]);
 
   function reportError(err) {
     if (accessDenied(err)) {
@@ -582,6 +600,36 @@ export default function ResearchWorkspace({ project, onClose }) {
     setTab("writing");
   };
 
+  const showLiteratureReference = (row, columnId) => {
+    if (!rows.some((candidate) => candidate.id === row.id)) {
+      const search = row.bibliography?.pmid || row.paper?.pmid || row.bibliography?.title || "";
+      setQuery(search);
+      setFilter(search);
+      setPage(0);
+    }
+    setLiteratureTarget({ referenceId: row.id, columnId });
+    setLiteratureView("table");
+    setTab("table");
+  };
+  const showLiteratureTopic = (selectedTopic) => {
+    // Keep unsaved writing intact while opening the existing saved argument.
+    if (!topics.some((item) => item.id === selectedTopic.id)) {
+      // The bounded graph uses the same first twenty topics as the writing RPC.
+      setTopicPage(0);
+      if (topicPage === 0) {
+        run("topic-open", async (isCurrent) => {
+          const result = await rpc("research_topics", { p_id: project.id, p_section: "all", p_page: 0 });
+          if (isCurrent()) {
+            setTopics(result.items);
+            setTopicTotal(result.total);
+          }
+        });
+      }
+    }
+    setLiteratureTarget({ topicId: selectedTopic.id });
+    setTab("writing");
+  };
+
   if (error)
     return (
       <section className="research-workspace">
@@ -877,143 +925,180 @@ export default function ResearchWorkspace({ project, onClose }) {
             프로젝트 문헌 {total}편 · {page + 1}페이지
           </p>
           {!rows.length && <p>문헌 상세의 메모·보관에서 이 프로젝트에 문헌을 추가해 주세요.</p>}
-          <div className="research-table-scroll">
-            <table className="research-table">
-              <thead>
-                <tr>
-                  <th>문헌</th>
-                  {settings.columns.map((column) => (
-                    <th key={column.id}>{column.label}</th>
-                  ))}
-                  <th>연구 설계 판단·메모</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => {
-                  const draft = drafts[row.id] || refDraft(row);
-                  return (
-                    <tr key={row.id}>
-                      <th scope="row" data-label="문헌">
-                        <h3>{row.bibliography?.title || "제목 미등록"}</h3>
-                        <p>
-                          {row.bibliography?.journal} · {row.bibliography?.pub_date}
-                        </p>
-                        {linkPaper(row)}
-                        <p className="reader-muted">{statusLabels[row.extraction_status] || "추출 전"}</p>
-                        {canEdit && (
+          <ProjectLiteratureViews
+            key={project.id}
+            projectId={project.id}
+            filter={filter}
+            view={literatureView}
+            onViewChange={setLiteratureView}
+            columns={settings.columns}
+            onShowReference={showLiteratureReference}
+            onShowTopic={showLiteratureTopic}
+            onError={reportError}
+          />
+          <div className="project-literature-table" hidden={literatureView !== "table"}>
+            <div className="research-table-scroll">
+              <table className="research-table">
+                <thead>
+                  <tr>
+                    <th>문헌</th>
+                    {settings.columns.map((column) => (
+                      <th key={column.id}>{column.label}</th>
+                    ))}
+                    <th>연구 설계 판단·메모</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {rows.map((row) => {
+                    const draft = drafts[row.id] || refDraft(row);
+                    return (
+                      <tr
+                        key={row.id}
+                        id={`research-reference-${row.id}`}
+                        tabIndex={-1}
+                        className={
+                          literatureTarget?.referenceId === row.id && !literatureTarget?.columnId
+                            ? "project-literature-target"
+                            : undefined
+                        }
+                      >
+                        <th scope="row" data-label="문헌">
+                          <h3>{row.bibliography?.title || "제목 미등록"}</h3>
+                          <p>
+                            {row.bibliography?.journal} · {row.bibliography?.pub_date}
+                          </p>
+                          {linkPaper(row)}
+                          <p className="reader-muted">{statusLabels[row.extraction_status] || "추출 전"}</p>
+                          {canEdit && (
+                            <button
+                              className="btn-secondary"
+                              disabled={!!busy || settingsChanged}
+                              onClick={() =>
+                                run("extract", async (isCurrent) => {
+                                  await rpc("request_research_extraction", { p_id: row.id });
+                                  await refreshRows(isCurrent);
+                                  if (isCurrent())
+                                    setNotice("추출을 요청했습니다. 사용자 수정값은 유지됩니다.");
+                                })
+                              }
+                            >
+                              항목 추출 요청
+                            </button>
+                          )}
+                        </th>
+                        {settings.columns.map((column) => {
+                          const manual = own(draft.user_values, column.id);
+                          return (
+                            <td
+                              data-label={column.label}
+                              key={column.id}
+                              id={`research-cell-${row.id}-${column.id}`}
+                              tabIndex={-1}
+                              className={
+                                literatureTarget?.referenceId === row.id &&
+                                literatureTarget?.columnId === column.id
+                                  ? "project-literature-target"
+                                  : undefined
+                              }
+                            >
+                              <p className="research-auto-label">자동 추출</p>
+                              <p className="research-auto-value">
+                                {row.auto_values?.[column.id] ||
+                                  (row.extraction_status === "waiting_source"
+                                    ? "원문 준비 대기"
+                                    : "아직 추출된 값 없음")}
+                              </p>
+                              <label className="research-override">
+                                <input
+                                  type="checkbox"
+                                  checked={manual}
+                                  disabled={!canEdit}
+                                  onChange={(event) => {
+                                    const values = { ...draft.user_values };
+                                    if (event.target.checked)
+                                      values[column.id] = row.auto_values?.[column.id] || "";
+                                    else delete values[column.id];
+                                    changeRow(row, { user_values: values });
+                                  }}
+                                />
+                                사용자 수정 · {column.label}
+                              </label>
+                              {manual && (
+                                <textarea
+                                  aria-label={`${row.bibliography?.title} · ${column.label} 수정값`}
+                                  value={draft.user_values[column.id]}
+                                  maxLength={1500}
+                                  disabled={!canEdit}
+                                  onChange={(event) =>
+                                    changeRow(row, {
+                                      user_values: { ...draft.user_values, [column.id]: event.target.value },
+                                    })
+                                  }
+                                />
+                              )}
+                              {canEdit && (
+                                <button
+                                  className="research-text-button"
+                                  onClick={() => addTopicFromCell(row, column)}
+                                >
+                                  이 항목을 논점에 연결
+                                </button>
+                              )}
+                            </td>
+                          );
+                        })}
+                        <td data-label="연구 설계 판단·메모">
+                          <label>
+                            설계 판단·메모
+                            <textarea
+                              aria-label={`${row.bibliography?.title} 설계 판단·메모`}
+                              value={draft.note}
+                              maxLength={6000}
+                              disabled={!canEdit}
+                              onChange={(event) => changeRow(row, { note: event.target.value })}
+                            />
+                          </label>
+                          <label>
+                            태그
+                            <input
+                              aria-label={`${row.bibliography?.title} 태그`}
+                              value={draft.tags}
+                              maxLength={2000}
+                              disabled={!canEdit}
+                              onChange={(event) => changeRow(row, { tags: event.target.value })}
+                              placeholder="쉼표로 구분"
+                            />
+                          </label>
                           <button
-                            className="btn-secondary"
-                            disabled={!!busy || settingsChanged}
-                            onClick={() =>
-                              run("extract", async (isCurrent) => {
-                                await rpc("request_research_extraction", { p_id: row.id });
-                                await refreshRows(isCurrent);
-                                if (isCurrent())
-                                  setNotice("추출을 요청했습니다. 사용자 수정값은 유지됩니다.");
-                              })
-                            }
+                            className="btn-primary"
+                            disabled={!canEdit || !!busy || !drafts[row.id]}
+                            onClick={() => run("row", (isCurrent) => saveRow(row, isCurrent))}
                           >
-                            항목 추출 요청
+                            문헌 수정 저장
                           </button>
-                        )}
-                      </th>
-                      {settings.columns.map((column) => {
-                        const manual = own(draft.user_values, column.id);
-                        return (
-                          <td data-label={column.label} key={column.id}>
-                            <p className="research-auto-label">자동 추출</p>
-                            <p className="research-auto-value">
-                              {row.auto_values?.[column.id] ||
-                                (row.extraction_status === "waiting_source"
-                                  ? "원문 준비 대기"
-                                  : "아직 추출된 값 없음")}
-                            </p>
-                            <label className="research-override">
-                              <input
-                                type="checkbox"
-                                checked={manual}
-                                disabled={!canEdit}
-                                onChange={(event) => {
-                                  const values = { ...draft.user_values };
-                                  if (event.target.checked)
-                                    values[column.id] = row.auto_values?.[column.id] || "";
-                                  else delete values[column.id];
-                                  changeRow(row, { user_values: values });
-                                }}
-                              />
-                              사용자 수정 · {column.label}
-                            </label>
-                            {manual && (
-                              <textarea
-                                aria-label={`${row.bibliography?.title} · ${column.label} 수정값`}
-                                value={draft.user_values[column.id]}
-                                maxLength={1500}
-                                disabled={!canEdit}
-                                onChange={(event) =>
-                                  changeRow(row, {
-                                    user_values: { ...draft.user_values, [column.id]: event.target.value },
-                                  })
-                                }
-                              />
-                            )}
-                            {canEdit && (
-                              <button
-                                className="research-text-button"
-                                onClick={() => addTopicFromCell(row, column)}
-                              >
-                                이 항목을 논점에 연결
-                              </button>
-                            )}
-                          </td>
-                        );
-                      })}
-                      <td data-label="연구 설계 판단·메모">
-                        <label>
-                          설계 판단·메모
-                          <textarea
-                            aria-label={`${row.bibliography?.title} 설계 판단·메모`}
-                            value={draft.note}
-                            maxLength={6000}
-                            disabled={!canEdit}
-                            onChange={(event) => changeRow(row, { note: event.target.value })}
-                          />
-                        </label>
-                        <label>
-                          태그
-                          <input
-                            aria-label={`${row.bibliography?.title} 태그`}
-                            value={draft.tags}
-                            maxLength={2000}
-                            disabled={!canEdit}
-                            onChange={(event) => changeRow(row, { tags: event.target.value })}
-                            placeholder="쉼표로 구분"
-                          />
-                        </label>
-                        <button
-                          className="btn-primary"
-                          disabled={!canEdit || !!busy || !drafts[row.id]}
-                          onClick={() => run("row", (isCurrent) => saveRow(row, isCurrent))}
-                        >
-                          문헌 수정 저장
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-          <div className="reader-actions">
-            <button className="btn-secondary" disabled={!page} onClick={() => setPage((value) => value - 1)}>
-              이전 문헌
-            </button>
-            <button
-              className="btn-secondary"
-              disabled={(page + 1) * 20 >= total}
-              onClick={() => setPage((value) => value + 1)}
-            >
-              다음 문헌
-            </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div className="reader-actions">
+              <button
+                className="btn-secondary"
+                disabled={!page}
+                onClick={() => setPage((value) => value - 1)}
+              >
+                이전 문헌
+              </button>
+              <button
+                className="btn-secondary"
+                disabled={(page + 1) * 20 >= total}
+                onClick={() => setPage((value) => value + 1)}
+              >
+                다음 문헌
+              </button>
+            </div>
           </div>
         </>
       )}
@@ -1194,7 +1279,12 @@ export default function ResearchWorkspace({ project, onClose }) {
             </form>
           )}
           {topics.map((item) => (
-            <article className="research-topic" key={item.id}>
+            <article
+              className={`research-topic${literatureTarget?.topicId === item.id ? " project-literature-target" : ""}`}
+              key={item.id}
+              id={`research-topic-${item.id}`}
+              tabIndex={-1}
+            >
               <p className="reader-muted">{item.section === "introduction" ? "서론" : "고찰"}</p>
               <h3>{item.title}</h3>
               <p className="research-topic-body">{item.body}</p>
