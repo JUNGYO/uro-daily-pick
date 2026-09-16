@@ -24,6 +24,9 @@ class ParallelCollectionTests(unittest.TestCase):
         for folder in ("documents", "cloud-archive", "sources"):
             (self.directory / folder).mkdir()
         self.db = sqlite3.connect(self.directory / "queue.sqlite3")
+        # Production uses WAL; durable per-source checkpoints now exercise this
+        # same mode rather than fsyncing a DELETE journal for every coordinator tick.
+        self.db.execute("PRAGMA journal_mode=WAL")
         self.db.execute("CREATE TABLE attempts(pmid TEXT PRIMARY KEY,status TEXT,next_retry REAL)")
         self.db.commit()
         self.main_thread = threading.get_ident()
