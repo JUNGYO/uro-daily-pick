@@ -3,6 +3,56 @@ import { cleanup, render, screen } from "@testing-library/react";
 import CollectionOverview, { ProcessingHealth } from "./CollectionOverview";
 afterEach(cleanup);
 
+it("shows the server-provided journal target separately from actual collection counts", () => {
+  render(
+    <CollectionOverview
+      catalog={{
+        automatic_papers: 100,
+        originals_acquired: 9,
+        summaries_ready: 4,
+        scope: { target_journals: 65, urology_journals: 51, ancillary_journals: 14 },
+      }}
+    />,
+  );
+  expect(screen.getByText("수집 대상 65개 저널")).toBeVisible();
+  expect(screen.getByText("비뇨의학 관련 51개 · 종양학·종합의학 14개")).toBeVisible();
+  expect(screen.getByRole("meter", { name: "등록 문헌 중 원문 확보율" })).toHaveAttribute(
+    "aria-valuenow",
+    "9",
+  );
+  expect(screen.getByRole("meter", { name: "확보 원문 중 요약 완료율" })).toHaveAttribute(
+    "aria-valuetext",
+    "4 / 9편",
+  );
+});
+
+it("omits missing scope totals and never supplies a hardcoded journal count", () => {
+  const { rerender } = render(<CollectionOverview catalog={{ automatic_papers: 100 }} />);
+  expect(screen.queryByText(/수집 대상 .*개 저널/)).not.toBeInTheDocument();
+  rerender(
+    <CollectionOverview
+      catalog={{ scope: { target_journals: 12, urology_journals: 8, ancillary_journals: 4 } }}
+    />,
+  );
+  expect(screen.getByText("수집 대상 12개 저널")).toBeVisible();
+  expect(screen.getByText("비뇨의학 관련 8개 · 종양학·종합의학 4개")).toBeVisible();
+  expect(screen.queryByText(/65개 저널/)).not.toBeInTheDocument();
+});
+
+it("shows a valid target without inventing an absent or inconsistent group breakdown", () => {
+  const { rerender } = render(<CollectionOverview catalog={{ scope: { target_journals: 65 } }} />);
+  expect(screen.getByText("수집 대상 65개 저널")).toBeVisible();
+  expect(screen.queryByText(/비뇨의학 관련/)).not.toBeInTheDocument();
+  rerender(
+    <CollectionOverview
+      catalog={{ scope: { target_journals: 65, urology_journals: 51, ancillary_journals: 99 } }}
+    />,
+  );
+  expect(screen.queryByText(/비뇨의학 관련/)).not.toBeInTheDocument();
+  rerender(<CollectionOverview catalog={{ scope: { target_journals: -1 } }} />);
+  expect(screen.queryByText(/수집 대상 .*개 저널/)).not.toBeInTheDocument();
+});
+
 it("separates citation records from acquisition and summarizes only acquired originals", () => {
   render(
     <CollectionOverview

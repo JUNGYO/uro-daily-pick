@@ -9,8 +9,9 @@ from xml.etree import ElementTree as ET
 
 import requests
 from common import get_json, patch_fields, supabase_headers
-from fetch_papers import URO_QUERIES, PUBMED_BASE, PUBMED_EMAIL, parse_article
+from fetch_papers import PUBMED_BASE, PUBMED_EMAIL, parse_article
 from catalog_policy import AUTOMATIC_START_DATE, PUBMED_DATE_RANGE, automatic_paper
+from journal_registry import REGISTRY_VERSION, journal_entries
 
 PAGE_LIMIT = 9999
 
@@ -19,10 +20,16 @@ class StorageCapacityReached(Exception):
     pass
 
 
-def job_for(query, lower=1, upper=None):
+def job_for(query, lower=1, upper=None, *, journal_id=None, priority=20):
+    # Keep the original identity so an exactly unchanged query can resume its
+    # committed UID snapshot. A different query must receive a new checkpoint.
     identity=json.dumps([query,lower,upper,AUTOMATIC_START_DATE],separators=(",",":"))
-    return {"job_key":hashlib.sha256(identity.encode()).hexdigest(),"query":query,
+    result={"job_key":hashlib.sha256(identity.encode()).hexdigest(),"query":query,
             "lower_uid":lower,"upper_uid":upper,"start_date":AUTOMATIC_START_DATE}
+    if journal_id is not None:
+        result.update(journal_id=journal_id,registry_version=REGISTRY_VERSION,
+                      query_version=hashlib.sha256(query.encode()).hexdigest(),priority=priority)
+    return result
 
 
 def search_term(job):
@@ -40,18 +47,23 @@ def split_job(job, ids):
     pivot=(low+ceiling)//2
     if pivot<low or (high is not None and pivot>=high) or ceiling<=low:
         raise ValueError("Cannot partition oversized PubMed result")
-    return [job_for(job["query"],pivot+1,high),job_for(job["query"],low,pivot)]
+    metadata={key:job[key] for key in ("journal_id","query_version","registry_version","priority") if key in job}
+    return [{**job_for(job["query"],pivot+1,high),**metadata},
+            {**job_for(job["query"],low,pivot),**metadata}]
 
 
 def validate_ids(result):
-    if result.get("errorlist") or result.get("warninglist",{}).get("phrasesnotfound"):
+    warnings=result.get("warninglist") or {}
+    if result.get("errorlist") or any(warnings.get(key) for key in ("phrasesnotfound","quotedphrasesnotfound","phrasesignored")):
         raise ValueError("PubMed did not recognize a configured search term")
     count=int(result["count"])
     ids=result.get("idlist",[])
-    if any(not str(pmid).isdigit() for pmid in ids) or len(ids)!=len(set(ids)):
+    if count<0 or any(not str(pmid).isdigit() or int(pmid)<1 for pmid in ids) or len(ids)!=len(set(ids)):
         raise ValueError("Invalid PubMed identifier response")
     if count<=PAGE_LIMIT and count!=len(ids):
         raise ValueError("Incomplete PubMed identifier snapshot")
+    if count>PAGE_LIMIT and not ids:
+        raise ValueError("Oversized PubMed search returned no partition identifiers")
     return count,ids
 
 
@@ -93,12 +105,22 @@ class Store:
         patch_fields(self.url+"/rest/v1/catalog_backfill_jobs",headers=self.headers,
                      params={"job_key":"eq."+key},data={**values,"updated_at":datetime.now(timezone.utc).isoformat()})
 
+    def adopt_query(self,query,metadata):
+        # One atomic metadata-only update also adopts every existing UID shard.
+        # Snapshot IDs, progress, status, retries and original timestamps survive.
+        allowed={"journal_id","query_version","registry_version","priority"}
+        if set(metadata)!=allowed:
+            raise ValueError("Only registry metadata may be adopted")
+        patch_fields(self.url+"/rest/v1/catalog_backfill_jobs",headers=self.headers,
+                     params={"query":"eq."+query,"start_date":"eq."+AUTOMATIC_START_DATE},data=metadata)
+
     def next_job(self):
         now=datetime.now(timezone.utc).isoformat()
         rows=self.read("catalog_backfill_jobs",{"select":"*","status":"in.(pending,active,error)",
             "start_date":"eq."+AUTOMATIC_START_DATE,
+            "registry_version":"eq."+REGISTRY_VERSION,
             "or":f"(retry_after.is.null,retry_after.lte.{now})",
-            "order":"status.asc,lower_uid.desc,updated_at.asc,job_key","limit":1})
+            "order":"priority.asc,status.asc,lower_uid.desc,updated_at.asc,job_key","limit":1})
         return rows[0] if rows else None
 
     def ensure_capacity(self):
@@ -113,10 +135,44 @@ def pubmed_search(job):
         "retmax":PAGE_LIMIT,"retmode":"json","tool":"uro_daily_pick","email":PUBMED_EMAIL})["esearchresult"]
 
 
+def registry_metadata(job):
+    return {key:job[key] for key in ("journal_id","query_version","registry_version","priority")}
+
+
+def seed_registry_jobs(store,entries=None):
+    """Initialize new scope without resetting any existing checkpoint.
+
+    Query content is the migration boundary: identical queries reuse their
+    progress; changed queries start pending, with old records retained as history.
+    Newly added journals precede rechecks of previously configured journals.
+    """
+    entries=journal_entries() if entries is None else entries
+    jobs=[job_for(entry.query,journal_id=entry.id,
+                  priority=0 if entry.legacy_query is None else 10) for entry in entries]
+    if not jobs:return
+    if len({job["job_key"] for job in jobs})!=len(jobs):
+        raise ValueError("Journal registry contains duplicate queries")
+    old=store.read("catalog_backfill_jobs",{
+        "select":"job_key,journal_id,query_version,registry_version,priority",
+        "job_key":"in.("+",".join(job["job_key"] for job in jobs)+")","limit":len(jobs)})
+    by_key={job["job_key"]:job for job in old}
+    store.insert("catalog_backfill_jobs",jobs,"job_key")
+    for job in jobs:
+        existing=by_key.get(job["job_key"])
+        metadata=registry_metadata(job)
+        if existing is not None and any(existing.get(key)!=value for key,value in metadata.items()):
+            store.adopt_query(job["query"],metadata)
+
+
 def seed_existing_catalog(store):
     """Audit the date-eligible existing catalog; preserve older stored records."""
-    job=job_for("Existing catalog citation audit v1")
-    if store.read("catalog_backfill_jobs",{"select":"job_key","job_key":"eq."+job["job_key"],"limit":1}):
+    job=job_for("Existing catalog citation audit v1",journal_id="existing-catalog-audit",priority=20)
+    existing=store.read("catalog_backfill_jobs",{"select":"job_key,journal_id,query_version,registry_version,priority",
+                       "job_key":"eq."+job["job_key"],"limit":1})
+    if existing:
+        metadata=registry_metadata(job)
+        if any(existing[0].get(key)!=value for key,value in metadata.items()):
+            store.adopt_query(job["query"],metadata)
         return
     ids=[]
     while True:
@@ -146,6 +202,7 @@ def pubmed_details(ids):
 
 
 def process_job(store,job,deadline,search=pubmed_search,details=pubmed_details):
+    if time.monotonic()>=deadline:return
     key=job["job_key"]
     ids=job.get("pmids")
     if ids is None:
@@ -182,16 +239,21 @@ def process_job(store,job,deadline,search=pubmed_search,details=pubmed_details):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--max-seconds",type=int,default=1200)
+    parser.add_argument("--seed-only",action="store_true",help="Initialize the registry checkpoints without PubMed requests or catalog scans")
     args=parser.parse_args()
     if not 60<=args.max_seconds<=3600:parser.error("Runtime must be 60..3600 seconds")
     store=Store()
+    deadline=time.monotonic()+args.max_seconds
+    seed_registry_jobs(store)
+    if args.seed_only:
+        report_status(store)
+        return
     try:store.ensure_capacity()
     except StorageCapacityReached:
         print("::warning::Catalog paused at its storage budget; existing service and checkpoints are preserved")
+        report_status(store)
         return
     seed_existing_catalog(store)
-    store.insert("catalog_backfill_jobs",[job_for(q) for q in URO_QUERIES],"job_key")
-    deadline=time.monotonic()+args.max_seconds
     failures=0
     while time.monotonic()<deadline:
         job=store.next_job()
@@ -205,12 +267,16 @@ def main():
             store.update(job["job_key"],{"status":"error","error_code":type(error).__name__,
                 "retry_after":(datetime.now(timezone.utc)+timedelta(minutes=15)).isoformat()})
             print(f"Catalog shard {job['job_key'][:10]}: {type(error).__name__}; checkpoint preserved",flush=True)
+    report_status(store)
+    if failures:print(f"::warning::{failures} catalog searches need retry; completed pages are preserved")
+
+
+def report_status(store):
     status=store.read("rpc/catalog_backfill_status",{})
     print(json.dumps(status),flush=True)
     if os.environ.get("GITHUB_STEP_SUMMARY"):
         with open(os.environ["GITHUB_STEP_SUMMARY"],"a",encoding="utf-8") as output:
             output.write("Catalog backfill from 2000-01-01\n\n```json\n"+json.dumps(status,indent=2)+"\n```\n")
-    if failures:print(f"::warning::{failures} catalog searches need retry; completed pages are preserved")
 
 
 if __name__=="__main__":main()
