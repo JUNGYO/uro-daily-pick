@@ -29,6 +29,34 @@ def draft(body, value):
 
 
 class NumericEvidenceTests(unittest.TestCase):
+    def test_known_identifier_hyphens_keep_positive_version_values(self):
+        for label, value in [('GPT-4o', 4), ('gpt-4o', 4), ('GPT-5', 5),
+                             ('PD-1', 1), ('PD-L1', 1), ('IL-6', 6),
+                             ('GPT\u20114o', 4), ('GPT\u20104o', 4), ('GPT\u22124o', 4)]:
+            with self.subTest(label=label):
+                self.assertEqual(numeric_values(label), {Decimal(value)})
+        for value in ('X-4', 'HR-4', 'CHANGE-4', 'change-4', 'change -4',
+                      'value=-4', '변화-4', '-4', '\u22124'):
+            with self.subTest(value=value):
+                self.assertEqual(numeric_values(value), {Decimal(-4)})
+        self.assertEqual(numeric_values('17-20'), {Decimal(17), Decimal(20)})
+
+    def test_identifier_format_equivalence_does_not_erase_versions_or_numeric_signs(self):
+        for source, claim in [('GPT4o', 'GPT-4o'), ('GPT\u20114o', 'GPT-4o'),
+                              ('GPT-4o', 'gpt-4o'), ('PD1', 'PD-1'), ('IL\u20116', 'IL-6')]:
+            with self.subTest(source=source, claim=claim):
+                body = 'Synthetic identifier ' + source + ' was evaluated.'
+                raw = draft(body, claim)
+                validate_evidence(raw, validate_summary(json.dumps(raw)), body)
+        for source, claim in [('GPT-5o', 'GPT-4o'), ('GPT-4o', 'GPT-5o'),
+                              ('IL-6', 'IL-7'), ('measured -4 units', 'GPT-4o'),
+                              ('GPT-4o', '-4'), ('measured -6 units', 'IL-6')]:
+            with self.subTest(source=source, claim=claim):
+                body = 'Synthetic observation: ' + source
+                raw = draft(body, claim)
+                with self.assertRaisesRegex(ValueError, 'Number absent'):
+                    validate_evidence(raw, validate_summary(json.dumps(raw)), body)
+
     def test_exact_equivalent_formats_have_the_same_decimal_value(self):
         for source, claim in [('.05', '0.05'), ('0.050', '0.05'), ('1\u2009234', '1,234'),
                               ('1\u00a0234', '1234'), ('1\u202f234', '1234'), ('17.', '17'),
