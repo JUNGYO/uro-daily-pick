@@ -57,7 +57,7 @@ export default function Admin() {
         >
           상태 새로고침
         </button>
-        <AdminPanel title="문헌 처리 현황" rpc="admin_catalog_status" refresh={retry}>
+        <AdminPanel title="문헌 처리 현황" rpc="admin_catalog_status" refresh={retry} pollMs={30000}>
           {(catalog) => (
             <>
               <CollectionOverview catalog={catalog} />
@@ -66,7 +66,7 @@ export default function Admin() {
         </AdminPanel>
         <IssueReview />
         <IntegrityReview />
-        <AdminPanel title="자동 처리 상태" rpc="admin_fulltext_status" refresh={retry}>
+        <AdminPanel title="자동 처리 상태" rpc="admin_fulltext_status" refresh={retry} pollMs={30000}>
           {(fulltexts) => <ProcessingHealth workers={fulltexts?.workers || []} />}
         </AdminPanel>
 

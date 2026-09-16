@@ -1,57 +1,82 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 
-export default function AdminPanel({ title, rpc, params, refresh, children, list = false }) {
+export default function AdminPanel({ title, rpc, params, refresh, children, list = false, pollMs = 0 }) {
   const [state, setState] = useState({ data: null, loading: true, error: "", updated: null });
   const [retry, setRetry] = useState(0);
   const parameters = JSON.stringify(params || {});
 
   useEffect(() => {
     let active = true;
-    const controller = new AbortController();
-    setState((old) => ({ ...old, loading: true, error: "" }));
-    const timer = setTimeout(() => {
-      if (active) {
-        active = false;
-        controller.abort();
-        setState((old) => ({
+    let pending = false;
+    let controller;
+    let deadlineTimer;
+    let pollTimer;
+    const polling = Number.isFinite(pollMs) && pollMs > 0;
+    const visible = () => document.visibilityState !== "hidden";
+    const schedule = () => {
+      clearTimeout(pollTimer);
+      if (active && polling && visible()) pollTimer = setTimeout(() => load(true), pollMs);
+    };
+    const load = async (background = false) => {
+      if (!active || pending || (background && !visible())) return;
+      clearTimeout(pollTimer);
+      pending = true;
+      controller = new AbortController();
+      const requestController = controller;
+      let settled = false;
+      const finish = (update) => {
+        if (!active || settled) return;
+        settled = true;
+        pending = false;
+        clearTimeout(deadlineTimer);
+        setState(update);
+        schedule();
+      };
+      if (!background) setState((old) => ({ ...old, loading: true, error: "" }));
+      deadlineTimer = setTimeout(() => {
+        finish((old) => ({
           ...old,
           loading: false,
           error: "조회 시간이 초과됐습니다. 다시 시도해 주세요.",
         }));
-      }
-    }, 15000);
-    (async () => {
+        requestController.abort();
+      }, 15000);
       try {
         const { data, error } = await supabase
           .rpc(rpc, JSON.parse(parameters))
-          .abortSignal(controller.signal);
+          .abortSignal(requestController.signal);
         if (error) throw error;
         const value = list && data === null ? [] : data;
         if (list ? !Array.isArray(value) : !value || typeof value !== "object" || Array.isArray(value)) {
           throw new Error("Invalid analytics response");
         }
-        if (active) setState({ data: value, loading: false, error: "", updated: new Date() });
+        finish({ data: value, loading: false, error: "", updated: new Date() });
       } catch (error) {
-        if (active)
-          setState((old) => ({
-            ...old,
-            loading: false,
-            error:
-              error?.code === "42501"
-                ? "관리자 권한을 확인할 수 없습니다. 로그인 상태를 확인해 주세요."
-                : "이 항목을 불러오지 못했습니다. 다시 시도해 주세요.",
-          }));
-      } finally {
-        clearTimeout(timer);
+        finish((old) => ({
+          ...old,
+          loading: false,
+          error:
+            error?.code === "42501"
+              ? "관리자 권한을 확인할 수 없습니다. 로그인 상태를 확인해 주세요."
+              : "이 항목을 불러오지 못했습니다. 다시 시도해 주세요.",
+        }));
       }
-    })();
+    };
+    const onVisibility = () => {
+      clearTimeout(pollTimer);
+      if (visible()) load(true);
+    };
+    if (polling) document.addEventListener("visibilitychange", onVisibility);
+    if (!polling || visible()) load();
     return () => {
       active = false;
-      clearTimeout(timer);
-      controller.abort();
+      clearTimeout(deadlineTimer);
+      clearTimeout(pollTimer);
+      if (polling) document.removeEventListener("visibilitychange", onVisibility);
+      controller?.abort();
     };
-  }, [rpc, parameters, refresh, retry, list]);
+  }, [rpc, parameters, refresh, retry, list, pollMs]);
 
   return (
     <section aria-label={title} className="min-w-0 bg-card rounded-xl border border-border p-4 sm:p-5 mb-4">
