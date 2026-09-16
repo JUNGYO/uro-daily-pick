@@ -49,6 +49,66 @@ def result_patch(raw, key="summary_2"):
 
 
 class SummaryRepairTests(unittest.TestCase):
+    def test_initial_model_wire_requires_exactly_three_separate_summary_strings(self):
+        schema = spark._summary_schema(source_blocks(BODY))
+        self.assertIn("summary_lines", schema["required"])
+        self.assertNotIn("summary_ko", schema["properties"])
+        self.assertNotIn("summary_ko", schema["required"])
+        field = schema["properties"]["summary_lines"]
+        self.assertEqual(field["type"], "array")
+        self.assertEqual((field["minItems"], field["maxItems"]), (3, 3))
+        self.assertEqual(field["items"]["type"], "string")
+        self.assertEqual(field["items"]["maxLength"], 220)
+
+    def test_three_model_strings_become_existing_publication_shape_with_unchanged_evidence(self):
+        canonical = draft()
+        wire = copy.deepcopy(canonical)
+        wire["summary_lines"] = wire.pop("summary_ko").splitlines()
+        paper = {**PAPER, "pmid": "123", "doi": "10.1000/synthetic"}
+        document = {"content_text": BODY, "content_hash": hashlib.sha256(BODY.encode()).hexdigest(),
+                    "sections": ["Methods", "Results"], "source_url": "https://example.test/article"}
+        with patch.object(spark, "chat", return_value=encoded(wire)) as chat:
+            result = spark.generate_summary(paper, document)
+        self.assertEqual(chat.call_count, 1)
+        self.assertEqual(result["summary_ko"], canonical["summary_ko"])
+        self.assertEqual(result["summary_ko"].count("\n"), 2)
+        self.assertEqual(result["evidence"]["claims"], canonical["evidence"])
+        payload = spark.summary_payload(paper, document, result)
+        self.assertEqual(payload["p_summary"]["summary_ko"], canonical["summary_ko"])
+        self.assertNotIn("summary_lines", payload["p_summary"])
+        self.assertNotIn("content_text", payload["p_source"])
+        self.assertEqual(spark.validate_cached_summary(result, paper, document), result)
+
+    def test_initial_wire_rejects_wrong_array_length_and_embedded_newlines(self):
+        canonical = draft()
+        lines = canonical["summary_ko"].splitlines()
+        invalid = [lines[:1], lines + [lines[0]],
+                   [lines[0], lines[1] + "\n추가 문장이다.", lines[2]],
+                   [lines[0], lines[1] + "\r추가 문장이다.", lines[2]],
+                   [lines[0], "", lines[2]], [lines[0], None, lines[2]],
+                   [lines[0], "가" * 221, lines[2]]]
+        for values in invalid:
+            wire = copy.deepcopy(canonical)
+            wire.pop("summary_ko")
+            wire["summary_lines"] = values
+            with self.subTest(values=values), self.assertRaises(ValueError):
+                spark._initial_draft(encoded(wire))
+
+    def test_initial_parser_preserves_canonical_cached_draft_compatibility(self):
+        canonical = draft()
+        self.assertEqual(spark._initial_draft(encoded(canonical)), canonical)
+
+    def test_malformed_model_choices_and_nontext_content_raise_validation_error(self):
+        responses = [{}, {"choices": []}, {"choices": None}, {"choices": [None]},
+                     {"choices": [{"finish_reason": "stop", "message": None}]},
+                     *({"choices": [{"finish_reason": "stop", "message": {"content": content}}]}
+                       for content in (None, 17, [], {}))]
+        for response in responses:
+            with self.subTest(response=response), patch.object(spark, "local_request", return_value=response) as request:
+                with self.assertRaises(ValueError):
+                    spark.chat("Synthetic instruction", "Synthetic input")
+                self.assertEqual(request.call_count, 1)
+
     def test_published_evidence_rejects_boolean_version_and_invalid_detail_text(self):
         raw = draft()
         support = validate_evidence(raw, validate_summary(encoded(raw)), BODY)

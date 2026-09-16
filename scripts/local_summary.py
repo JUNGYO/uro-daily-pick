@@ -123,9 +123,15 @@ def chat(system, content, schema=None, deadline=None):
             directory = _INFERENCE_DIRECTORY.get()
             with literature_inference_lock(directory, deadline) if directory is not None else nullcontext():
                 result=local_request("/v1/chat/completions",payload,timeout=remaining_timeout(deadline))
-            candidate=result["choices"][0]
+            choices = result.get('choices') if isinstance(result, dict) else None
+            if not isinstance(choices, list) or not choices or not isinstance(choices[0], dict):
+                raise ValueError('Missing Spark completion')
+            candidate = choices[0]
             if candidate.get("finish_reason") != "stop": raise ValueError("Incomplete Spark response")
-            return candidate["message"]["content"]
+            message = candidate.get('message')
+            if not isinstance(message, dict) or not isinstance(message.get('content'), str) or not message['content'].strip():
+                raise ValueError('Missing Spark response text')
+            return message['content']
         except HTTPError as error:
             if error.code not in (408,429,500,502,503,504):
                 raise RuntimeError(f"Spark request rejected: HTTP {error.code}") from None
@@ -136,10 +142,24 @@ def chat(system, content, schema=None, deadline=None):
 
 
 def _read_object(raw):
+    if not isinstance(raw, str):
+        raise ValueError('Missing model response')
     value = json.loads(re.sub(r"^```(?:json)?\s*|\s*```$", "", raw.strip()))
     if not isinstance(value, dict):
         raise ValueError("Summary must be an object")
     return value
+
+
+def _initial_draft(raw):
+    data = _read_object(raw)
+    if 'summary_lines' in data:
+        lines = data.pop('summary_lines')
+        if ('summary_ko' in data or not isinstance(lines, list) or len(lines) != 3
+                or any(not isinstance(line, str) or not 1 <= len(line.strip()) <= 220
+                       or '\n' in line or '\r' in line for line in lines)):
+            raise ValueError('Expected three separate summary sentences')
+        data['summary_ko'] = '\n'.join(line.strip() for line in lines)
+    return data
 
 
 def _checkpoint(path, value):
@@ -163,6 +183,10 @@ def _checkpoint(path, value):
 
 def _summary_schema(blocks):
     schema = copy.deepcopy(SCHEMA)
+    schema['required'] = ['summary_lines' if key == 'summary_ko' else key for key in schema['required']]
+    del schema['properties']['summary_ko']
+    schema['properties']['summary_lines'] = {'type': 'array', 'minItems': 3, 'maxItems': 3,
+                                           'items': {'type': 'string', 'minLength': 1, 'maxLength': 220}}
     schema['$defs'] = {'source_id': {'type': 'string', 'enum': [block['id'] for block in blocks]}}
     for field in schema['properties']['evidence']['properties'].values():
         field['items'] = {'$ref': '#/$defs/source_id'}
@@ -235,7 +259,10 @@ def generate_summary(paper, document, deadline=None, cache_path=None):
             source = '\n\n'.join(notes)
             if len(source) > 65000:
                 raise ValueError('Article evidence exceeds Spark context')
-        raw = chat(PROMPT + '\nWrite all three summary sentences in Korean. Return exactly three newline-separated lines. '
+        prompt = PROMPT.replace('summary_ko: exactly three Korean sentences separated by newline',
+                                'summary_lines: an array containing exactly three separate Korean sentences')
+        raw = chat(prompt + '\nReturn summary_lines as an array of exactly three Korean strings, one sentence per item. '
+            'Never combine them into a paragraph or insert line breaks inside an item. '
             'Do not quote article sentences. Keep each line under 220 characters. Use only numeric values explicitly reported in the source. '
             'Never add patient counts across studies or calculate totals, percentages or a study-design breakdown. '
             'For reviews, sample_size may report the stated number of studies; otherwise use Not reported. '
@@ -249,7 +276,7 @@ def generate_summary(paper, document, deadline=None, cache_path=None):
             'Describe observed comparisons cautiously; do not claim equivalence from nonsignificant results.',
             json.dumps({'title': paper['title'], 'source_type': 'fulltext', 'source': source}, ensure_ascii=False),
             _summary_schema(blocks), deadline=deadline)
-        data = _read_object(raw)
+        data = _initial_draft(raw)
         # Optional schema keys can be emitted for unused QA slots. They are not claims.
         claims = claim_texts(data)
         if isinstance(data.get('evidence'), dict):
