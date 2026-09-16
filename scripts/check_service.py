@@ -26,10 +26,14 @@ def main():
                     "/rpc/save_research_workspace", "/rpc/save_research_reference", "/rpc/research_topics", "/rpc/save_research_topic",
                     "/rpc/research_export_snapshot", "/rpc/request_research_extraction", "/rpc/claim_research_extractions",
                     "/rpc/finish_research_extraction", "/rpc/fail_research_extraction",
-                    "/rpc/record_research_export", "/rpc/research_document_exports"]
+                    "/rpc/record_research_export", "/rpc/research_document_exports", "/rpc/research_graph"]
         missing = [path for path in required if path not in paths]
         if missing:
             raise SystemExit("Missing database contracts: " + ", ".join(missing))
+        for table, columns in [("reader_states", "read_at,saved_at"), ("profiles", "personalization_enabled")]:
+            contract = requests.get(f"{url}/rest/v1/{table}", headers=headers,
+                                    params={"select":columns,"limit":"0"}, timeout=30)
+            contract.raise_for_status()
         response = requests.get(f"{url}/rest/v1/papers", headers=headers, params={
             "select":"fetched_at,summary_basis,summary_model,fulltext_storage", "order":"fetched_at.desc", "limit":"1"}, timeout=30)
         response.raise_for_status()

@@ -1,561 +1,448 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/auth";
-import { kstDate, shiftDate, checked, allRows } from "../lib/data";
+import { kstDate, checked, allRows } from "../lib/data";
+import {
+  ACTIVITY_LABELS,
+  PERIODS,
+  buildReadingEntries,
+  activityEntries,
+  activityBuckets,
+  periodEvents,
+  topicCounts,
+  methodCounts,
+  readingStreak,
+  heatmapData,
+} from "../lib/readingInsights";
 import { ErrorNotice } from "../components/Status";
+import {
+  Ring,
+  HeatmapTable,
+  PaperResults,
+  InterestExpansion,
+  COLORS,
+  HEAT,
+  PAPER_FIELDS,
+} from "../components/InsightsPanels";
 import { Loader2, TrendingUp, BookOpen, Zap } from "lucide-react";
-
-const STOP = new Set([
-  "humans",
-  "male",
-  "female",
-  "aged",
-  "middle aged",
-  "aged, 80 and over",
-  "adult",
-  "young adult",
-  "adolescent",
-  "child",
-  "animals",
-  "treatment outcome",
-  "follow-up studies",
-  "time factors",
-  "prognosis",
-  "risk factors",
-  "retrospective studies",
-  "prospective studies",
-  "cohort studies",
-  "prevalence",
-  "incidence",
-  "survival rate",
-  "survival analysis",
-  "proportional hazards models",
-  "multivariate analysis",
-  "logistic models",
-  "predictive value of tests",
-  "sensitivity and specificity",
-  "reproducibility of results",
-  "reference values",
-  "risk assessment",
-  "united states",
-  "europe",
-  "japan",
-  "korea",
-  "china",
-  "journal article",
-  "research support",
-  "english abstract",
-  "comparative study",
-  "multicenter study",
-  "randomized controlled trial",
-  "evaluation study",
-  "clinical trial",
-  "practice guideline",
-  "meta-analysis",
-  "systematic review",
-  "review",
-  "case reports",
-  "editorial",
-  "letter",
-  "comment",
-]);
-const COLORS = [
-  "#0066CC",
-  "#187A36",
-  "#965500",
-  "#8738B5",
-  "#C32D26",
-  "#00776F",
-  "#5856D6",
-  "#B82043",
-  "#08788D",
-  "#775B37",
-  "#636366",
-  "#48484A",
-];
-const TYPE_LABELS = {
-  rct: "Randomized controlled trial",
-  basic_research: "Basic Research",
-  biomarker: "Biomarker",
-  retrospective: "Retrospective",
-  prospective: "Prospective",
-  meta_analysis: "Meta-analysis",
-  ai_ml: "AI / ML",
-  surgical: "Surgical",
-  imaging: "Imaging",
-  epidemiology: "Epidemiology",
-  guideline: "Guideline",
-  review: "Review",
-};
-const HEAT = ["#F5F5F7", "#DBEAFE", "#93C5FD", "#3B82F6", "#1D4ED8", "#1E3A5F"];
-
-function Ring({ value, max, color, label, icon: Icon }) {
-  var r = 34,
-    circ = 2 * Math.PI * r,
-    pct = Math.min(1, value / Math.max(1, max));
-  return (
-    <div className="flex flex-col items-center gap-1">
-      <svg className="w-[68px] h-[68px] sm:w-[84px] sm:h-[84px]" viewBox="0 0 84 84">
-        <circle cx="42" cy="42" r={r} fill="none" stroke="#F2F2F7" strokeWidth="6" />
-        <circle
-          cx="42"
-          cy="42"
-          r={r}
-          fill="none"
-          stroke={color}
-          strokeWidth="6"
-          strokeDasharray={pct * circ + " " + circ}
-          strokeLinecap="round"
-          transform="rotate(-90 42 42)"
-        />
-        <text x="42" y="39" textAnchor="middle" fontSize="16" fontWeight="700" fill="#1D1D1F">
-          {value}
-        </text>
-        <text x="42" y="52" textAnchor="middle" fontSize="8" fill="#64646B">
-          {"/ " + max}
-        </text>
-      </svg>
-      <div className="flex items-center gap-1">
-        <Icon size={11} style={{ color: color }} />
-        <span className="text-[0.667rem] text-text3 font-medium">{label}</span>
-      </div>
-    </div>
-  );
-}
-
-function HeatmapTable({ weeks, heatCells, heatMonths }) {
-  var days = [
-    { label: "M", color: "#64646B" },
-    { label: "T", color: "#64646B" },
-    { label: "W", color: "#64646B" },
-    { label: "T", color: "#64646B" },
-    { label: "F", color: "#64646B" },
-    { label: "S", color: "#0066CC" },
-    { label: "S", color: "#C32D26" },
-  ];
-
-  // Single grid: col 0 = day labels, cols 1..weeks = data
-  // Row 0 = month labels, rows 1..7 = data
-  var cols = weeks + 1; // +1 for day label column
-  var rows = 8; // 1 month row + 7 day rows
-
-  // Build month header cells with correct colSpan via gridColumn
-  var monthCells = [];
-  var col = 2; // start after day-label column (grid is 1-indexed)
-  heatMonths.forEach(function (m) {
-    monthCells.push({ label: m.label, colStart: col, colEnd: col + m.span });
-    col += m.span;
-  });
-
-  return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "16px repeat(" + weeks + ", 1fr)",
-        gridTemplateRows: "auto repeat(7, 1fr)",
-        gap: 2,
-        width: "100%",
-      }}
-    >
-      {/* Row 0, Col 0: empty corner */}
-      <div />
-      {/* Row 0: month labels */}
-      {monthCells.map(function (m, i) {
-        return (
-          <div
-            key={i}
-            className="text-text3"
-            style={{
-              gridColumn: m.colStart + " / " + m.colEnd,
-              gridRow: 1,
-              fontSize: 10,
-              lineHeight: "16px",
-            }}
-          >
-            {m.label}
-          </div>
-        );
-      })}
-      {/* Rows 1-7: day labels + cells */}
-      {days.flatMap(function (d, row) {
-        var items = [];
-        // Day label
-        items.push(
-          <div
-            key={"label-" + row}
-            style={{
-              gridColumn: 1,
-              gridRow: row + 2,
-              fontSize: 10,
-              fontWeight: 600,
-              color: d.color,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "flex-end",
-              paddingRight: 2,
-            }}
-          >
-            {d.label}
-          </div>,
-        );
-        // Cells for this day across all weeks
-        for (var w = 0; w < weeks; w++) {
-          var cell = heatCells[w * 7 + row];
-          items.push(
-            <div
-              key={"c-" + row + "-" + w}
-              title={cell ? cell.date + ": " + cell.count + " papers" : ""}
-              className="rounded-sm hover:ring-2 hover:ring-accent hover:ring-offset-1"
-              style={{
-                gridColumn: w + 2,
-                gridRow: row + 2,
-                background: cell ? HEAT[Math.min(5, cell.count)] : "#F5F5F7",
-                cursor: "pointer",
-                aspectRatio: "1",
-              }}
-            />,
-          );
-        }
-        return items;
-      })}
-    </div>
-  );
-}
+import "../insights.css";
 
 export default function Insights() {
-  var auth = useAuth(),
-    user = auth.user;
-  var _p = useState([]),
-    papers = _p[0],
-    setPapers = _p[1];
-  var _d = useState({}),
-    readDates = _d[0],
-    setReadDates = _d[1];
-  var _l = useState(true),
-    loading = _l[0],
-    setLoading = _l[1];
-  var _s = useState({ total: 0, liked: 0, streak: 0 }),
-    stats = _s[0],
-    setStats = _s[1];
-
-  const [error, setError] = useState("");
-  const [retry, setRetry] = useState(0);
-  useEffect(
-    function () {
-      if (!user) return;
-      let active = true;
-      setLoading(true);
-      setError("");
-      (async function () {
-        try {
-          const [fbs, reads] = await Promise.all([
-            allRows(() =>
-              supabase
-                .from("feedbacks")
-                .select("paper_id")
-                .eq("user_id", user.id)
-                .eq("action", "like")
-                .order("id"),
-            ),
-            allRows(() =>
-              supabase
-                .from("read_history")
-                .select("paper_id,clicked_at")
-                .eq("user_id", user.id)
-                .gte("clicked_at", new Date(Date.now() - 365 * 86400000).toISOString())
-                .order("id"),
-            ),
-          ]);
+  const { user, profile } = useAuth();
+  const [params, setParams] = useSearchParams(),
+    location = useLocation(),
+    resultsRef = useRef(null);
+  const [loaded, setLoaded] = useState(null),
+    [loading, setLoading] = useState(true),
+    [error, setError] = useState(""),
+    [retry, setRetry] = useState(0),
+    [limit, setLimit] = useState(20);
+  const today = kstDate();
+  const period = PERIODS.some(([key]) => key === params.get("period")) ? params.get("period") : "90";
+  const activity = Object.hasOwn(ACTIVITY_LABELS, params.get("activity")) ? params.get("activity") : "read";
+  const filters = {
+    topic: params.get("topic") || "",
+    method: params.get("method") || "",
+    day: /^\d{4}-\d{2}-\d{2}$/.test(params.get("day") || "") ? params.get("day") : "",
+    month: /^\d{4}-\d{2}$/.test(params.get("month") || "") ? params.get("month") : "",
+  };
+  const returnTo = location.pathname + location.search;
+  useEffect(() => {
+    if (!user?.id) return;
+    let active = true;
+    setLoading(true);
+    setError("");
+    setLoaded(null);
+    (async () => {
+      try {
+        const [states, views, feedback] = await Promise.all([
+          allRows(() =>
+            supabase
+              .from("reader_states")
+              .select("paper_id,reading_state,read_at,saved,saved_at,note,tags")
+              .eq("user_id", user.id)
+              .order("paper_id"),
+          ),
+          allRows(() =>
+            supabase.from("read_history").select("paper_id,clicked_at").eq("user_id", user.id).order("id"),
+          ),
+          allRows(() =>
+            supabase
+              .from("feedbacks")
+              .select("paper_id,action,created_at")
+              .eq("user_id", user.id)
+              .eq("action", "like")
+              .order("id"),
+          ),
+        ]);
+        const ids = [...new Set([...states, ...views, ...feedback].map((row) => row.paper_id))],
+          papers = [];
+        for (let offset = 0; offset < ids.length; offset += 100) {
           if (!active) return;
-          var paperIds = Array.from(
-            new Set(
-              fbs
-                .map(function (f) {
-                  return f.paper_id;
-                })
-                .concat(
-                  reads.map(function (r) {
-                    return r.paper_id;
-                  }),
-                ),
-            ),
+          papers.push(
+            ...((await checked(
+              supabase
+                .from("papers")
+                .select(PAPER_FIELDS)
+                .in("id", ids.slice(offset, offset + 100)),
+            )) || []),
           );
-          var dateCounts = {};
-          const dayPapers = new Set();
-          reads.forEach((r) => {
-            if (!r.clicked_at) return;
-            const day = kstDate(r.clicked_at),
-              key = `${day}:${r.paper_id}`;
-            if (!dayPapers.has(key)) {
-              dayPapers.add(key);
-              dateCounts[day] = (dateCounts[day] || 0) + 1;
-            }
-          });
-          setReadDates(dateCounts);
-          const loaded = [];
-          for (let offset = 0; offset < paperIds.length; offset += 100) {
-            loaded.push(
-              ...((await checked(
-                supabase
-                  .from("papers")
-                  .select("id,keywords,mesh_terms,study_type,journal")
-                  .in("id", paperIds.slice(offset, offset + 100)),
-              )) || []),
-            );
-          }
-          if (!active) return;
-          setPapers(loaded);
-          let streak = 0,
-            day = kstDate();
-          if (!dateCounts[day]) day = shiftDate(day, -1);
-          while (dateCounts[day] && streak < 365) {
-            streak++;
-            day = shiftDate(day, -1);
-          }
-          setStats({ total: new Set(reads.map((r) => r.paper_id)).size, liked: fbs.length, streak: streak });
-        } catch {
-          if (active) setError("Could not load insights. Please retry.");
-        } finally {
-          if (active) setLoading(false);
         }
-      })();
-      return () => {
-        active = false;
-      };
-    },
-    [user?.id, retry],
+        if (active)
+          setLoaded({ uid: user.id, entries: buildReadingEntries({ papers, states, views, feedback }) });
+      } catch {
+        if (active) setError("Could not load insights. Please retry.");
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [user?.id, retry]);
+  useEffect(() => setLimit(20), [returnTo]);
+  const entries = loaded?.uid === user?.id ? loaded.entries : [];
+  const selected = useMemo(
+    () => activityEntries(entries, activity, period, today),
+    [entries, activity, period, today],
   );
-
+  const topics = useMemo(() => topicCounts(selected), [selected]);
+  const methods = useMemo(() => methodCounts(selected), [selected]);
+  const matching = activityEntries(entries, activity, period, today, filters).sort(
+    (a, b) =>
+      (periodEvents(b, activity, period, today).filter(Boolean).sort().at(-1) || "").localeCompare(
+        periodEvents(a, activity, period, today).filter(Boolean).sort().at(-1) || "",
+      ) || Number(b.paper.id) - Number(a.paper.id),
+  );
+  const counts = Object.fromEntries(
+    Object.keys(ACTIVITY_LABELS).map((key) => [key, activityEntries(entries, key, period, today).length]),
+  );
+  const days = activityBuckets(selected, activity, period, today),
+    months = Object.entries(activityBuckets(selected, activity, period, today, "month"));
+  const weeks = period === "30" ? 5 : period === "90" ? 13 : 26,
+    heatmap = heatmapData(days, weeks, today);
+  const unknownCount = entries.filter((entry) => entry.events[activity].includes(null)).length;
+  const currentTopic =
+    topics.find((topic) => topic.id === filters.topic) ||
+    (filters.topic ? { id: filters.topic, label: filters.topic } : null);
+  const topJournal = Object.entries(
+    selected.reduce((result, { paper }) => {
+      if (paper.journal) result[paper.journal] = (result[paper.journal] || 0) + 1;
+      return result;
+    }, {}),
+  ).sort((a, b) => b[1] - a[1])[0];
+  function change(values, drill = false) {
+    const next = new URLSearchParams(params);
+    for (const [key, value] of Object.entries(values)) {
+      if (value) next.set(key, value);
+      else next.delete(key);
+    }
+    setParams(next);
+    if (drill)
+      requestAnimationFrame(() =>
+        resultsRef.current?.scrollIntoView?.({
+          behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+          block: "start",
+        }),
+      );
+  }
   if (error)
     return (
       <div className="page-shell max-w-3xl">
-        <ErrorNotice message={error} onRetry={() => setRetry((r) => r + 1)} />
+        <ErrorNotice message={error} onRetry={() => setRetry((n) => n + 1)} />
       </div>
     );
-
-  if (loading)
+  if (loading || loaded?.uid !== user?.id)
     return (
-      <div className="flex items-center justify-center" style={{ height: "calc(100vh - 56px)" }}>
-        <Loader2 size={32} className="text-accent animate-spin" />
+      <div className="flex items-center justify-center h-full">
+        <Loader2 size={32} className="text-accent animate-spin" aria-label="Loading insights" />
       </div>
     );
-
-  // Topic data
-  var kwCount = {};
-  function toArr(v) {
-    if (Array.isArray(v)) return v;
-    if (typeof v === "string") {
-      try {
-        var p = JSON.parse(v);
-        if (Array.isArray(p)) return p;
-      } catch (e) {}
-    }
-    return [];
-  }
-  papers.forEach(function (p) {
-    var kws = toArr(p.keywords);
-    var mesh = toArr(p.mesh_terms);
-    kws.forEach(function (k) {
-      if (typeof k === "string") {
-        var kl = k.toLowerCase();
-        if (!STOP.has(kl) && kl.length > 2 && kl.length < 40) kwCount[kl] = (kwCount[kl] || 0) + 1;
-      }
-    });
-    mesh.forEach(function (m) {
-      if (typeof m === "string") {
-        var ml = m.toLowerCase();
-        if (!STOP.has(ml) && ml.length > 2 && ml.length < 40) kwCount[ml] = (kwCount[ml] || 0) + 1;
-      }
-    });
-  });
-  var topicData = Object.entries(kwCount)
-    .sort(function (a, b) {
-      return b[1] - a[1];
-    })
-    .slice(0, 10);
-  var topicTotal =
-    topicData.reduce(function (s, d) {
-      return s + d[1];
-    }, 0) || 1;
-
-  // Study types
-  var typeCounts = {};
-  papers.forEach(function (p) {
-    var t = p.study_type || "other";
-    typeCounts[t] = (typeCounts[t] || 0) + 1;
-  });
-  var typeData = Object.entries(typeCounts)
-    .sort(function (a, b) {
-      return b[1] - a[1];
-    })
-    .slice(0, 6);
-  var maxType = typeData[0] ? typeData[0][1] : 1;
-
-  // Heatmap data — responsive weeks (13 on mobile, 26 on desktop)
-  var isMobile = typeof window !== "undefined" && window.innerWidth < 640;
-  const weeks = isMobile ? 13 : 26;
-  const todayKey = kstDate();
-  const weekday = (new Date(`${todayKey}T00:00:00Z`).getUTCDay() + 6) % 7;
-  const monday = shiftDate(todayKey, -weekday);
-  const firstMonday = shiftDate(monday, -(weeks - 1) * 7);
-  const heatCells = [];
-  const heatMonths = [];
-  for (let week = 0; week < weeks; week++) {
-    const start = shiftDate(firstMonday, week * 7);
-    const month = new Date(`${start}T00:00:00Z`).toLocaleDateString("en-US", {
-      month: "short",
-      timeZone: "UTC",
-    });
-    if (heatMonths.at(-1)?.label === month) heatMonths.at(-1).span++;
-    else heatMonths.push({ label: month, span: 1 });
-    for (let day = 0; day < 7; day++) {
-      const key = shiftDate(start, day);
-      heatCells.push(key > todayKey ? null : { date: key, count: readDates[key] || 0 });
-    }
-  }
-
-  // Insight
-  var topKws = topicData.slice(0, 2).map(function (d) {
-    return d[0];
-  });
-  var topType = typeData[0];
-  var journals = {};
-  papers.forEach(function (p) {
-    if (p.journal) journals[p.journal] = (journals[p.journal] || 0) + 1;
-  });
-  var topJ = Object.entries(journals).sort(function (a, b) {
-    return b[1] - a[1];
-  })[0];
-
-  if (!stats.total && !loading)
-    return (
-      <div tabIndex={0} role="region" aria-label="Insights content" className="h-full overflow-y-auto">
-        <div className="p-4 sm:p-6 max-w-[800px] mx-auto">
-          <h1 className="text-[1.111rem] font-bold text-text1 mb-5">Research Insights</h1>
-          <div className="flex flex-col items-center py-16">
-            <div className="w-20 h-20 rounded-2xl bg-hover flex items-center justify-center mb-4">
-              <BookOpen size={32} className="text-text3" />
-            </div>
-            <p className="text-[1.111rem] font-semibold text-text1 mb-2">No data yet</p>
-            <p className="text-[0.889rem] text-text3 text-center max-w-xs leading-relaxed">
-              Start reading and liking papers in Daily Pick. Your insights will appear here.
-            </p>
-          </div>
-        </div>
-      </div>
-    );
-
   return (
-    <div tabIndex={0} role="region" aria-label="Insights content" className="h-full overflow-y-auto">
+    <div
+      tabIndex={0}
+      role="region"
+      aria-label="Insights content"
+      className="insights-page h-full overflow-y-auto"
+    >
       <div className="p-4 sm:p-6 max-w-[800px] mx-auto">
         <h1 className="text-[1.111rem] font-bold text-text1 mb-5">Research Insights</h1>
-
-        <div
-          className="bg-card rounded-xl border border-border p-4 mb-4 flex items-center justify-around"
-          style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.03)" }}
-        >
-          <Ring value={stats.total} max={50} color="#0066CC" label="Read / year" icon={BookOpen} />
-          <Ring value={stats.liked} max={20} color="#187A36" label="Liked" icon={TrendingUp} />
-          <Ring value={stats.streak} max={30} color="#965500" label="Streak" icon={Zap} />
+        <div className="insights-controls">
+          <label>
+            Period{" "}
+            <select
+              value={period}
+              onChange={(event) => change({ period: event.target.value, day: "", month: "" })}
+            >
+              {PERIODS.map(([key, label]) => (
+                <option key={key} value={key}>
+                  {label}
+                </option>
+              ))}
+            </select>
+          </label>
+          <span className="insights-caption">Activity dates use Korea Standard Time.</span>
         </div>
-
-        {topKws.length >= 2 && (
+        <div className="bg-card rounded-xl border border-border p-4 mb-4 flex items-center justify-around">
+          <Ring
+            value={counts.read}
+            max={Math.max(...Object.values(counts), 1)}
+            color="#0066CC"
+            label="Marked read"
+            icon={BookOpen}
+          />
+          <Ring
+            value={counts.liked}
+            max={Math.max(...Object.values(counts), 1)}
+            color="#187A36"
+            label="Liked"
+            icon={TrendingUp}
+          />
+          <Ring
+            value={readingStreak(entries, today)}
+            max={30}
+            color="#965500"
+            label="Current streak"
+            icon={Zap}
+            unit="days"
+          />
+        </div>
+        <div className="insights-activity-tabs" role="group" aria-label="Activity to explore">
+          {Object.entries(ACTIVITY_LABELS).map(([key, label]) => (
+            <button
+              key={key}
+              aria-pressed={activity === key}
+              onClick={() => change({ activity: key, day: "", month: "", method: "", topic: "" })}
+            >
+              {label}
+              <strong>{counts[key]}</strong>
+            </button>
+          ))}
+        </div>
+        <p className="insights-caption insights-definition">
+          Marked read counts your explicit reading status. Viewed records active viewing, not completion.
+          Saved and liked are separate actions. The current streak uses dated marked-read records.
+        </p>
+        {unknownCount > 0 && (
+          <p className="insights-caption">
+            {unknownCount} {ACTIVITY_LABELS[activity].toLowerCase()} papers have no recorded action date;{" "}
+            {period === "all" ? (
+              "included in totals, excluded from the calendar."
+            ) : (
+              <button
+                className="insights-text-button"
+                onClick={() => change({ period: "all", day: "", month: "" })}
+              >
+                show them in All time
+              </button>
+            )}
+          </p>
+        )}
+        {!entries.some((entry) => Object.values(entry.events).some((events) => events.length)) && (
+          <div className="insights-panel insights-empty">
+            <BookOpen size={30} />
+            <h2>No data yet</h2>
+            <p>
+              View, save, like or mark papers read in Daily Pick. Each action will appear separately here.
+            </p>
+            <Link to="/">Start reading</Link>
+          </div>
+        )}
+        {topics.length > 0 && (
           <div className="bg-[rgba(0,122,255,0.04)] border border-[rgba(0,122,255,0.1)] rounded-xl p-4 mb-4">
             <p className="text-[0.833rem] text-text1 leading-relaxed">
-              Your reading is centered on <strong>{topKws[0]}</strong> and <strong>{topKws[1]}</strong>.
-              {topType && papers.length
-                ? " " +
-                  Math.round((topType[1] / papers.length) * 100) +
-                  "% are " +
-                  (TYPE_LABELS[topType[0]] || topType[0]) +
-                  "."
-                : ""}
-              {topJ ? " Most read: " + topJ[0] + " (" + topJ[1] + ")." : ""}
+              In this period, your {ACTIVITY_LABELS[activity].toLowerCase()} papers most often include{" "}
+              <strong>{topics[0].label}</strong>
+              {topics[1] ? (
+                <>
+                  {" "}
+                  and <strong>{topics[1].label}</strong>
+                </>
+              ) : null}
+              .{topJournal ? ` Most frequent journal: ${topJournal[0]} (${topJournal[1]} papers).` : ""}
             </p>
           </div>
         )}
-
-        <div
-          className="bg-card rounded-xl border border-border p-4 sm:p-5 mb-4"
-          style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.03)" }}
-        >
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-[0.833rem] font-semibold text-text1">Reading Activity · {weeks} weeks</h2>
-            <div className="flex items-center gap-1.5">
-              <span className="text-[0.667rem] text-text3">Less</span>
-              {HEAT.map(function (c, i) {
-                return (
-                  <div key={i} className="rounded-sm" style={{ width: 11, height: 11, background: c }} />
-                );
-              })}
-              <span className="text-[0.667rem] text-text3">More</span>
-            </div>
+        <section className="insights-panel" aria-labelledby="activity-heading">
+          <div className="insights-panel-heading">
+            <h2 id="activity-heading">Reading Activity · {ACTIVITY_LABELS[activity]}</h2>
+            <span className="insights-caption">Recent {weeks} weeks</span>
           </div>
-          <HeatmapTable weeks={weeks} heatCells={heatCells} heatMonths={heatMonths} />
-        </div>
-
-        <div
-          className="bg-card rounded-xl border border-border p-4 mb-4"
-          style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.03)" }}
-        >
-          <h2 className="text-[0.833rem] font-semibold text-text1 mb-3">Research Topics</h2>
-          <div className="flex flex-wrap gap-1" style={{ minHeight: 120 }}>
-            {topicData.map(function (d, i) {
-              var pct = d[1] / topicTotal;
-              return (
-                <div
-                  key={d[0]}
-                  className="rounded-lg flex flex-col justify-end p-2.5"
+          <HeatmapTable
+            weeks={weeks}
+            cells={heatmap.cells}
+            months={heatmap.months}
+            selected={filters.day}
+            activity={ACTIVITY_LABELS[activity]}
+            onSelect={(day) =>
+              change({ day: filters.day === day ? "" : day, month: "", topic: "", method: "" }, true)
+            }
+          />
+          <div className="insights-legend" aria-hidden="true">
+            <span>Less</span>
+            {HEAT.map((color) => (
+              <i key={color} style={{ background: color }} />
+            ))}
+            <span>More</span>
+          </div>
+          <p className="insights-caption">
+            Choose a date or month to open its paper list. Month counts deduplicate repeated views of the same
+            paper.
+          </p>
+          <div className="insights-timeline" role="group" aria-label="Monthly activity">
+            {months.map(([month, count]) => (
+              <button
+                key={month}
+                aria-pressed={filters.month === month}
+                aria-label={`${month}: ${count} ${ACTIVITY_LABELS[activity].toLowerCase()} papers`}
+                onClick={() =>
+                  change(
+                    { month: filters.month === month ? "" : month, day: "", topic: "", method: "" },
+                    true,
+                  )
+                }
+              >
+                <span>{month}</span>
+                <span
+                  className="insights-month-bar"
                   style={{
-                    flex: "1 1 " + Math.max(28, pct * 250) + "%",
-                    minWidth: 70,
-                    minHeight: 45,
-                    background: COLORS[i % COLORS.length],
+                    height: `${Math.max(5, (count / Math.max(...months.map(([, count]) => count))) * 45)}px`,
                   }}
-                >
-                  <span
-                    className="text-white font-semibold"
-                    style={{ fontSize: pct > 0.15 ? 13 : 11, lineHeight: "1.2" }}
-                  >
-                    {d[0].length > 20 ? d[0].slice(0, 18) + "..." : d[0]}
-                  </span>
-                  <span className="text-white" style={{ fontSize: 10 }}>
-                    {d[1]}
-                  </span>
-                </div>
-              );
-            })}
+                />
+                <strong>{count}</strong>
+              </button>
+            ))}
           </div>
-        </div>
-
-        <div
-          className="bg-card rounded-xl border border-border p-4"
-          style={{ boxShadow: "0 1px 3px rgba(0,0,0,0.03)" }}
+          {!months.length && (
+            <p className="insights-empty">
+              No dated {ACTIVITY_LABELS[activity].toLowerCase()} activity in this period.
+            </p>
+          )}
+        </section>
+        <section className="insights-panel" aria-labelledby="topics-heading">
+          <h2 id="topics-heading">Research Topics</h2>
+          <p className="insights-caption">
+            MeSH and keyword metadata, with explicit aliases merged once per paper. Topics and study methods
+            are counted separately.
+          </p>
+          <div className="insights-topics">
+            {topics.slice(0, 10).map((topic, i) => (
+              <button
+                key={topic.id}
+                aria-pressed={filters.topic === topic.id}
+                onClick={() =>
+                  change(
+                    { topic: filters.topic === topic.id ? "" : topic.id, day: "", month: "", method: "" },
+                    true,
+                  )
+                }
+                style={{ background: COLORS[i % COLORS.length], flexGrow: topic.count }}
+              >
+                <span>{topic.label}</span>
+                <strong>{topic.count} papers</strong>
+                <small>{topic.source}</small>
+              </button>
+            ))}
+          </div>
+          {!topics.length && <p className="insights-empty">No topics for this activity and period.</p>}
+          {topics.length > 10 && (
+            <label className="insights-topic-select">
+              More topics{" "}
+              <select
+                value={filters.topic}
+                onChange={(event) =>
+                  change({ topic: event.target.value, day: "", month: "", method: "" }, true)
+                }
+              >
+                <option value="">All topics</option>
+                {topics.map((topic) => (
+                  <option key={topic.id} value={topic.id}>
+                    {topic.label} ({topic.count})
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+        </section>
+        <section className="insights-panel" aria-labelledby="methods-heading">
+          <h2 id="methods-heading">Study Types</h2>
+          <p className="insights-caption">
+            Recognized study methods from metadata. Clinical topics such as imaging and AI are not treated as
+            methods.
+          </p>
+          <div className="insights-methods">
+            {methods.map((method, i) => (
+              <button
+                key={method.id}
+                aria-pressed={filters.method === method.id}
+                onClick={() =>
+                  change(
+                    { method: filters.method === method.id ? "" : method.id, topic: "", day: "", month: "" },
+                    true,
+                  )
+                }
+              >
+                <span>
+                  {method.label}
+                  <strong>{method.count}</strong>
+                </span>
+                <span className="insights-method-track">
+                  <i
+                    style={{
+                      width: `${(method.count / Math.max(...methods.map((item) => item.count))) * 100}%`,
+                      background: COLORS[i % COLORS.length],
+                    }}
+                  />
+                </span>
+              </button>
+            ))}
+          </div>
+          {!methods.length && <p className="insights-empty">No study methods for this selection.</p>}
+        </section>
+        <section
+          ref={resultsRef}
+          className="insights-panel insights-results"
+          aria-labelledby="insights-results-title"
         >
-          <h2 className="text-[0.833rem] font-semibold text-text1 mb-3">Study Types</h2>
-          <div className="space-y-2.5">
-            {typeData.map(function (entry, i) {
-              return (
-                <div key={entry[0]}>
-                  <div className="flex items-center justify-between mb-0.5">
-                    <span className="text-[0.778rem] text-text2">{TYPE_LABELS[entry[0]] || entry[0]}</span>
-                    <span className="text-[0.667rem] text-text3 font-mono">{entry[1]}</span>
-                  </div>
-                  <div className="h-2.5 bg-hover rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full"
-                      style={{
-                        width: (entry[1] / maxType) * 100 + "%",
-                        background: COLORS[i % COLORS.length],
-                        transition: "width 0.7s",
-                      }}
-                    />
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+          {Object.values(filters).some(Boolean) && (
+            <div className="insights-filter-summary">
+              <span>
+                {[
+                  currentTopic?.label,
+                  methods.find((method) => method.id === filters.method)?.label || filters.method,
+                  filters.day,
+                  filters.month,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </span>
+              <button
+                className="insights-text-button"
+                onClick={() => change({ topic: "", method: "", day: "", month: "" })}
+              >
+                Clear chart selection
+              </button>
+            </div>
+          )}
+          <PaperResults
+            entries={matching}
+            activity={activity}
+            period={period}
+            today={today}
+            title={`${ACTIVITY_LABELS[activity]} papers${currentTopic ? ` · ${currentTopic.label}` : ""}`}
+            returnTo={returnTo}
+            limit={limit}
+            onMore={() => setLimit((n) => n + 20)}
+          />
+        </section>
+        <InterestExpansion
+          key={user.id}
+          userId={user.id}
+          personalized={profile?.personalization_enabled !== false}
+          topic={currentTopic}
+          returnTo={returnTo}
+        />
       </div>
     </div>
   );

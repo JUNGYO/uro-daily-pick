@@ -4,7 +4,6 @@ Scores papers with full-text summaries and saves up to five daily recommendation
 Run daily via GitHub Actions after fetch_papers.py.
 """
 import os
-import json
 import math
 from datetime import datetime, timedelta, timezone
 from collections import Counter
@@ -14,15 +13,25 @@ from common import supabase_headers
 from common import get_json, paginate, strings
 from keywords import keyword_matches, keyword_count
 from catalog_policy import AUTOMATIC_START_DATE, automatic_paper, recent_paper
+from recommendation_topics import normalized_term, paper_topics, topic_id
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 
 # Scoring weights
-W_CONTENT = 0.30
+W_CONTENT = 0.50
 W_BEHAVIORAL = 0.25
-W_COLLABORATIVE = 0.25
-W_TEMPORAL = 0.20
+W_COLLABORATIVE = 0.10
+W_TEMPORAL = 0.15
+
+MIN_SIMILAR_READERS = 3
+MIN_SHARED_LIKES = 2
+MIN_SIMILARITY = 0.20
+MIN_PAPER_SUPPORT = 3
+MIN_TOPIC_PAPERS = 2
+MAX_SIMILAR_READERS = 50
+MAX_NETWORK_TOPICS = 8
+PAPER_FIELDS = "id,pmid,title,abstract,authors,journal,pub_date,mesh_terms,keywords,paper_type,study_type,summary_review_required,integrity_status,fulltext_available,summary_basis,summary_ko,summary_source_hash,summary_model,summarized_at"
 
 
 def sb(method, path, data=None, params=None):
@@ -59,14 +68,16 @@ def sb_patch(table, row_id, data):
 
 
 def get_all_profiles():
-    return paginate(lambda path, params: sb("GET", path, params), "profiles", {"select": "*", "onboarding_done": "eq.true", "name": "neq.[DELETED]", "order": "id"})
+    return paginate(lambda path, params: sb("GET", path, params), "profiles", {
+        "select": "id,keywords,preferred_journals,preferred_study_types,personalization_enabled",
+        "onboarding_done": "eq.true", "name": "neq.[DELETED]", "order": "id"})
 
 
 def get_catalog_papers():
     # Import time is not publication freshness. Backfilled bodies must become
     # candidates, while unready papers still supply existing feedback signals.
     papers = paginate(lambda path, params: sb("GET", path, params=params), "papers", {
-        "select": "id,pmid,title,abstract,authors,journal,pub_date,mesh_terms,keywords,paper_type,study_type,summary_review_required,integrity_status,fulltext_available,summary_basis,summary_ko,summary_source_hash,summary_model,summarized_at",
+        "select": PAPER_FIELDS,
         "order": "pub_date.desc,id",
         "fulltext_available": "eq.true",
         "pub_date": "gte."+AUTOMATIC_START_DATE,
@@ -77,7 +88,7 @@ def get_catalog_papers():
         signals.extend(paginate(lambda path, params: sb("GET",path,params=params),table,{"select":"paper_id","order":"id"}))
     missing=sorted({p["paper_id"] for p in signals}-known)
     for start in range(0,len(missing),100):
-        papers.extend(sb("GET","papers",params={"select":"*","id":"in.("+",".join(map(str,missing[start:start+100]))+")"}))
+        papers.extend(sb("GET","papers",params={"select":PAPER_FIELDS,"id":"in.("+",".join(map(str,missing[start:start+100]))+")"}))
     return papers
 
 
@@ -113,21 +124,25 @@ def text_match_score(paper, user_keywords):
     """BM25-like content matching: keyword overlap in title + abstract."""
     if not user_keywords:
         return 0.0, []
-    title_lower = paper.get("title", "").lower()
-    abstract_lower = paper.get("abstract", "").lower()
-    paper_kws = set(k.lower() for k in (paper.get("keywords") or []))
-    paper_mesh = set(m.lower() for m in (paper.get("mesh_terms") or []))
+    title_lower = (paper.get("title") or "").lower()
+    abstract_lower = (paper.get("abstract") or "").lower()
+    paper_kws = set(normalized_term(k) for k in strings(paper.get("keywords")))
+    paper_mesh = set(normalized_term(m) for m in strings(paper.get("mesh_terms")))
     all_paper_terms = paper_kws | paper_mesh
 
     score = 0.0
     matched = []
+    seen_topics = set()
     for kw in user_keywords:
-        kw_lower = kw.strip().lower()
-        if not kw_lower:
+        kw_lower = normalized_term(kw)
+        canonical = topic_id(kw)
+        if not kw_lower or canonical in seen_topics:
             continue
-        if kw_lower in all_paper_terms:
+        previous_score = score
+        metadata_matches = sorted(term for term in all_paper_terms if topic_id(term) == canonical)
+        if metadata_matches:
             score += 3.0  # exact keyword/mesh match
-            matched.append(kw)
+            matched.append(kw if kw_lower in all_paper_terms else metadata_matches[0])
         elif keyword_matches(title_lower, kw_lower):
             score += 2.5  # in title — strong signal
             matched.append(kw)
@@ -140,6 +155,9 @@ def text_match_score(paper, user_keywords):
                 score += 0.3  # mentioned once or twice — weak, probably tangential
             matched.append(kw)
 
+        if score > previous_score:
+            seen_topics.add(canonical)
+
     # Normalize to 0-1 range (cap at 10)
     return min(1.0, score / 10.0), matched
 
@@ -148,22 +166,17 @@ def behavioral_score(paper, liked_papers, disliked_kws, dwell_papers):
     """Score based on user's past behavior."""
     score = 0.0
     reasons = []
-    paper_kws = set(k.lower() for k in (paper.get("keywords") or []))
-    paper_mesh = set(m.lower() for m in (paper.get("mesh_terms") or []))
     paper_authors = set(paper.get("authors") or [])
-    paper_terms = paper_kws | paper_mesh
+    paper_terms = paper_topics(paper)
 
     # Liked keyword overlap
-    liked_kw_match = 0
+    liked_matches = set()
     for lp in liked_papers:
-        lp_terms = set(k.lower() for k in (lp.get("keywords") or []))
-        lp_terms |= set(m.lower() for m in (lp.get("mesh_terms") or []))
-        overlap = paper_terms & lp_terms
-        liked_kw_match += len(overlap)
+        liked_matches.update(paper_terms & paper_topics(lp))
 
-    if liked_kw_match:
-        score += min(1.0, liked_kw_match * 0.15)
-        reasons.append({"type": "learned", "label": "Based on your likes"})
+    if liked_matches:
+        score += min(1.0, len(liked_matches) * 0.15)
+        reasons.append({"type": "learned", "label": "Based on your likes", "topics": sorted(liked_matches)[:3]})
 
     # Liked author overlap
     liked_authors = set()
@@ -172,17 +185,17 @@ def behavioral_score(paper, liked_papers, disliked_kws, dwell_papers):
     author_overlap = paper_authors & liked_authors
     if author_overlap:
         score += min(0.5, len(author_overlap) * 0.2)
-        reasons.append({"type": "author", "label": ", ".join(list(author_overlap)[:2])})
+        reasons.append({"type": "author", "label": ", ".join(sorted(author_overlap)[:2])})
 
     # Dislike penalty
     for dk in disliked_kws:
-        if dk.strip() and (dk.strip().lower() in paper_terms or keyword_matches(paper.get("abstract"), dk)):
+        if dk.strip() and (topic_id(dk) in paper_terms or keyword_matches(paper.get("abstract"), dk)):
             score -= 0.4
 
     # Dwell-based signals
     dwell_terms = set()
     for dp in dwell_papers:
-        dwell_terms |= set(k.lower() for k in (dp.get("keywords") or []))
+        dwell_terms.update(paper_topics(dp))
     dwell_overlap = paper_terms & dwell_terms
     if dwell_overlap:
         score += min(0.3, len(dwell_overlap) * 0.05)
@@ -197,31 +210,83 @@ def behavioral_score(paper, liked_papers, disliked_kws, dwell_papers):
     return max(0, min(1.0, score)), reasons
 
 
+def likes_by_user(all_likes, eligible_user_ids=None):
+    """Internal-only index; duplicate rows never count as independent support."""
+    indexed = {}
+    for like in all_likes:
+        uid, pid = like.get("user_id"), like.get("paper_id")
+        if uid is None or pid is None or (eligible_user_ids is not None and uid not in eligible_user_ids):
+            continue
+        indexed.setdefault(uid, set()).add(pid)
+    return indexed
+
+
+def build_collaborative_context(user_id, indexed_likes, papers=(), enabled=True):
+    """Build once per reader from opted-in likes, never notes or research projects.
+
+    Thresholds are conservative product rules, not estimates of statistical
+    confidence. Similarity weights ranking only; no probability is published.
+    """
+    network = {
+        "status": "insufficient" if enabled else "disabled",
+        "min_similar_readers": MIN_SIMILAR_READERS,
+        "min_shared_likes": MIN_SHARED_LIKES,
+        "min_paper_support": MIN_PAPER_SUPPORT,
+        "min_topic_papers": MIN_TOPIC_PAPERS,
+        "topics": [],
+    }
+    context = {"network": network, "paper_signals": {}}
+    my_likes = indexed_likes.get(user_id, set())
+    if not enabled or len(my_likes) < MIN_SHARED_LIKES:
+        return context
+    similar = []
+    for uid, their_likes in indexed_likes.items():
+        if uid == user_id:
+            continue
+        shared = len(my_likes & their_likes)
+        similarity = shared / len(my_likes | their_likes)
+        if shared >= MIN_SHARED_LIKES and similarity >= MIN_SIMILARITY:
+            similar.append((uid, similarity, their_likes))
+    similar.sort(key=lambda row: (-row[1], str(row[0])))
+    similar = similar[:MAX_SIMILAR_READERS]
+    if len(similar) < MIN_SIMILAR_READERS:
+        return context
+
+    network.update(status="qualified", cohort_size=len(similar))
+    by_id = {p["id"]: p for p in papers
+             if automatic_paper(p) and p.get("integrity_status") != "retracted"
+             and not p.get("summary_review_required")}
+    supporters, weighted_support = {}, Counter()
+    topic_readers, topic_papers = {}, {}
+    total_weight = sum(similarity for _, similarity, _ in similar)
+    for uid, similarity, their_likes in similar:
+        for pid in their_likes - my_likes:
+            supporters.setdefault(pid, set()).add(uid)
+            weighted_support[pid] += similarity
+            for topic in paper_topics(by_id.get(pid, {})):
+                topic_readers.setdefault(topic, set()).add(uid)
+                topic_papers.setdefault(topic, set()).add(pid)
+    for pid, readers in supporters.items():
+        support = len(readers)
+        if support >= MIN_PAPER_SUPPORT:
+            # Shrink at the minimum support; the maximum CF contribution is 10%.
+            score = weighted_support[pid] / total_weight * min(1.0, support / (2 * MIN_PAPER_SUPPORT))
+            context["paper_signals"][pid] = {
+                "score": score, "support": support, "cohort_size": len(similar),
+            }
+    topics = [{"id": topic, "label": topic, "reader_support": len(readers),
+               "paper_support": len(topic_papers[topic]), "source": "metadata"}
+              for topic, readers in topic_readers.items()
+              if len(readers) >= MIN_SIMILAR_READERS and len(topic_papers[topic]) >= MIN_TOPIC_PAPERS]
+    topics.sort(key=lambda topic: (-topic["reader_support"], -topic["paper_support"], topic["id"]))
+    network["topics"] = topics[:MAX_NETWORK_TOPICS]
+    return context
+
+
 def collaborative_score(paper_id, user_id, all_likes):
-    """Jaccard-based: papers liked by similar users."""
-    # Find user's liked papers
-    my_likes = set(l["paper_id"] for l in all_likes if l["user_id"] == user_id)
-    if not my_likes:
-        return 0.0
-
-    # Find users who share likes
-    other_users = {}
-    for l in all_likes:
-        if l["user_id"] != user_id and l["paper_id"] in my_likes:
-            other_users.setdefault(l["user_id"], set()).add(l["paper_id"])
-
-    if not other_users:
-        return 0.0
-
-    # Check if similar users liked this paper
-    score = 0.0
-    for uid, shared in other_users.items():
-        their_likes = set(l["paper_id"] for l in all_likes if l["user_id"] == uid)
-        if paper_id in their_likes:
-            jaccard = len(shared) / (len(my_likes) + len(their_likes) - len(shared))
-            score += jaccard
-
-    return min(1.0, score)
+    """Compatibility helper; callers must pass only opted-in users' likes."""
+    context = build_collaborative_context(user_id, likes_by_user(all_likes))
+    return context["paper_signals"].get(paper_id, {}).get("score", 0.0)
 
 
 def temporal_score(pub_date_str):
@@ -248,11 +313,13 @@ def authority_boost(paper):
     return boost
 
 
-def score_paper(paper, profile, liked_papers, disliked_kws, dwell_papers, all_likes):
+def score_paper(paper, profile, liked_papers, disliked_kws, dwell_papers, all_likes, collaborative=None):
     """Compute final hybrid score for a paper."""
+    personalized = profile.get("personalization_enabled", True) is True
     content, matched_terms = text_match_score(paper, profile.get("keywords") or [])
-    behav, behav_reasons = behavioral_score(paper, liked_papers, disliked_kws, dwell_papers)
-    collab = collaborative_score(paper["id"], profile["id"], all_likes)
+    behav, behav_reasons = behavioral_score(paper, liked_papers, disliked_kws, dwell_papers) if personalized else (0.0, [])
+    if collaborative is None or not personalized:
+        collaborative = build_collaborative_context(profile["id"], likes_by_user(all_likes), enabled=personalized)
     temporal = temporal_score(paper.get("pub_date"))
     boost = authority_boost(paper)
 
@@ -293,8 +360,16 @@ def score_paper(paper, profile, liked_papers, disliked_kws, dwell_papers, all_li
             reasons.insert(0, {"type": "alert", "alert_type": kind, "label": f"Alert: {alert['value']}"})
             break
 
+    signal = collaborative["paper_signals"].get(paper["id"], {})
+    # Collaborative activity supplements an actual personal content/behavior match.
+    collab = signal.get("score", 0.0) if personalized and (content > 0 or behav > 0) else 0.0
+    if collab:
+        reasons.insert(0, {"type": "similar_readers",
+                           "label": f"비슷한 독자 {signal['support']}명이 좋아한 문헌",
+                           "support": signal["support"], "cohort_size": signal["cohort_size"]})
+
     final = (
-        W_CONTENT * content +
+        W_CONTENT * min(1.0, content) +
         W_BEHAVIORAL * behav +
         W_COLLABORATIVE * collab +
         W_TEMPORAL * temporal
@@ -303,7 +378,31 @@ def score_paper(paper, profile, liked_papers, disliked_kws, dwell_papers, all_li
     return round(final * 15, 2), {
         "reasons": reasons[:5],
         "matched_terms": matched_terms[:10],
+        "personalization_enabled": personalized,
+        "network": collaborative["network"],
     }
+
+
+def diverse_picks(scored, limit=5):
+    """A modest redundancy penalty keeps relevance and the five-year tier first."""
+    remaining = list(scored)
+    selected, journals, topics = [], Counter(), Counter()
+    while remaining and len(selected) < limit:
+        def rank(item):
+            paper, score, _ = item
+            journal = normalized_term(paper.get("journal"))
+            paper_terms = paper_topics(paper)
+            redundancy = max((topics[term] for term in paper_terms), default=0)
+            adjusted = score * (0.9 ** journals[journal] if journal else 1.0) * 0.9 ** redundancy
+            return recent_paper(paper), adjusted, score, paper["id"]
+        choice = max(remaining, key=rank)
+        remaining.remove(choice)
+        selected.append(choice)
+        journal = normalized_term(choice[0].get("journal"))
+        if journal:
+            journals[journal] += 1
+        topics.update(paper_topics(choice[0]))
+    return selected
 
 
 def main():
@@ -319,6 +418,8 @@ def main():
         for field in ("authors", "keywords", "mesh_terms"):
             paper[field] = strings(paper.get(field))
     all_likes = get_all_feedbacks_likes()
+    eligible_users = {profile["id"] for profile in profiles if profile.get("personalization_enabled", True) is True}
+    indexed_likes = likes_by_user(all_likes, eligible_users)
     alerts = paginate(lambda path, params: sb("GET", path, params), "alerts", {"select": "user_id,alert_type,value", "is_active": "eq.true", "order": "id"})
 
     print(f"Users: {len(profiles)}, Papers pool: {len(papers)}, Total likes: {len(all_likes)}")
@@ -326,12 +427,15 @@ def main():
 
     for profile in profiles:
         uid = profile["id"]
+        personalized = profile.get("personalization_enabled", True) is True
         profile["alerts"] = [a for a in alerts if a["user_id"] == uid]
         feedbacks = get_user_feedbacks(uid)
         reads = get_user_reads(uid)
 
         fb_map = {f["paper_id"]: f["action"] for f in feedbacks}
-        seen_ids = set(fb_map.keys()) | set(r["paper_id"] for r in reads)
+        seen_ids = set(fb_map.keys())
+        if personalized:
+            seen_ids.update(r["paper_id"] for r in reads)
 
         # Liked papers (full data for behavioral scoring)
         liked_ids = [pid for pid, action in fb_map.items() if action == "like"]
@@ -347,6 +451,7 @@ def main():
         # Dwell papers (30s+)
         dwell_ids = set(r["paper_id"] for r in reads if r.get("dwell_seconds", 0) >= 30)
         dwell_papers = [p for p in papers if p["id"] in dwell_ids]
+        collaborative = build_collaborative_context(uid, indexed_likes, papers, enabled=personalized)
 
         # Score unseen papers (skip letters/comments/erratum)
         skip_types = {"letter", "comment", "erratum", "editorial"}
@@ -362,12 +467,11 @@ def main():
             t = paper.get("title", "").lower()
             if any(s in t for s in ["reply to", "letter to the editor", "research letter", "letter:", "re:", "comment on", "erratum", "corrigendum", "retraction", "editorial", "correspondence"]):
                 continue
-            score, reasons = score_paper(paper, profile, liked_papers, disliked_kws, dwell_papers, all_likes)
+            score, reasons = score_paper(paper, profile, liked_papers, disliked_kws, dwell_papers, [], collaborative)
             if score > 0:
                 scored.append((paper, score, reasons))
 
-        scored.sort(key=lambda x: (recent_paper(x[0]), x[1], x[0]["id"]), reverse=True)
-        top5 = scored[:5]
+        top5 = diverse_picks(scored)
 
         recs = [{"paper_id": p["id"], "score": score, "reasons": reasons} for p, score, reasons in top5]
         sb("POST", "rpc/replace_daily_recommendations", {"p_user_id": uid, "p_date": today, "p_recs": recs})

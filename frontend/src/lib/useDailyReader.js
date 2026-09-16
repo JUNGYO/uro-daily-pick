@@ -6,10 +6,10 @@ import { useResource } from "../components/ReaderUI";
 
 // One day's bounded recommendation queue. Detail requests are deduplicated and only
 // the adjacent article is prefetched; private state never enters persistent storage.
-export function useDailyReader(uid, day, requestedPmid, active = true) {
+export function useDailyReader(uid, day, requestedPmid, active = true, personalized = true) {
   const queue = useResource(
-    async () => ({ uid, day, cards: await rpc("reader_daily", { p_day: day }) }),
-    [uid, day],
+    async () => ({ uid, day, personalized, cards: await rpc("reader_daily", { p_day: day }) }),
+    [uid, day, personalized],
   );
   const session = useMemo(() => ({ cache: new Map(), pending: new Map(), opened: new Set() }), [uid, day]);
   const currentSession = useRef(session);
@@ -24,7 +24,10 @@ export function useDailyReader(uid, day, requestedPmid, active = true) {
   const automaticWrite = useRef(null);
   const manualWrite = useRef(false);
   const [automaticRevision, setAutomaticRevision] = useState(0);
-  const cards = queue.data?.uid === uid && queue.data?.day === day ? queue.data.cards : [];
+  const cards =
+    queue.data?.uid === uid && queue.data?.day === day && queue.data?.personalized === personalized
+      ? queue.data.cards
+      : [];
   const index = Math.max(
     0,
     cards.findIndex((p) => p.pmid === requestedPmid),
@@ -85,8 +88,11 @@ export function useDailyReader(uid, day, requestedPmid, active = true) {
     )
       .then((rows) => {
         if (live) {
-          setReasons(Object.fromEntries((rows || []).map((r) => [r.paper_id, r.reasons])));
-          setScores(Object.fromEntries((rows || []).map((r) => [r.paper_id, r.score])));
+          const allowed = (rows || []).filter(
+            (r) => personalized || r.reasons?.personalization_enabled === false,
+          );
+          setReasons(Object.fromEntries(allowed.map((r) => [r.paper_id, r.reasons])));
+          setScores(Object.fromEntries(allowed.map((r) => [r.paper_id, r.score])));
         }
       })
       .catch(() => {}); // The server's recommendation explanation remains available.
@@ -113,7 +119,7 @@ export function useDailyReader(uid, day, requestedPmid, active = true) {
     return () => {
       live = false;
     };
-  }, [queue.data, uid, day]);
+  }, [queue.data, uid, day, personalized]);
   useEffect(() => {
     if (!detail.data?.paper) return;
     const adjacent = cards[index + 1];
@@ -222,8 +228,16 @@ export function useDailyReader(uid, day, requestedPmid, active = true) {
     detail,
     states,
     opinions,
-    reasons,
-    scores,
+    reasons: personalized
+      ? reasons
+      : Object.fromEntries(
+          Object.entries(reasons).filter(([, value]) => value?.personalization_enabled === false),
+        ),
+    scores: personalized
+      ? scores
+      : Object.fromEntries(
+          Object.entries(scores).filter(([id]) => reasons[id]?.personalization_enabled === false),
+        ),
     change,
     opinion,
     undo,

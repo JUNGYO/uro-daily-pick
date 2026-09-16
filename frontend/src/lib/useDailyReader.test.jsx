@@ -1,17 +1,18 @@
 import { act, renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, expect, test, vi } from "vitest";
 
-const api = vi.hoisted(() => ({ rpc: vi.fn() }));
+const api = vi.hoisted(() => ({ rpc: vi.fn(), rows: [] }));
 vi.mock("./workspace", () => ({ rpc: api.rpc }));
 vi.mock("./supabase", () => ({
   supabase: {
-    from: () => {
+    from: (table) => {
       const q = {
         select: () => q,
         eq: () => q,
         in: () => q,
         limit: () => q,
-        then: (resolve) => Promise.resolve({ data: [], error: null }).then(resolve),
+        then: (resolve) =>
+          Promise.resolve({ data: table === "recommendations" ? api.rows : [], error: null }).then(resolve),
       };
       return q;
     },
@@ -21,6 +22,36 @@ import { useDailyReader } from "./useDailyReader";
 
 beforeEach(() => {
   api.rpc.mockReset();
+  api.rows = [];
+});
+
+test("opting out immediately hides personalized queue and stale reasons during refresh", async () => {
+  let releaseQueue;
+  let requests = 0;
+  api.rows = [{ paper_id: 1, score: 0.9, reasons: { personalization_enabled: true, cf: 0.8 } }];
+  api.rpc.mockImplementation((name) => {
+    if (name === "reader_daily") {
+      requests += 1;
+      if (requests === 1) return Promise.resolve([{ id: 1, pmid: "1" }]);
+      return new Promise((resolve) => {
+        releaseQueue = () => resolve([{ id: 1, pmid: "1" }]);
+      });
+    }
+    return Promise.resolve({ paper: { id: 1, pmid: "1" }, state: { reading_state: "read" } });
+  });
+  const { result, rerender } = renderHook(
+    ({ personalized }) => useDailyReader("reader", "2026-09-15", "1", false, personalized),
+    { initialProps: { personalized: true } },
+  );
+  await waitFor(() => expect(result.current.reasons[1]?.cf).toBe(0.8));
+  rerender({ personalized: false });
+  expect(result.current.cards).toEqual([]);
+  expect(result.current.reasons).toEqual({});
+  expect(result.current.scores).toEqual({});
+  await waitFor(() => expect(releaseQueue).toBeTypeOf("function"));
+  await act(async () => releaseQueue());
+  await waitFor(() => expect(result.current.cards).toHaveLength(1));
+  expect(result.current.reasons).toEqual({});
 });
 
 test("a save accepted during automatic reading waits and stays with its original paper", async () => {

@@ -84,6 +84,7 @@ const db = {
       keywords: ["prostate", "bladder"],
       preferred_journals: ["European Urology"],
       preferred_study_types: ["rct", "meta_analysis"],
+      personalization_enabled: true,
       email_digest: true,
       digest_frequency: "daily",
       onboarding_done: scenario !== "onboarding",
@@ -100,6 +101,7 @@ const db = {
           rec_date: today,
           score: 9 - i,
           reasons: {
+            personalization_enabled: true,
             reasons: [
               { type: "keyword", label: "prostate" },
               { type: "fresh", label: "Recent publication" },
@@ -175,6 +177,7 @@ if (researchScenario) {
     note: i === 0 ? "Unsaved needle memo" : `Reading journal entry ${i + 1}`,
     tags: i === 0 ? ["unsaved-needle"] : ["review"],
     updated_at: new Date(Date.now() + i * 60000).toISOString(),
+    read_at: null, saved_at: null,
   }));
   db.feedbacks = [{ user_id: "reader", paper_id: 5, action: "like" }];
   db.collection_papers = db.papers.map((p) => ({
@@ -195,11 +198,94 @@ if (researchScenario) {
     });
   }
 }
+const ago = (days) => new Date(Date.now() - days * 86400000).toISOString();
+if (scenario.startsWith("insights-")) {
+  const metadata = [
+    { keywords: ["prostate cancer", "prostate neoplasms"], mesh_terms: ["Prostatic Neoplasms", "Humans"] },
+    { keywords: ["RCC"], mesh_terms: ["Carcinoma, Renal Cell"] },
+    { keywords: ["bladder cancer"], mesh_terms: ["Urinary Bladder Neoplasms"] },
+    { keywords: ["prostate cancer"], mesh_terms: ["Prostatic Neoplasms"] },
+    { keywords: ["AI", "prostate cancer"], mesh_terms: ["Artificial Intelligence", "Prostatic Neoplasms"] },
+  ];
+  db.papers.forEach((paper, index) => Object.assign(paper, metadata[index]));
+  db.papers.push({ ...papers[0], id: 6, pmid: "12345679", title: "Legacy completed paper without a known date" });
+  db.reader_states = [
+    { user_id: "reader", paper_id: 1, reading_state: "read", read_at: ago(2), saved: false, saved_at: null,
+      note: "Verified first-paper memo", tags: ["follow-up"], updated_at: ago(0) },
+    { user_id: "reader", paper_id: 3, reading_state: "unread", read_at: null, saved: true, saved_at: ago(4),
+      note: "Saved bladder source", tags: ["biomarkers"], updated_at: ago(0) },
+    { user_id: "reader", paper_id: 6, reading_state: "read", read_at: null, saved: false, saved_at: null,
+      note: "A recent note edit is not a completion date", tags: [], updated_at: ago(0) },
+  ];
+  db.read_history = [{ id: 1, user_id: "reader", paper_id: 2, dwell_seconds: 10, clicked_at: ago(0) }];
+  db.feedbacks = [{ id: 1, user_id: "reader", paper_id: 4, action: "like", created_at: ago(1) }];
+  const qualified = scenario === "insights-qualified";
+  for (const rec of db.recommendations) {
+    rec.reasons.network = {
+      status: qualified ? "qualified" : "insufficient", min_similar_readers: 3,
+      min_shared_likes: 2, min_paper_support: 3, min_topic_papers: 2,
+      ...(qualified ? { cohort_size: 4 } : {}),
+      topics: qualified ? [{ id: "prostatic neoplasms", label: "prostatic neoplasms", reader_support: 3, paper_support: 2, source: "metadata" }] : [],
+    };
+    rec.reasons.reasons = [{ type: "keyword", label: rec.paper.keywords[0] }];
+    if (qualified && rec.paper_id === 5) rec.reasons.reasons.unshift({
+      type: "similar_readers", label: "비슷한 독자 3명이 좋아한 문헌", support: 3, cohort_size: 4,
+    });
+  }
+}
+if (scenario === "research-network" || scenario === "research-network-reader") {
+  if (scenario === "research-network-reader") db.collections[0].user_id = "project-owner";
+  db.papers.forEach((paper, index) => Object.assign(paper, {
+    keywords: [index % 2 ? "bladder cancer" : "prostate cancer"],
+    mesh_terms: [index % 2 ? "Urinary Bladder Neoplasms" : "Prostatic Neoplasms", "Humans"],
+    publication_types: [],
+  }));
+  Object.assign(db.papers.find((paper) => paper.id === 24), { study_type: "surgical", structured_data: {} });
+  Object.assign(db.papers.find((paper) => paper.id === 25), { summary_basis: "abstract" });
+  db.research_topic_entries = [
+    { id: 1, collection_id: 1, section: "discussion", title: "Validation needs independent evidence",
+      body: "User-authored interpretation linked to retained sources.", reference_ids: [1, 25],
+      cell_links: [{ reference_id: 25, column_id: "population" }], revision: 1 },
+    { id: 2, collection_id: 1, section: "introduction", title: "Compare methods without equating conclusions",
+      body: "These are related topics, not demonstrated causal relationships.", reference_ids: [24], cell_links: [], revision: 1 },
+  ];
+}
+function enrichedReference(reference) {
+  const paper = db.papers.find((paper) => paper.id === reference.paper_id);
+  return {
+    ...reference,
+    paper: paper ? {
+      id: paper.id, pmid: paper.pmid, title: paper.title,
+      keywords: paper.keywords, mesh_terms: paper.mesh_terms,
+      publication_types: paper.publication_types || [], study_type: paper.study_type,
+      study_design: paper.structured_data?.study_design || null,
+      fulltext_available: paper.fulltext_available,
+      summary_ready: paper.fulltext_available === true && paper.summary_basis === "fulltext",
+      integrity_status: paper.integrity_status || "unknown",
+    } : null,
+  };
+}
+function applyReaderTransition(state, patch, inserted = false) {
+  const before = { ...state }, now = new Date().toISOString();
+  Object.assign(state, patch);
+  state.read_at = state.reading_state !== "read" ? null
+    : inserted || before.reading_state !== "read" ? now : before.read_at ?? null;
+  state.saved_at = !state.saved ? null : inserted || !before.saved ? now : before.saved_at ?? null;
+  state.updated_at = now;
+}
+function applyProfileUpdate(profile, patch) {
+  const previous = profile.personalization_enabled;
+  Object.assign(profile, patch);
+  if (profile.personalization_enabled !== previous)
+    db.recommendations = db.recommendations.filter((rec) => rec.user_id !== profile.id);
+}
+const isResearchReader = () => ["research-reader", "research-network-reader"].includes(scenario);
+globalThis.__uroFixtureSnapshot = () => structuredClone(db);
 let researchConflict = scenario === "research-conflict";
 function researchRpc(name, args) {
   const result = (data) => ({ data: structuredClone(data), error: null });
   const error = (code, message) => ({ data: null, error: { code, message } });
-  const readOnly = scenario === "research-reader";
+  const readOnly = isResearchReader();
   const ref = db.research_reference_entries.find((r) => r.id === args.p_id);
   const collectionId = ["save_research_reference", "request_research_extraction"].includes(name) ? ref?.collection_id : args.p_collection_id ?? args.p_id;
   const project = db.collections.find((p) => p.id === collectionId);
@@ -224,7 +310,21 @@ function researchRpc(name, args) {
     const q = (args.p_query || "").toLowerCase(), page = args.p_page || 0;
     const matches = db.research_reference_entries.filter((r) => r.collection_id === collectionId &&
       (!q || `${JSON.stringify(r.bibliography)} ${r.note} ${r.tags.join(" ")}`.toLowerCase().includes(q))).sort((a, b) => b.id - a.id);
-    return result({ items: matches.slice(page * 20, (page + 1) * 20), total: matches.length, page, can_edit: !readOnly });
+    return result({ items: matches.slice(page * 20, (page + 1) * 20).map(enrichedReference), total: matches.length, page, can_edit: !readOnly });
+  }
+  if (name === "research_graph") {
+    const query = (args.p_query || "").trim().toLowerCase(), limit = args.p_limit ?? 50;
+    if (!project) return error("42501", "Project access required");
+    if (query.length > 200 || !Number.isInteger(limit) || limit < 1 || limit > 50)
+      return error("22023", "Invalid graph scope");
+    const topics = db.research_topic_entries.filter((topic) => topic.collection_id === collectionId).sort((a, b) => a.id - b.id);
+    const visibleTopics = topics.slice(0, 20);
+    const linked = (ref) => visibleTopics.some((topic) => topic.reference_ids.includes(ref.id));
+    const matches = db.research_reference_entries.filter((ref) => ref.collection_id === collectionId &&
+      (!query || `${JSON.stringify(ref.bibliography)} ${ref.note} ${ref.tags.join(" ")}`.toLowerCase().includes(query)))
+      .sort((a, b) => Number(linked(b)) - Number(linked(a)) || b.created_at.localeCompare(a.created_at) || b.id - a.id);
+    return result({ references: matches.slice(0, limit).map(enrichedReference), topics: visibleTopics,
+      total: matches.length, topic_total: topics.length, limit, truncated: matches.length > limit || topics.length > 20 });
   }
   if (name === "add_research_reference") return result(ensureResearchReference(collectionId, args.p_paper_id));
   if (name === "save_research_reference") {
@@ -425,7 +525,12 @@ function query(table) {
       filters.push((row) => row[k] === v);
       return q;
     },
-    gte() {
+    gte(k, v) {
+      filters.push((row) => row[k] != null && row[k] >= v);
+      return q;
+    },
+    lte(k, v) {
+      filters.push((row) => row[k] != null && row[k] <= v);
       return q;
     },
     in(k, values) {
@@ -489,7 +594,9 @@ function query(table) {
                     )
                   : null;
               if (existing) {
-                Object.assign(existing, row);
+                if (table === "profiles") applyProfileUpdate(existing, row);
+                else if (table === "reader_states") applyReaderTransition(existing, row);
+                else Object.assign(existing, row);
                 if (table === "project_notes") {
                   const ref = ensureResearchReference(row.collection_id, row.paper_id);
                   if (ref) Object.assign(ref, { note: row.note, tags: row.tags, revision: ref.revision + 1 });
@@ -502,6 +609,8 @@ function query(table) {
                 enabled: true,
                 ...row,
               };
+              if (table === "profiles" && inserted.personalization_enabled == null) inserted.personalization_enabled = true;
+              if (table === "reader_states") applyReaderTransition(inserted, {}, true);
               db[table].push(inserted);
               if (table === "collection_papers") ensureResearchReference(row.collection_id, row.paper_id);
               if (table === "project_notes") {
@@ -512,7 +621,11 @@ function query(table) {
             });
           }
           if (action === "update")
-            rows.forEach((row) => Object.assign(row, payload));
+            rows.forEach((row) => {
+              if (table === "profiles") applyProfileUpdate(row, payload);
+              else if (table === "reader_states") applyReaderTransition(row, payload);
+              else Object.assign(row, payload);
+            });
           if (action === "delete")
             db[table] = db[table].filter((row) => !rows.includes(row));
           if (orderBy) {
@@ -520,7 +633,7 @@ function query(table) {
             rows.sort((a, b) => (ascending ? 1 : -1) * String(a[key] ?? "").localeCompare(String(b[key] ?? "")));
           }
           if (
-            ["collection_papers", "reader_states", "feedbacks"].includes(table)
+            ["collection_papers", "reader_states", "feedbacks", "read_history", "recommendations"].includes(table)
           )
             rows = rows.map((row) => ({
               ...row,
@@ -600,22 +713,25 @@ export const supabase = {
       }
       if (name === "reader_daily" && args.p_day && args.p_day !== today)
         return { data: [] };
-      if (name === "reader_daily")
+      if (name === "reader_daily") {
+        const profile = db.profiles.find((profile) => profile.id === user?.id) || {};
+        const valid = (paper) => ready(paper) && paper.pub_date >= "2000-01-01" &&
+          paper.integrity_status !== "retracted" && !paper.summary_review_required &&
+          !db.feedbacks.some((feedback) => feedback.user_id === user?.id && feedback.paper_id === paper.id && feedback.action === "dislike");
+        const stored = db.recommendations.filter((rec) => rec.user_id === user?.id && rec.rec_date === (args.p_day || today) &&
+          (profile.personalization_enabled !== false || rec.reasons?.personalization_enabled === false))
+          .sort((a, b) => b.score - a.score).map((rec) => db.papers.find((paper) => paper.id === rec.paper_id)).filter((paper) => paper && valid(paper));
+        const seen = new Set(stored.map((paper) => paper.id));
+        const candidates = db.papers.filter((paper) => valid(paper) && !seen.has(paper.id) && state(paper.id).reading_state !== "read" &&
+          !["letter", "editorial", "comment", "erratum"].includes(paper.paper_type));
         return {
-          data: db.papers
-            .filter(
-              (p) =>
-                ready(p) &&
-                p.integrity_status !== "retracted" &&
-                !p.summary_review_required,
-            )
-            .slice(0, 5)
-            .map((p) => ({
+          data: [...stored, ...candidates].slice(0, 5).map((p) => ({
               ...card(p),
               reason:
                 scenario === "journal-alert" ? "구독 저널 · Urol" : "관심 주제",
             })),
         };
+      }
       if (name === "reader_paper") {
         if (scenario === "slow-daily")
           await new Promise((r) =>
@@ -671,7 +787,7 @@ export const supabase = {
           };
           db.reader_states.push(s);
         }
-        Object.assign(s, args.p_patch);
+        applyReaderTransition(s, args.p_patch);
         return { data: { ...s } };
       }
       if (name === "reader_opinion") {
@@ -685,6 +801,7 @@ export const supabase = {
             paper_id: args.p_paper_id,
             user_id: "reader",
             action: args.p_action,
+            created_at: new Date().toISOString(),
           });
         return { data: null };
       }
@@ -772,7 +889,7 @@ export const supabase = {
                 n.paper_id === c.paper_id,
             ),
           })).filter((p) => !term || `${p.title} ${p.pmid} ${p.doi} ${p.note || ""} ${(p.tags || []).join(" ")}`.toLowerCase().includes(term));
-        return { data: { items: items.slice(page * 20, (page + 1) * 20), total: items.length, page, can_edit: scenario !== "research-reader" } };
+        return { data: { items: items.slice(page * 20, (page + 1) * 20), total: items.length, page, can_edit: !isResearchReader() } };
       }
       if (name === "project_recommendations")
         return {
@@ -831,6 +948,7 @@ export const supabase = {
             user_id: "reader",
             paper_id: args.p_paper_id,
             action: args.p_action,
+            created_at: new Date().toISOString(),
           });
       }
       if (name === "delete_own_account") {
