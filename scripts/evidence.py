@@ -14,6 +14,7 @@ _SCIENTIFIC = re.compile(
     r'|(?:[+\-\u2212]?(?:\d+(?:\.\d+)?|\.\d+)\s*[x\u00d7]\s*)?10'
     r'(?:\s*\^\s*\{?\s*[+\-\u2212]?\d+\s*\}?|[⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻]+))')
 _NUMBER_WORDS = ('zero','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve','thirteen','fourteen','fifteen','sixteen','seventeen','eighteen','nineteen','twenty')
+_NUMBERED_LABEL = re.compile(r'(?<!\w)(?:GPT|gpt|PD(?:-L)?|IL)$')
 
 
 def numeric_values(text, *, source=False):
@@ -33,6 +34,11 @@ def numeric_values(text, *, source=False):
     values = set()
     for match in _NUMBER.finditer(text):
         sign, number = match.groups()
+        # These explicit identifier namespaces use a hyphen as a label separator
+        # (GPT-4o, PD-L1, IL-6). Keep their numeric value; do not erase it or treat
+        # an arbitrary word/uppercase token followed by a minus as an identifier.
+        if sign in ('-', '\u2212') and _NUMBERED_LABEL.search(text[:match.start()]):
+            sign = ''
         # An ASCII hyphen directly between numbers denotes a range, not unary minus.
         if sign == '-' and match.start() and text[match.start()-1].isdecimal():
             sign = ''
