@@ -14,70 +14,30 @@ from catalog_policy import PUBMED_DATE_RANGE, automatic_paper
 from common import supabase_headers
 from classify_papers import classify
 from common import get_json
+from journal_registry import JOURNALS, REGISTRY_VERSION, build_journal_queries
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 PUBMED_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
 PUBMED_EMAIL = os.environ.get("NCBI_EMAIL", "")
 
-# ── Major Journals ──
-# Urology
-URO_JOURNALS = [
-    "European Urology",
-    "Journal of Urology",
-    "BJU International",
-    "Urology",
-    "World Journal of Urology",
-    "Nature Reviews Urology",
-    "European Urology Focus",
-    "European Urology Oncology",
-    "Prostate Cancer and Prostatic Diseases",
-    "Neurourology and Urodynamics",
-    "Journal of Endourology",
-    "International Journal of Urology",
-    "Urologic Oncology",
-    "The Prostate",
-    "Scandinavian Journal of Urology",
-    "Asian Journal of Urology",
-]
-
-# Oncology (publishes urology-relevant work)
-ONCO_JOURNALS = [
-    "Journal of Clinical Oncology",
-    "Lancet Oncology",
-    "JAMA Oncology",
-    "Annals of Oncology",
-    "Clinical Cancer Research",
-    "Cancer Research",
-    "Cancer",
-    "European Journal of Cancer",
-]
-
-# General top-tier (publish high-impact urology)
-GENERAL_JOURNALS = [
-    "New England Journal of Medicine",
-    "Lancet",
-    "JAMA",
-    "BMJ",
-    "Nature Medicine",
-    "JAMA Network Open",
-]
-
-def build_journal_queries():
-    """Build PubMed queries by journal."""
-    queries = []
-    # Each urology journal — fetch all recent papers
-    for j in URO_JOURNALS:
-        aliases={"BJU International":"British Journal of Urology",
-                 "Scandinavian Journal of Urology":"Scandinavian Journal of Urology and Nephrology"}
-        queries.append(f'({j}[Journal] OR {aliases[j]}[Journal])' if j in aliases else f'{j}[Journal]')
-    # Oncology + General journals — only urology-related papers
-    uro_filter = "(urology OR urologic OR prostate OR bladder OR kidney OR renal OR testicular)"
-    for j in ONCO_JOURNALS + GENERAL_JOURNALS:
-        queries.append(f'({j}[Journal]) AND {uro_filter}')
-    return queries
+# Daily discovery and historical backfill share the reviewed journal identities.
+URO_JOURNALS = [j.display_name for j in JOURNALS if j.group == "urology"]
+ONCO_JOURNALS = [j.display_name for j in JOURNALS if j.group == "oncology"]
+GENERAL_JOURNALS = [j.display_name for j in JOURNALS if j.group == "general"]
 
 URO_QUERIES = build_journal_queries()
+
+
+class StorageCapacityReached(Exception):
+    pass
+
+
+def ensure_catalog_capacity():
+    status = get_json(f"{SUPABASE_URL}/rest/v1/rpc/catalog_storage_status",
+                      headers=supabase_headers(SUPABASE_KEY), params={})
+    if int(status["database_bytes"]) >= int(status["budget_bytes"]):
+        raise StorageCapacityReached("Database storage budget reached; existing records preserved")
 
 
 def supabase_request(method, path, data=None):
@@ -91,8 +51,8 @@ def supabase_request(method, path, data=None):
         headers["Prefer"] = ""
         return requests.get(url, headers=headers, params=data, timeout=30)
     elif method == "POST":
-        headers["Prefer"] = "resolution=ignore-duplicates,return=minimal"
-        return requests.post(url, headers=headers, json=data, timeout=30)
+        headers["Prefer"] = "resolution=ignore-duplicates,return=representation"
+        return requests.post(url, headers=headers, params={"on_conflict": "pmid", "select": "pmid"}, json=data, timeout=30)
     return None
 
 
@@ -111,8 +71,16 @@ def search_pmids(query, max_results=100, days_back=7):
         r = requests.get(f"{PUBMED_BASE}/esearch.fcgi", params=params, timeout=30)
         r.raise_for_status()
         result = r.json()["esearchresult"]
+        warnings = result.get("warninglist") or {}
+        if result.get("errorlist") or any(warnings.get(k) for k in (
+                "phrasesnotfound", "quotedphrasesnotfound", "phrasesignored")):
+            raise ValueError("PubMed did not recognize a configured search term")
         page = result.get("idlist", [])
+        if any(not str(p).isdigit() or int(p) < 1 for p in page) or len(set(pmids + page)) != len(pmids) + len(page):
+            raise ValueError("Invalid or duplicate PubMed identifiers")
         total = int(result.get("count", len(page)))
+        if total < 0 or len(pmids) + len(page) > total:
+            raise ValueError("Inconsistent PubMed search count")
         if total > 9999:
             raise ValueError("PubMed result exceeds 9,999; narrow the date window")
         pmids.extend(page)
@@ -140,7 +108,15 @@ def fetch_details(pmids):
     r = requests.get(f"{PUBMED_BASE}/efetch.fcgi", params=params, timeout=30)
     r.raise_for_status()
     root = ET.fromstring(r.content)
-    return [parse_article(a) for a in root.findall(".//PubmedArticle")]
+    if root.tag == "ERROR" or root.find(".//ERROR") is not None:
+        raise ValueError("PubMed metadata returned an error")
+    papers = [parse_article(a) for a in root.findall(".//PubmedArticle")]
+    if any(not p["title"].strip() for p in papers):
+        raise ValueError("PubMed metadata is missing a required title")
+    received = [p["pmid"] for p in papers]
+    if len(received) != len(set(received)) or set(received) != set(pmids):
+        raise ValueError("PubMed metadata does not match requested identifiers")
+    return papers
 
 
 def classify_study_type(title, abstract, pub_types):
@@ -230,8 +206,18 @@ def parse_article(article):
     }
 
 
-def get_existing_pmids():
-    """Get all PMIDs already in DB."""
+def get_existing_pmids(candidates=None):
+    """Look up only discovered IDs; retain full enumeration for explicit callers."""
+    if candidates is not None:
+        candidates = list(dict.fromkeys(candidates))
+        if any(not str(p).isdigit() for p in candidates):
+            raise ValueError("Invalid PubMed identifiers")
+        found = set()
+        for start in range(0, len(candidates), 200):
+            page = get_json(f"{SUPABASE_URL}/rest/v1/papers", headers=supabase_headers(SUPABASE_KEY),
+                            params={"select": "pmid", "pmid": "in.(" + ",".join(candidates[start:start+200]) + ")"})
+            found.update(row["pmid"] for row in page)
+        return found
     found = set()
     offset = 0
     while True:
@@ -252,10 +238,11 @@ def insert_papers(papers):
     count = 0
     for i in range(0, len(papers), 50):
         batch = papers[i:i+50]
+        ensure_catalog_capacity()
         r = supabase_request("POST", "papers", batch)
         r.raise_for_status()
         if r.status_code in (200, 201):
-            count += len(batch)
+            count += len(r.json())
         else:
             print(f"  Insert error: {r.status_code} {r.text[:200]}")
     return count
@@ -268,38 +255,44 @@ def main():
     print(f"=== Uro Daily Pick - Paper Fetch ===")
     print(f"Time: {datetime.now().isoformat()}")
 
-    existing = get_existing_pmids()
-    print(f"Existing papers in DB: {len(existing)}")
+    try:
+        ensure_catalog_capacity()
+    except StorageCapacityReached:
+        print("::warning::Daily discovery paused at its database storage budget; no new papers requested")
+        return
+
+    existing = set()
+    print(f"Journal scope: {REGISTRY_VERSION} ({len(URO_QUERIES)} journals)")
 
     total_new = 0
-    all_new_papers = []
     failed_queries = 0
 
     for query in URO_QUERIES:
         short = query[:50]
         try:
             pmids = search_pmids(f'({query}) AND {PUBMED_DATE_RANGE}', max_results=200, days_back=7)
+            existing.update(get_existing_pmids(pmids))
             new_pmids = [p for p in pmids if p not in existing]
             if new_pmids:
                 time.sleep(0.4)  # NCBI rate limit
                 details = fetch_details(new_pmids)
                 valid = [d for d in details if d["pmid"] and d["title"] and automatic_paper(d)]
-                all_new_papers.extend(valid)
+                inserted = insert_papers(valid)
+                total_new += inserted
                 existing.update(d["pmid"] for d in valid)
-                print(f"  [{short}...] {len(pmids)} found, {len(valid)} new")
+                print(f"  [{short}...] {len(pmids)} found, {inserted} inserted")
             else:
                 print(f"  [{short}...] {len(pmids)} found, 0 new")
-            time.sleep(0.4)
+        except StorageCapacityReached:
+            print("::warning::Daily discovery paused at its database storage budget; committed batches preserved")
+            if failed_queries:
+                raise SystemExit(f"ERROR: {failed_queries} PubMed queries failed before the capacity pause")
+            return
         except Exception as e:
             failed_queries += 1
             print(f"  [{short}...] ERROR: {e}")
-
-    if all_new_papers:
-        count = insert_papers(all_new_papers)
-        total_new = count
-        print(f"\nInserted: {count} papers")
-    else:
-        print("\nNo new papers to insert")
+        finally:
+            time.sleep(0.4)
 
     print(f"Total new: {total_new}")
     if failed_queries:

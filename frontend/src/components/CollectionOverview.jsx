@@ -36,6 +36,14 @@ export default function CollectionOverview({ catalog }) {
   const budget = storage?.budget_bytes;
   const storageKnown = known(used) && known(budget) && budget > 0;
   const paused = storageKnown && used >= budget;
+  const scope = catalog.scope;
+  const scopeKnown = Number.isInteger(scope?.target_journals) && scope.target_journals > 0;
+  const scopeGroupsKnown =
+    Number.isInteger(scope?.urology_journals) &&
+    scope.urology_journals >= 0 &&
+    Number.isInteger(scope?.ancillary_journals) &&
+    scope.ancillary_journals >= 0 &&
+    scope.urology_journals + scope.ancillary_journals === scope.target_journals;
   const stages = [
     { label: "문헌 정보 등록", value: metadata, description: "제목·저자·발행일 등 서지 정보" },
     {
@@ -56,6 +64,17 @@ export default function CollectionOverview({ catalog }) {
   return (
     <div>
       <p className="text-sm text-text2 mb-4">2000년 1월 1일 이후 발행 논문 · 추천은 최근 5년 우선</p>
+      {scopeKnown && (
+        <p className="text-sm text-text2 mb-4">
+          수집 대상 {count(scope.target_journals)}개 저널
+          {scopeGroupsKnown && (
+            <span className="block text-xs mt-1">
+              비뇨의학 관련 {count(scope.urology_journals)}개 · 종양학·종합의학{" "}
+              {count(scope.ancillary_journals)}개
+            </span>
+          )}
+        </p>
+      )}
       <ol aria-label="문헌 처리 단계" className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {stages.map((stage, index) => (
           <li key={stage.label} className="rounded-xl border border-border p-4 min-w-0">
@@ -99,7 +118,10 @@ export default function CollectionOverview({ catalog }) {
             aria-valuemax={100}
             aria-valuenow={Math.min(100, (100 * used) / budget)}
             aria-valuetext={
-              (used / 1048576).toFixed(1) + " MiB 사용, 신규 등록 중단 기준 " + (budget / 1048576).toFixed(0) + " MiB"
+              (used / 1048576).toFixed(1) +
+              " MiB 사용, 신규 등록 중단 기준 " +
+              (budget / 1048576).toFixed(0) +
+              " MiB"
             }
             className="h-2 bg-hover rounded-full overflow-hidden mt-3"
           >
@@ -117,7 +139,10 @@ export default function CollectionOverview({ catalog }) {
               : "저장공간 상태를 확인하고 있습니다."}
         </p>
       </div>
-      <p className="text-xs text-text2 mt-3">DB 전체 사용량에는 서지 정보·초록·요약·사용자 데이터와 인덱스가 포함됩니다. 원문·그림은 제외됩니다. 표시 기준은 요금제 용량과 별개인 신규 등록 중단 기준입니다.</p>
+      <p className="text-xs text-text2 mt-3">
+        DB 전체 사용량에는 서지 정보·초록·요약·사용자 데이터와 인덱스가 포함됩니다. 원문·그림은 제외됩니다.
+        표시 기준은 요금제 용량과 별개인 신규 등록 중단 기준입니다.
+      </p>
       <details className="mt-4 border-t border-border pt-3 text-sm text-text2">
         <summary className="cursor-pointer min-h-10 flex items-center">기존 문헌 정보 보관 현황</summary>
         <dl className="grid grid-cols-2 gap-2 pb-2">

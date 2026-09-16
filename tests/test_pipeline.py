@@ -44,12 +44,13 @@ class PipelineTests(unittest.TestCase):
             response = Mock()
             response.raise_for_status.side_effect = requests.HTTPError("database unavailable")
             with self.subTest(function=fn.__qualname__, method=method):
-                with patch.object(requests, method, return_value=response), self.assertRaises(requests.HTTPError):
+                with patch.object(fetch, "ensure_catalog_capacity"), patch.object(requests, method, return_value=response), self.assertRaises(requests.HTTPError):
                     fn(*args)
 
     def test_partial_fetch_is_reported_as_failure_after_preserving_results(self):
         paper = {"pmid": "1", "title": "Test", "abstract": "Abstract", "pub_date":"2000-01-01"}
         with patch.multiple(fetch, SUPABASE_URL="https://example.test", SUPABASE_KEY="test", URO_QUERIES=["one", "two"]), \
+             patch.object(fetch, "ensure_catalog_capacity"), \
              patch.object(fetch, "get_existing_pmids", return_value=set()), \
              patch.object(fetch, "search_pmids", side_effect=[requests.Timeout(), ["1"]]), \
              patch.object(fetch, "fetch_details", return_value=[paper]), \

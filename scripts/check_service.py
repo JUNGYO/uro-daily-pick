@@ -30,7 +30,7 @@ def main():
         missing = [path for path in required if path not in paths]
         if missing:
             raise SystemExit("Missing database contracts: " + ", ".join(missing))
-        for table, columns in [("reader_states", "read_at,saved_at"), ("profiles", "personalization_enabled")]:
+        for table, columns in [("reader_states", "read_at,saved_at"), ("profiles", "personalization_enabled"), ("catalog_backfill_jobs", "journal_id,query_version,registry_version,priority")]:
             contract = requests.get(f"{url}/rest/v1/{table}", headers=headers,
                                     params={"select":columns,"limit":"0"}, timeout=30)
             contract.raise_for_status()
