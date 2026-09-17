@@ -32,6 +32,7 @@ MIN_TOPIC_PAPERS = 2
 MAX_SIMILAR_READERS = 50
 MAX_NETWORK_TOPICS = 8
 PAPER_FIELDS = "id,pmid,title,abstract,authors,journal,pub_date,mesh_terms,keywords,paper_type,study_type,summary_review_required,integrity_status,fulltext_available,summary_basis,summary_ko,summary_source_hash,summary_model,summarized_at"
+CATALOG_PAGE_SIZE = 200
 
 
 def sb(method, path, data=None, params=None):
@@ -76,12 +77,31 @@ def get_all_profiles():
 def get_catalog_papers():
     # Import time is not publication freshness. Backfilled bodies must become
     # candidates, while unready papers still supply existing feedback signals.
-    papers = paginate(lambda path, params: sb("GET", path, params=params), "papers", {
+    params = {
         "select": PAPER_FIELDS,
-        "order": "pub_date.desc,id",
+        "order": "id.asc",
         "fulltext_available": "eq.true",
+        "summary_basis": "eq.fulltext",
+        "summary_source_hash": "not.is.null",
+        "summarized_at": "not.is.null",
+        "summary_model": "not.is.null",
+        "summary_ko": "not.is.null",
         "pub_date": "gte."+AUTOMATIC_START_DATE,
-    })
+        "limit": str(CATALOG_PAGE_SIZE),
+    }
+    papers, cursor = [], 0
+    while True:
+        page = sb("GET", "papers", params={**params, "id": "gt."+str(cursor)})
+        if not isinstance(page, list) or len(page) > CATALOG_PAGE_SIZE:
+            raise ValueError("Invalid recommendation candidate page")
+        for paper in page:
+            if (not isinstance(paper, dict) or type(paper.get("id")) is not int
+                    or paper["id"] <= cursor):
+                raise ValueError("Recommendation candidate cursor did not advance")
+            cursor = paper["id"]
+        papers.extend(page)
+        if len(page) < CATALOG_PAGE_SIZE:
+            break
     known={p["id"] for p in papers}
     signals=[]
     for table in ("feedbacks","read_history"):
