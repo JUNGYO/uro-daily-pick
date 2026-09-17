@@ -72,6 +72,14 @@ def enroll(directory):
     return {"worker_id": config["id"], "token_hash": hashlib.sha256(token.encode()).hexdigest()}
 
 
+class ServiceRequestError(RuntimeError):
+    """Transport diagnosis without retaining a request, URL or response body."""
+    def __init__(self, message, *, category, http_status=None):
+        super().__init__(message)
+        self.category = category
+        self.http_status = http_status
+
+
 class Service:
     def __init__(self, directory):
         self.config = json.loads((directory / "worker.json").read_text(encoding="utf-8"))
@@ -90,6 +98,7 @@ class Service:
         sync_deadline = getattr(self, "sync_deadline", None)
         if sync_deadline is not None:
             deadline = sync_deadline if deadline is None else min(deadline, sync_deadline)
+        category, http_status = "network", None
         for attempt in range(4):
             remaining = 45 if deadline is None else min(45, deadline - time.monotonic())
             if remaining < 1:
@@ -104,23 +113,30 @@ class Service:
                         raise ValueError("Service response exceeds the metadata limit")
                 return json.loads(content) if content else None
             except HTTPError as error:
+                category, http_status = "http", error.code
+                error.close()
                 if path in ("rpc/finish_research_extraction", "rpc/fail_research_extraction") and error.code in (403, 409):
                     from research_extraction import ResearchLeaseSuperseded
                     raise ResearchLeaseSuperseded("Research extraction lease or source changed") from None
                 if path=="rpc/publish_institution_summary" and error.code in (400,409,422):
                     raise SummaryPublicationRejected("Summary publication requires revalidation") from None
                 if error.code not in (408,429,500,502,503,504,520,522,524):
-                    raise RuntimeError(f"Service HTTP {error.code}") from None
+                    raise ServiceRequestError(f"Service HTTP {error.code}",
+                        category=category, http_status=http_status) from None
             except ssl.SSLCertVerificationError:
-                raise RuntimeError("Service certificate verification failed") from None
-            except (URLError, TimeoutError, IncompleteRead, ConnectionError, ssl.SSLError):
-                pass
+                raise ServiceRequestError("Service certificate verification failed", category="tls") from None
+            except (URLError, TimeoutError, IncompleteRead, ConnectionError, ssl.SSLError) as error:
+                reason = error.reason if isinstance(error, URLError) else error
+                category = ("timeout" if isinstance(reason, TimeoutError) else
+                            "tls" if isinstance(reason, ssl.SSLError) else "network")
+                http_status = None
             if attempt < 3:
                 pause = 2 ** (attempt + 1)
                 if deadline is not None and deadline - time.monotonic() <= pause + 1:
                     raise TimeoutError("Research service retry budget expired")
                 time.sleep(pause)
-        raise RuntimeError("Service temporarily unavailable")
+        raise ServiceRequestError("Service temporarily unavailable",
+            category=category, http_status=http_status) from None
 
     def rpc(self, name, **values):
         allowed={"institution_worker_status","publish_institution_summary","institution_cloud_archive","confirm_local_fulltext_archive","register_institution_original",

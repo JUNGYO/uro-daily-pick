@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:db": "node ../tests/test_migrations.mjs && node ../tests/test_reader_workspace.mjs && node ../tests/test_research_documents.mjs && node ../tests/test_reading_network.mjs && node ../tests/test_journal_coverage.mjs && node ../tests/test_local_catalog_sync.mjs",
+    "test:db": "node ../tests/test_migrations.mjs && node ../tests/test_reader_workspace.mjs && node ../tests/test_research_documents.mjs && node ../tests/test_reading_network.mjs && node ../tests/test_journal_coverage.mjs && node ../tests/test_local_catalog_sync.mjs && node ../tests/test_catalog_sync_health.mjs",
     "check": "npm test && npm run test:db && npm run build",
     "test:e2e": "playwright test",
     "format": "prettier --write \"src/**/*.{js,jsx}\" \"*.js\"",

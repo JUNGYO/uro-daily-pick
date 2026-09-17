@@ -12,4 +12,6 @@ The administrator view distinguishes local citations, citations synchronized to 
 
 GitHub's daily workflow checks sync health and continues classification, recommendation and configured digest work. Its hourly catalog workflow is a read-only health check. Neither workflow performs the normal citation collection anymore. The old catalog command remains available for tests and explicit maintenance; its historic cloud checkpoints are preserved.
 
+The health check reads a dedicated synchronization report, without scanning the citation or acquisition tables. Both the report and its last successful synchronization cycle must be recent. Missing reports, stale successful cycles, offline states and API failures remain failures; reaching the storage budget is a warning, because locally committed work stays queued. A successful cycle can legitimately acknowledge no new records and is not evidence that the entire queue has been published. Local failure diagnostics identify the stage, category and time without logging credentials or source content.
+
 Local capacity does not expand cloud capacity. Publishing the entire retained catalog still requires adequate service storage. No paid subscription or storage limit is changed by this implementation.
