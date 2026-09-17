@@ -32,12 +32,52 @@ class RecommendationReadinessTests(unittest.TestCase):
                 self.assertFalse(recs.has_fulltext_summary({**ready_paper(), **change}))
 
     def test_catalog_query_crosses_old_fetch_dates_and_server_page_limits(self):
-        first_page = [ready_paper(n) for n in range(500)]
-        with patch.object(recs, "sb", side_effect=[first_page, [ready_paper(500)], [], []]) as get:
+        first_page = [ready_paper(n * 3) for n in range(1, recs.CATALOG_PAGE_SIZE + 1)]
+        last_id = first_page[-1]["id"]
+        with patch.object(recs, "sb", side_effect=[first_page, [ready_paper(last_id + 3)], [], []]) as get:
             papers = recs.get_catalog_papers()
-        self.assertEqual(len(papers), 501)
-        self.assertEqual(get.call_args_list[1].kwargs["params"]["offset"], "500")
-        self.assertNotIn("fetched_at", get.call_args.kwargs["params"])
+        self.assertEqual(len(papers), recs.CATALOG_PAGE_SIZE + 1)
+        first = get.call_args_list[0].kwargs["params"]
+        second = get.call_args_list[1].kwargs["params"]
+        self.assertEqual(first["id"], "gt.0")
+        self.assertEqual(second["id"], "gt." + str(last_id))
+        self.assertEqual(first["order"], "id.asc")
+        self.assertEqual(first["fulltext_available"], "eq.true")
+        self.assertEqual(first["summary_basis"], "eq.fulltext")
+        for field in ("summary_source_hash", "summarized_at", "summary_model", "summary_ko"):
+            self.assertEqual(first[field], "not.is.null")
+        self.assertEqual(first["pub_date"], "gte.2000-01-01")
+        self.assertNotIn("fetched_at", first)
+        self.assertNotIn("offset", first)
+        self.assertNotIn("offset", second)
+
+    def test_catalog_candidate_cursor_rejects_invalid_or_nonadvancing_pages(self):
+        for page in (None, {}, [ready_paper(0)], [ready_paper(True)],
+                     [ready_paper("1")], [ready_paper(3), ready_paper(2)],
+                     [ready_paper(2), ready_paper(2)], [None],
+                     [ready_paper(n) for n in range(1, recs.CATALOG_PAGE_SIZE + 2)]):
+            with self.subTest(page=page), patch.object(recs, "sb", return_value=page):
+                with self.assertRaises(ValueError):
+                    recs.get_catalog_papers()
+        first_page = [ready_paper(n) for n in range(1, recs.CATALOG_PAGE_SIZE + 1)]
+        with patch.object(recs, "sb", side_effect=[first_page, [first_page[-1]]]):
+            with self.assertRaises(ValueError):
+                recs.get_catalog_papers()
+
+    def test_unready_feedback_and_read_papers_remain_available_for_scoring_signals(self):
+        unready = {**ready_paper(2), "summary_basis": None, "summary_ko": None}
+        abstract = {**ready_paper(3), "summary_basis": "abstract"}
+        with patch.object(recs, "sb", side_effect=[
+                [ready_paper()], [{"paper_id": 1}, {"paper_id": 2}],
+                [{"paper_id": 2}, {"paper_id": 3}], [unready, abstract]]) as get:
+            papers = recs.get_catalog_papers()
+        self.assertEqual([paper["id"] for paper in papers], [1, 2, 3])
+        self.assertEqual(get.call_args.kwargs["params"]["id"], "in.(2,3)")
+        self.assertNotIn("summary_basis", get.call_args.kwargs["params"])
+        self.assertEqual([paper["id"] for paper in papers if recs.has_fulltext_summary(paper)], [1])
+        score, reasons = recs.behavioral_score(ready_paper(4), [unready], set(), [abstract])
+        self.assertGreater(score, 0)
+        self.assertTrue(reasons)
 
     def test_rebuild_excludes_pre2000_papers_preserving_feedback_and_history(self):
         papers = [ready_paper(n) for n in range(1, 8)]

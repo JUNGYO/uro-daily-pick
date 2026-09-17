@@ -17,6 +17,7 @@ def get_json(url, *, headers, params=None, attempts=4):
     """Retry transient read failures without logging credentials or response bodies."""
     for attempt in range(attempts):
         response = None
+        category, status = "unknown", None
         try:
             response = requests.get(url, headers={**headers, "Connection": "close"},
                                     params=params, timeout=(10, 45))
@@ -25,13 +26,19 @@ def get_json(url, *, headers, params=None, attempts=4):
         except requests.HTTPError:
             if response is None or response.status_code not in (408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524):
                 raise
-        except (requests.ConnectionError, requests.Timeout, ValueError):
-            pass
+            category, status = "http", response.status_code
+        except requests.Timeout:
+            category = "timeout"
+        except requests.ConnectionError:
+            category = "connection"
+        except ValueError:
+            category = "invalid_json"
         finally:
             if response is not None:
                 response.close()
         if attempt + 1 == attempts:
-            raise requests.RequestException(f"Database read failed after {attempts} attempts") from None
+            detail = category + (f" HTTP {status}" if status is not None else "")
+            raise requests.RequestException(f"Database read failed after {attempts} attempts ({detail})") from None
         time.sleep(min(2 ** (attempt + 1), 8))
 
 

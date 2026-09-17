@@ -39,6 +39,7 @@ class ReadRecoveryTests(unittest.TestCase):
             with self.assertRaisesRegex(requests.RequestException, "after 4 attempts") as caught:
                 get_json("https://example.test", headers={"apikey": "test"})
         self.assertNotIn("sensitive", str(caught.exception))
+        self.assertIn("(timeout)", str(caught.exception))
         self.assertEqual(get.call_count, 4)
         self.assertEqual(sleep.call_count, 3)
 
@@ -49,6 +50,19 @@ class ReadRecoveryTests(unittest.TestCase):
                 get_json("https://example.test", headers={})
         self.assertEqual(get.call_count, 1)
         sleep.assert_not_called()
+
+    @patch("common.time.sleep")
+    def test_final_read_failure_category_has_no_response_or_request_details(self, sleep):
+        for category, failure in [("http HTTP 504", response(504, b"private-response")),
+                                  ("invalid_json", response(body=b"private-response")),
+                                  ("connection", requests.ConnectionError("private-url"))]:
+            with self.subTest(category=category):
+                kwargs = {"side_effect": failure} if isinstance(failure, Exception) else {"return_value": failure}
+                with patch("common.requests.get", **kwargs), self.assertRaises(requests.RequestException) as caught:
+                    get_json("https://example.test/private-url", headers={"apikey": "private-key"}, attempts=2)
+                message = str(caught.exception)
+                self.assertIn(f"({category})", message)
+                self.assertNotIn("private", message)
 
 
 class WriteRecoveryTests(unittest.TestCase):
