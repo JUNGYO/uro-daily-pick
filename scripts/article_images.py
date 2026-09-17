@@ -291,12 +291,25 @@ def run_image_queue(directory, node, seconds, requested_pmid=None):
             allowed=service.automatic_figure_pmids(local_pmids)
         print(f'Figure queue: {len(allowed)} eligible local papers',flush=True)
         for root in roots:
-            for path in sorted(root.glob('*.json'),key=lambda p:p.stat().st_mtime,reverse=True):
+            originals=[]
+            for path in root.glob('*.json'):
+                # Summary drafts and image manifests are replaced independently.
+                # Filter them before stat, and tolerate original-file replacement
+                # between directory enumeration and its metadata/read operation.
+                if path.stem not in allowed or path.stem in attempted: continue
+                try:
+                    originals.append((path.stat().st_mtime,path))
+                except OSError:
+                    print(f'PMID {path.stem}: figure source unavailable; deferred',flush=True)
+            for _,path in sorted(originals,key=lambda item:item[0],reverse=True):
                 if time.monotonic()>=deadline: return
                 if path.stem not in allowed or path.stem in attempted: continue
-                attempted.add(path.stem)
                 try:
                     record=json.loads(path.read_text(encoding='utf-8'))
+                    if not isinstance(record,dict) or not isinstance(record.get('document'),dict):
+                        raise ValueError('Invalid local original record')
+                    # A failed read can still fall back to this PMID's archive.
+                    attempted.add(path.stem)
                     manifest=directory/'documents'/(path.stem+'.images.json')
                     if manifest.exists():
                         old=json.loads(manifest.read_text(encoding='utf-8'))

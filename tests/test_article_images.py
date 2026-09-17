@@ -46,6 +46,45 @@ class ImageCollectionTests(unittest.TestCase):
             self.assertEqual([call.args[1] for call in collect.call_args_list],['1'])
         self.assertEqual((self.docs/'1.json').read_bytes(),before)
 
+    def test_replaced_draft_and_disappearing_original_do_not_abort_other_figures(self):
+        for name in ('1.json','2.json','2.notes.draft.json'):
+            (self.docs/name).write_text(json.dumps(self.record),encoding='utf-8')
+        original_stat=Path.stat
+        checked=[]
+        def stat(path,*args,**kwargs):
+            checked.append(path.name)
+            if path in (self.docs/'1.json',self.docs/'2.notes.draft.json'):
+                raise FileNotFoundError('Synthetic concurrent replacement')
+            return original_stat(path,*args,**kwargs)
+        with patch.dict(sys.modules,{'msvcrt':Mock()}), \
+             patch('institution_worker.local_service') as service, \
+             patch('institution_worker.Browser'), \
+             patch.object(Path,'stat',stat), \
+             patch.object(images,'collect_images',return_value={'figures':[]}) as collect:
+            service.return_value.automatic_figure_pmids.return_value={'1','2'}
+            images.run_image_queue(self.root,'node',60)
+        self.assertEqual([call.args[1] for call in collect.call_args_list],['2'])
+        self.assertNotIn('2.notes.draft.json',checked)
+
+    def test_original_disappearing_after_stat_uses_archive_and_keeps_other_papers(self):
+        archive=self.root/'cloud-archive'
+        archive.mkdir()
+        for path in (self.docs/'1.json',self.docs/'2.json',archive/'1.json'):
+            path.write_text(json.dumps(self.record),encoding='utf-8')
+        original_read=Path.read_text
+        def read(path,*args,**kwargs):
+            if path==self.docs/'1.json':
+                raise FileNotFoundError('Synthetic replacement after stat')
+            return original_read(path,*args,**kwargs)
+        with patch.dict(sys.modules,{'msvcrt':Mock()}), \
+             patch('institution_worker.local_service') as service, \
+             patch('institution_worker.Browser'), \
+             patch.object(Path,'read_text',read), \
+             patch.object(images,'collect_images',return_value={'figures':[]}) as collect:
+            service.return_value.automatic_figure_pmids.return_value={'1','2'}
+            images.run_image_queue(self.root,'node',60)
+        self.assertCountEqual([call.args[1] for call in collect.call_args_list],['1','2'])
+
     def test_high_resolution_caption_and_tables(self):
         result = images.html_figures(HTML + '<figure><a href="/tables/1">Table 1</a></figure>', self.record['document']['source_url'])
         self.assertEqual(len(result), 1)
