@@ -44,7 +44,8 @@ class SparkPipelineTests(unittest.TestCase):
         browser=Mock(); browser.read.return_value={"status":"downloaded","title":"Synthetic study","doi":"10.1000/study", "html":HTML,"url":"https://link.springer.com/article/10.1000/study"}
         with tempfile.TemporaryDirectory() as temporary, \
              patch.dict(sys.modules,{"msvcrt":SimpleNamespace(locking=lambda *a:None,LK_NBLCK=1)}), \
-             patch.object(worker,"Service",return_value=service), patch.object(worker,"Browser",return_value=browser), \
+             patch.object(worker,"local_service",return_value=service), patch.object(worker,"Browser",return_value=browser), \
+             patch.object(worker,"run_local_cycles",side_effect=lambda service, deadline, phase, cycle, pmid: cycle(service.candidates())), \
              patch.object(worker,"fetch_oa",side_effect=worker.FulltextUnavailable()), \
              patch.object(worker,"ensure_server") as readiness, patch.object(worker,"generate_summary") as summary, \
              patch.object(worker.time,"sleep"), contextlib.redirect_stdout(io.StringIO()):
@@ -61,7 +62,8 @@ class SparkPipelineTests(unittest.TestCase):
         service=Mock(); service.candidates.return_value=[paper,{**paper,"pmid":"2"}]; service.rpc.return_value=None
         with tempfile.TemporaryDirectory() as temporary, \
              patch.dict(sys.modules,{"msvcrt":SimpleNamespace(locking=lambda *a:None,LK_NBLCK=1)}), \
-             patch.object(worker,"Service",return_value=service), patch.object(worker,"Browser") as browser, \
+             patch.object(worker,"local_service",return_value=service), patch.object(worker,"Browser") as browser, \
+             patch.object(worker,"run_local_cycles",side_effect=lambda service, deadline, phase, cycle, pmid: cycle(service.candidates())), \
              patch.object(worker,"fetch_oa") as fetch, patch.object(worker,"ensure_server"), \
              patch.object(worker,"generate_summary",return_value=derived(paper,document)) as summary, \
              patch.object(worker.time,"sleep"), contextlib.redirect_stdout(io.StringIO()):
@@ -120,7 +122,7 @@ class SparkPipelineTests(unittest.TestCase):
                 lock.write(b"0"); lock.flush(); lock.seek(0)
                 msvcrt.locking(lock.fileno(),msvcrt.LK_NBLCK,1)
                 try:
-                    with patch.object(worker,"Service") as service, contextlib.redirect_stdout(io.StringIO()):
+                    with patch.object(worker,"local_service") as service, contextlib.redirect_stdout(io.StringIO()):
                         worker.run(directory,Path("node.exe"),60)
                     service.assert_not_called()
                 finally:
@@ -182,7 +184,7 @@ class SparkPipelineTests(unittest.TestCase):
             return derived(paper,document)
         with tempfile.TemporaryDirectory() as temporary, \
              patch.dict(sys.modules,{"msvcrt":SimpleNamespace(locking=lambda *a:None,LK_NBLCK=1)}), \
-             patch.object(worker,"Service",return_value=service),patch.object(worker,"Browser",return_value=browser), \
+             patch.object(worker,"local_service",return_value=service),patch.object(worker,"Browser",return_value=browser), \
              patch.object(worker,"fetch_oa",side_effect=worker.FulltextUnavailable()),patch.object(worker,"ensure_server"), \
              patch.object(worker,"generate_summary",side_effect=summarize),patch.object(worker.time,"sleep"), \
              contextlib.redirect_stdout(io.StringIO()):

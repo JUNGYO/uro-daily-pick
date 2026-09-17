@@ -375,7 +375,8 @@ class SummaryQueueTests(unittest.TestCase):
         service.candidates.return_value = []
         counts = dict(first_completed=0, updated=0, failed=0, yielded=0, deferred=0)
         with patch.dict(sys.modules, {"msvcrt": SimpleNamespace(locking=lambda *a: None, LK_NBLCK=1)}), \
-                patch.object(worker, "Service", return_value=service), \
+                patch.object(worker, "local_service", return_value=service), \
+                patch.object(worker, "run_local_cycles", side_effect=lambda service, deadline, phase, cycle, pmid: cycle([])), \
                 patch.object(worker, "ensure_server") as readiness, \
                 patch.object(worker, "archive_legacy_bodies") as archive, \
                 patch.object(worker, "Browser") as browser, \

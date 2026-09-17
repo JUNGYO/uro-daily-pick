@@ -118,7 +118,7 @@ class PipelineTests(unittest.TestCase):
                     self.assertNotIn("--publish", step.get("run", ""))
         steps = workflows["daily-fetch.yml"]["jobs"]["fetch"]["steps"]
         self.assertEqual([step["run"] for step in steps if step.get("run", "").startswith("python scripts/")], [
-            "python scripts/fetch_papers.py", "python scripts/classify_papers.py",
+            "python scripts/check_catalog_sync.py", "python scripts/classify_papers.py",
             "python scripts/generate_recs.py", "python scripts/send_digest.py",
         ])
         for name in ("daily-fetch.yml", "daily-recommend.yml", "daily-email.yml", "manual-run.yml", "fulltext-worker.yml"):

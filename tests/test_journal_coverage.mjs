@@ -8,7 +8,7 @@ try {
  CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
  GRANT USAGE ON SCHEMA auth,public TO authenticated,anon;`);
  const migrations=(await readdir(new URL('../supabase/migrations/',import.meta.url))).filter(f=>f.endsWith('.sql')).sort();
- for(const file of migrations.filter(f=>!f.startsWith('026_')))
+ for(const file of migrations.filter(f=>Number(f.slice(0,3))<26))
   await db.exec((await readFile(new URL('../supabase/migrations/'+file,import.meta.url),'utf8')).replace(/^\uFEFF/,''));
  await db.exec(`INSERT INTO public.catalog_backfill_jobs(job_key,query,start_date,status,processed,pmids,unavailable_pmids)
  VALUES(repeat('a',64),'old journal','2000-01-01','active',3,'["1","2","3","4"]','["2"]');

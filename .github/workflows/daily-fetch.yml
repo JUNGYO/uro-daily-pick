@@ -26,12 +26,12 @@ jobs:
       - name: Install dependencies
         run: python -m pip install -r scripts/requirements.txt
 
-      - name: Fetch papers from PubMed
+      - name: Check independently collected catalog synchronization
         env:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           NCBI_EMAIL: ${{ vars.NCBI_EMAIL }}
           SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
-        run: python scripts/fetch_papers.py
+        run: python scripts/check_catalog_sync.py
 
       - name: Classify new papers
         env:

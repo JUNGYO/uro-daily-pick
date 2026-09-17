@@ -992,6 +992,23 @@ export const supabase = {
             newest_publication: "2026-09-14",
             metadata_examined: 5,
             metadata_unavailable: 0,
+            ...(scenario === "admin-local-catalog" ? {
+              local_catalog: {
+                available: true,
+                stale: false,
+                reported_at: new Date().toISOString(),
+                registry_version: "fixture-local-catalog",
+                local_papers: 200,
+                synced_papers: 4,
+                citation_pending: 196,
+                local_originals: 35,
+                local_summaries: 18,
+                pending_originals: 32,
+                pending_summaries: 16,
+                sync_state: "capacity_blocked",
+                last_sync_at: new Date().toISOString(),
+              },
+            } : {}),
             storage: {
               database_bytes: 450 * 1048576,
               budget_bytes: 450 * 1048576,

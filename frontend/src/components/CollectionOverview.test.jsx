@@ -1,7 +1,86 @@
 import { afterEach, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import CollectionOverview, { ProcessingHealth } from "./CollectionOverview";
 afterEach(cleanup);
+
+const localReport = (overrides = {}) => ({
+  available: true,
+  stale: false,
+  reported_at: new Date().toISOString(),
+  local_papers: 200,
+  synced_papers: 100,
+  citation_pending: 100,
+  local_originals: 35,
+  local_summaries: 18,
+  pending_originals: 26,
+  pending_summaries: 14,
+  sync_state: "capacity_blocked",
+  ...overrides,
+});
+
+it("distinguishes durable local collection and pending publication from actual service counts", () => {
+  render(
+    <CollectionOverview
+      catalog={{
+        automatic_papers: 100,
+        originals_acquired: 9,
+        summaries_ready: 4,
+        local_catalog: localReport(),
+      }}
+    />,
+  );
+  const local = screen.getByRole("region", { name: "수집 및 동기화" });
+  expect(within(local).getByText("로컬 수집 완료").parentElement).toHaveTextContent("200편");
+  expect(within(local).getByText("서비스 동기화 완료").parentElement).toHaveTextContent("100편");
+  expect(within(local).getByText("서지정보 동기화 대기").parentElement).toHaveTextContent("100편");
+  expect(local).toHaveTextContent("서비스 반영 대기: 원문 확보 정보 26편 · 본문 요약 14편");
+  expect(screen.getByRole("meter", { name: "등록 문헌 중 원문 확보율" })).toHaveAttribute(
+    "aria-valuenow",
+    "9",
+  );
+  expect(screen.getByText("서비스 반영 현황")).toBeVisible();
+  expect(document.body).not.toHaveTextContent(/Z8|Spark|Qwen/);
+});
+
+it("explains stored local work at capacity without claiming a live collector from a sync heartbeat", () => {
+  render(
+    <CollectionOverview
+      catalog={{
+        local_catalog: localReport(),
+        storage: { database_bytes: 453 * 1048576, budget_bytes: 450 * 1048576 },
+      }}
+    />,
+  );
+  expect(
+    screen.getByText("저장공간 한도로 서비스 동기화가 대기 중입니다. 로컬에 저장된 자료는 보관됩니다."),
+  ).toBeVisible();
+  expect(document.body).not.toHaveTextContent("로컬 수집은 계속");
+});
+
+it("retains reported counts with a stale label and never infers current collection from old or future reports", () => {
+  const view = render(<CollectionOverview catalog={{ local_catalog: localReport({ stale: true }) }} />);
+  expect(screen.getByText(/최근 수집 상태를 확인할 수 없습니다/)).toBeVisible();
+  expect(screen.getByText("로컬 수집 완료").parentElement).toHaveTextContent("200편");
+  for (const reported_at of [
+    new Date(Date.now() - 3 * 3600000).toISOString(),
+    "invalid",
+    new Date(Date.now() + 3600000).toISOString(),
+  ]) {
+    view.rerender(<CollectionOverview catalog={{ local_catalog: localReport({ reported_at }) }} />);
+    expect(screen.getByText(/최근 수집 상태를 확인할 수 없습니다/)).toBeVisible();
+    expect(screen.queryByText(/저장공간 확보 후 동기화 예정/)).not.toBeInTheDocument();
+  }
+});
+
+it("does not invent local counts when no worker has reported", () => {
+  render(
+    <CollectionOverview
+      catalog={{ automatic_papers: 100, local_catalog: { available: false, stale: true } }}
+    />,
+  );
+  expect(screen.queryByRole("region", { name: "수집 및 동기화" })).not.toBeInTheDocument();
+  expect(screen.queryByText("로컬 수집 완료")).not.toBeInTheDocument();
+});
 
 it("shows the server-provided journal target separately from actual collection counts", () => {
   render(

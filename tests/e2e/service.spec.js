@@ -315,3 +315,35 @@ test("mobile admin distinguishes metadata, originals and summaries with accurate
     fullPage: true,
   });
 });
+
+test("mobile admin separates local catalog sync from published counts at capacity", async ({ page }, testInfo) => {
+  const errors = [];
+  page.on("pageerror", (error) => errors.push(error.message));
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    await page.goto("admin?scenario=admin-local-catalog");
+    const panel = page.getByRole("region", { name: "문헌 처리 현황", exact: true });
+    const local = panel.getByRole("region", { name: "수집 및 동기화", exact: true });
+    await expect(local.getByText("로컬 수집 완료", { exact: true }).locator("..")).toContainText("200편");
+    await expect(local.getByText("서비스 동기화 완료", { exact: true }).locator("..")).toContainText("4편");
+    await expect(local.getByText("서지정보 동기화 대기", { exact: true }).locator("..")).toContainText("196편");
+    await expect(local).toContainText("로컬 원문 35편 · 로컬 본문 요약 18편");
+    await expect(local).toContainText("서비스 반영 대기: 원문 확보 정보 32편 · 본문 요약 16편");
+    const published = panel.getByRole("list", { name: "문헌 처리 단계", exact: true }).getByRole("listitem");
+    await expect(published).toHaveCount(3);
+    await expect(published.nth(0)).toContainText("4편");
+    await expect(published.nth(1)).toContainText("3편");
+    await expect(published.nth(2)).toContainText("2편");
+    await expect(panel.getByRole("meter", { name: "등록 문헌 중 원문 확보율" })).toHaveAttribute("aria-valuenow", "75");
+    await expect(panel.getByRole("meter", { name: "확보 원문 중 요약 완료율" })).toHaveAttribute("aria-valuetext", "2 / 3편");
+    await expect(panel).toContainText("저장공간 한도로 서비스 동기화가 대기 중입니다. 로컬에 저장된 자료는 보관됩니다.");
+    await expect(panel).not.toContainText(/로컬 수집은 계속|Z8|Spark|Qwen/);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect(await page.getByRole("region", { name: "Admin content", exact: true }).evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+    const accessibility = await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze();
+    expect(accessibility.violations).toEqual([]);
+    await local.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: testInfo.outputPath(`catalog-sync-${width}px.png`), fullPage: true });
+  }
+  expect(errors).toEqual([]);
+});
