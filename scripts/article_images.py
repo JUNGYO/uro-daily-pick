@@ -268,7 +268,7 @@ def collect_images(directory, pmid, record, browser=None, deadline=None):
 
 def run_image_queue(directory, node, seconds, requested_pmid=None):
     import msvcrt
-    from institution_worker import Browser, Service
+    from institution_worker import Browser, local_service
     directory=Path(directory)
     lock=(directory/'figures.lock').open('a+b')
     if not lock.tell(): lock.write(b'0');lock.flush()
@@ -277,13 +277,18 @@ def run_image_queue(directory, node, seconds, requested_pmid=None):
     except OSError: lock.close();return
     deadline=time.monotonic()+seconds
     browser=None
+    service=None
     attempted=set()
     try:
         roots=(directory/'documents',directory/'cloud-archive')
         local_pmids=sorted({path.stem for root in roots for path in root.glob('*.json') if path.stem.isdigit()})
-        # Legacy local archives have no publication date. Resolve scope against
-        # the citation catalog before opening a document or a publisher browser.
-        allowed={requested_pmid} if requested_pmid else Service(directory).automatic_figure_pmids(local_pmids)
+        # Scope is resolved from the durable local catalog even while the
+        # service is offline. Explicit paper requests keep their date exception.
+        if requested_pmid:
+            allowed={requested_pmid}
+        else:
+            service=local_service(directory)
+            allowed=service.automatic_figure_pmids(local_pmids)
         print(f'Figure queue: {len(allowed)} eligible local papers',flush=True)
         for root in roots:
             for path in sorted(root.glob('*.json'),key=lambda p:p.stat().st_mtime,reverse=True):
@@ -307,4 +312,5 @@ def run_image_queue(directory, node, seconds, requested_pmid=None):
                     print(f'PMID {path.stem}: figure collection deferred',flush=True)
     finally:
         if browser: browser.close()
+        if service: service.close()
         lock.close()

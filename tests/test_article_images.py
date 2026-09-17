@@ -34,7 +34,7 @@ class ImageCollectionTests(unittest.TestCase):
             (self.docs/(pmid+'.json')).write_text(json.dumps(self.record),encoding='utf-8')
         before=(self.docs/'1.json').read_bytes()
         with patch.dict(sys.modules,{'msvcrt':Mock()}), \
-             patch('institution_worker.Service') as service, \
+             patch('institution_worker.local_service') as service, \
              patch('institution_worker.Browser'), \
              patch.object(images,'collect_images',return_value={'figures':[]}) as collect:
             service.return_value.automatic_figure_pmids.return_value={'2'}

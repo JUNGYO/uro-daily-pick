@@ -87,6 +87,9 @@ class Service:
             "rpc/claim_research_extractions", "rpc/finish_research_extraction", "rpc/fail_research_extraction"} else None
         if path in ("papers", "rpc/publish_institution_summary", "rpc/institution_worker_status"):
             deadline = getattr(self, "summary_deadline", None)
+        sync_deadline = getattr(self, "sync_deadline", None)
+        if sync_deadline is not None:
+            deadline = sync_deadline if deadline is None else min(deadline, sync_deadline)
         for attempt in range(4):
             remaining = 45 if deadline is None else min(45, deadline - time.monotonic())
             if remaining < 1:
@@ -95,7 +98,10 @@ class Service:
                 request = Request(url, data=payload, headers={"apikey": self.config["public_key"],
                     "Content-Type": "application/json", "Accept": "application/json"})
                 with self.opener.open(request, timeout=remaining) as response:
-                    content = response.read(2 * 1024 * 1024)
+                    maximum = 8 * 1024 * 1024
+                    content = response.read(maximum + 1)
+                    if len(content) > maximum:
+                        raise ValueError("Service response exceeds the metadata limit")
                 return json.loads(content) if content else None
             except HTTPError as error:
                 if path in ("rpc/finish_research_extraction", "rpc/fail_research_extraction") and error.code in (403, 409):
@@ -360,6 +366,31 @@ def archive_legacy_bodies(service, directory, deadline):
     print(f"Legacy archive: {count} bodies moved to Z8 with hashes verified",flush=True)
 
 
+def local_service(directory):
+    from local_service import LocalService
+    return LocalService(directory)
+
+
+def run_local_cycles(service, deadline, phase, cycle, requested_pmid=None, *, clock=time.monotonic, sleep=time.sleep):
+    """Revisit local work as catalog collection progresses, including empty startup."""
+    totals = {}
+    while clock() < deadline:
+        papers = service.candidates(requested_pmid, include_summary=phase == "summarize")
+        if papers:
+            counts = cycle(papers)
+            for key, value in counts.items():
+                totals[key] = totals.get(key, 0) + value
+        if requested_pmid:
+            break
+        remaining = deadline - clock()
+        if remaining <= 0:
+            break
+        # Failed source/model attempts keep their existing per-paper backoff.
+        # Polling is local-only and allows newly acquired/catalogued work to join.
+        sleep(min(30, remaining))
+    return totals
+
+
 def run(directory, node, seconds, phase="all", requested_pmid=None):
     if phase not in ("all","collect","summarize"):
         raise ValueError("Unknown worker phase")
@@ -375,7 +406,7 @@ def run(directory, node, seconds, phase="all", requested_pmid=None):
         print("An institution worker is already running", flush=True)
         return
     browser = None
-    service = Service(directory)
+    service = local_service(directory)
     db = sqlite3.connect(directory / "queue.sqlite3",timeout=20)
     db.execute("PRAGMA journal_mode=WAL")
     db.execute("CREATE TABLE IF NOT EXISTS attempts(pmid TEXT PRIMARY KEY,status TEXT,next_retry REAL)")
@@ -390,8 +421,8 @@ def run(directory, node, seconds, phase="all", requested_pmid=None):
         service.status("running")
         if phase!="collect":
             ensure_server(directory)
-        if phase == "all":
-            archive_legacy_bodies(service,directory,deadline)
+        # Legacy cloud-body migration is complete. Normal local phases must not
+        # wait on that historical RPC or any cloud service during startup.
         if phase == "summarize":
             papers = service.candidates(requested_pmid, include_summary=True)
         else:
@@ -403,16 +434,18 @@ def run(directory, node, seconds, phase="all", requested_pmid=None):
         print(f"Institution {phase} queue: {len(papers)} papers", flush=True)
         if phase == "collect":
             from collection_queue import run_collection
-            counts = run_collection(directory, node, deadline, service, db, papers)
-            print(f"Institution collect: {counts['completed']} completed, {counts['failed']} unavailable/invalid, "
-                  f"{counts['deferred']} deferred", flush=True)
+            counts = run_local_cycles(service, deadline, phase,
+                lambda candidates: run_collection(directory, node, deadline, service, db, candidates), requested_pmid)
+            print(f"Institution collect: {counts.get('completed', 0)} completed locally, {counts.get('failed', 0)} unavailable/invalid, "
+                  f"{counts.get('deferred', 0)} deferred", flush=True)
             return
         if phase == "summarize":
             from summary_queue import run_summary_queue
-            counts = run_summary_queue(directory, deadline, service, db, papers,
-                                       refresh=None if requested_pmid else lambda: service.candidates(include_summary=True))
-            print(f"Institution summarize: {counts['first_completed']} first summaries, {counts['updated']} refreshed, "
-                  f"{counts['failed']} failed, {counts['yielded']} yielded, {counts['deferred']} deferred", flush=True)
+            counts = run_local_cycles(service, deadline, phase,
+                lambda candidates: run_summary_queue(directory, deadline, service, db, candidates,
+                    refresh=None if requested_pmid else lambda: service.candidates(include_summary=True)), requested_pmid)
+            print(f"Institution summarize: {counts.get('first_completed', 0)} first summaries stored locally, {counts.get('updated', 0)} refreshed, "
+                  f"{counts.get('failed', 0)} failed, {counts.get('yielded', 0)} yielded, {counts.get('deferred', 0)} deferred", flush=True)
             return
         for paper in papers:
             if time.monotonic() >= deadline:
@@ -489,7 +522,7 @@ def run(directory, node, seconds, phase="all", requested_pmid=None):
                 db.execute("INSERT OR REPLACE INTO attempts VALUES(?,?,?)", (pmid,"ready",0))
                 db.commit()
                 done += 1
-                print(f"PMID {pmid}: local body {len(document['content_text'])} characters; summary published", flush=True)
+                print(f"PMID {pmid}: local body {len(document['content_text'])} characters; summary stored locally, sync pending", flush=True)
             except SummaryBudgetExpired:
                 print(f"PMID {pmid}: summary time budget reached; original and evidence retained for next run",flush=True)
                 break
@@ -513,6 +546,7 @@ def run(directory, node, seconds, phase="all", requested_pmid=None):
         if browser:
             browser.close()
         db.close()
+        service.close()
         lock.close()
 
 

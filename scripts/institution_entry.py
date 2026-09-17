@@ -1,4 +1,4 @@
-"""Run independent acquisition and Spark queues with one existing scheduled task."""
+"""Run local catalog, acquisition, inference and cloud sync independently."""
 from datetime import datetime, timezone
 import json
 import os
@@ -63,16 +63,21 @@ def main():
         print(f"\n{datetime.now(timezone.utc).isoformat()} Z8 acquisition and summary queues started", flush=True)
         with sqlite3.connect(state / "queue.sqlite3", timeout=20) as database:
             database.execute("PRAGMA journal_mode=WAL")
-        from institution_worker import Service
-        service = Service(state)
-        service.status("running")
-        for phase in ("collect", "summarize", "figures", "research"):
+        # No cloud call precedes local work: a full or unavailable database must
+        # never prevent durable discovery, acquisition or inference from starting.
+        for phase in ("catalog", "sync", "collect", "summarize", "figures", "research"):
             output = (state / (phase + ".log")).open("a", encoding="utf-8", buffering=1)
             logs.append(output)
             output.write(f"\n{datetime.now(timezone.utc).isoformat()} {phase} started\n")
-            process = subprocess.Popen([sys.executable, "-u", str(release / "institution_worker.py"),
-                "--state-dir", str(state), "--node", str(release / "node.exe"),
-                "--phase", phase, "--max-seconds", "3300"], cwd=release,
+            if phase in {"catalog", "sync"}:
+                script = "local_catalog_worker.py" if phase == "catalog" else "catalog_sync.py"
+                command = [sys.executable, "-u", str(release / script),
+                           "--state-dir", str(state), "--max-seconds", "3300"]
+            else:
+                command = [sys.executable, "-u", str(release / "institution_worker.py"),
+                    "--state-dir", str(state), "--node", str(release / "node.exe"),
+                    "--phase", phase, "--max-seconds", "3300"]
+            process = subprocess.Popen(command, cwd=release,
                 stdout=output, stderr=output, stdin=subprocess.DEVNULL,
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             processes.append((phase, process))
@@ -86,7 +91,10 @@ def main():
                 print(f"{phase}: stalled child stopped; committed documents are retained", flush=True)
             results.append(code)
             print(f"{datetime.now(timezone.utc).isoformat()} {phase} finished: {code}", flush=True)
-        service.status("error" if any(results) else "idle")
+        from local_catalog import LocalCatalog
+        with LocalCatalog(state) as catalog:
+            catalog.set_meta("controller_status", {"state": "error" if any(results) else "idle",
+                "updated_at": datetime.now(timezone.utc).isoformat()})
         if any(results):
             raise SystemExit(1)
     finally:

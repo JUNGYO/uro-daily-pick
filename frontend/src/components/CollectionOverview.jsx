@@ -44,6 +44,20 @@ export default function CollectionOverview({ catalog }) {
     Number.isInteger(scope?.ancillary_journals) &&
     scope.ancillary_journals >= 0 &&
     scope.urology_journals + scope.ancillary_journals === scope.target_journals;
+  const local = catalog.local_catalog;
+  const localAvailable = local?.available === true;
+  const reportedAt = Date.parse(local?.reported_at);
+  const localFresh =
+    localAvailable &&
+    local.stale === false &&
+    Number.isFinite(reportedAt) &&
+    Date.now() - reportedAt <= 2 * 3600000 &&
+    reportedAt <= Date.now() + 5 * 60000;
+  const localStages = [
+    { label: "로컬 수집 완료", value: local?.local_papers },
+    { label: "서비스 동기화 완료", value: local?.synced_papers },
+    { label: "서지정보 동기화 대기", value: local?.citation_pending },
+  ];
   const stages = [
     { label: "문헌 정보 등록", value: metadata, description: "제목·저자·발행일 등 서지 정보" },
     {
@@ -75,6 +89,44 @@ export default function CollectionOverview({ catalog }) {
           )}
         </p>
       )}
+      {localAvailable && (
+        <section aria-label="수집 및 동기화" className="mb-5">
+          <h3 className="text-sm font-medium text-text1 mb-3">수집 및 동기화</h3>
+          <dl className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {localStages.map((stage) => (
+              <div key={stage.label} className="rounded-xl border border-border p-4 min-w-0">
+                <dt className="text-xs text-text3 mb-3">{stage.label}</dt>
+                <dd className="text-2xl font-semibold text-text1 tabular-nums">
+                  {count(stage.value)}
+                  <span className="text-sm font-normal ml-1">편</span>
+                </dd>
+              </div>
+            ))}
+          </dl>
+          <p className="text-xs text-text2 mt-3">
+            로컬 원문 {count(local.local_originals)}편 · 로컬 본문 요약 {count(local.local_summaries)}편
+          </p>
+          <p className="text-xs text-text2 mt-2">
+            서비스 반영 대기: 원문 확보 정보 {count(local.pending_originals)}편 · 본문 요약{" "}
+            {count(local.pending_summaries)}편
+          </p>
+          <p className="text-xs text-text2 mt-2">
+            {localFresh
+              ? {
+                  idle: "동기화 대기",
+                  syncing: "동기화 중",
+                  capacity_blocked: "저장공간 확보 후 동기화 예정",
+                  offline: "연결 복구 후 동기화 예정",
+                  error: "동기화 오류 확인 필요",
+                }[local.sync_state] || "동기화 상태 확인 필요"
+              : "최근 수집 상태를 확인할 수 없습니다. 마지막 보고 수치입니다."}
+            {Number.isFinite(reportedAt) && (
+              <> · 마지막 보고 {new Date(reportedAt).toLocaleString("ko-KR")}</>
+            )}
+          </p>
+        </section>
+      )}
+      {localAvailable && <h3 className="text-sm font-medium text-text1 mb-3">서비스 반영 현황</h3>}
       <ol aria-label="문헌 처리 단계" className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {stages.map((stage, index) => (
           <li key={stage.label} className="rounded-xl border border-border p-4 min-w-0">
@@ -133,7 +185,9 @@ export default function CollectionOverview({ catalog }) {
         )}
         <p className="text-sm text-text2 mt-3">
           {paused
-            ? "새 문헌 정보 등록이 일시 중지되었습니다. 저장공간 확보가 필요합니다."
+            ? localFresh
+              ? "저장공간 한도로 서비스 동기화가 대기 중입니다. 로컬에 저장된 자료는 보관됩니다."
+              : "새 문헌 정보 등록이 일시 중지되었습니다. 저장공간 확보가 필요하며 로컬 수집의 현재 진행 여부는 확인되지 않았습니다."
             : storageKnown
               ? "새 문헌 정보는 등록 중단 기준에 도달할 때까지 등록합니다."
               : "저장공간 상태를 확인하고 있습니다."}

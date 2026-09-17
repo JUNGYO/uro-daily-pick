@@ -253,7 +253,11 @@ def run_summary_queue(directory, deadline, service, db, papers, *, dependencies=
             counts["completed"] += 1
             first = not _cloud_ready(context["paper"], context["source_hash"])
             counts["first_completed" if first else "updated"] += 1
-            log(context, "first summary published" if first else "existing summary refreshed")
+            if getattr(service, "publication_is_local", False):
+                log(context, "first summary stored locally; sync pending" if first
+                    else "existing summary refreshed locally; sync pending")
+            else:
+                log(context, "first summary published" if first else "existing summary refreshed")
         except Exception as error:
             failed(context, error, operation)
 
