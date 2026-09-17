@@ -184,31 +184,52 @@ def sync_events(directory, catalog, service, deadline, limit=50):
     return completed
 
 
-def report(catalog, service, state):
+def report(catalog, service, state, *, sync_at=None):
     names = ("local_papers", "synced_papers", "citation_pending", "local_originals",
              "local_summaries", "pending_originals", "pending_summaries")
     stats = catalog.stats()
     status = {name: int(stats[name]) for name in names}
-    status.update(sync_state=state, last_sync_at=catalog.get_meta("last_sync_at"),
+    status.update(sync_state=state, last_sync_at=sync_at or catalog.get_meta("last_sync_at"),
                   registry_version=REGISTRY_VERSION)
-    worker_rpc(service, "report_institution_catalog", p_status=status)
     heartbeat = catalog.get_meta("worker_status", {})
     service.status(heartbeat.get("state", "running"))
+    worker_rpc(service, "report_institution_catalog", p_status=status)
     return status
 
 
+def failure_details(error, stage):
+    """Use an allowlist, never the exception message or a request's contents."""
+    stages = {"initialization", "catalog_import", "citation_sync", "derived_sync", "status_report"}
+    stage = stage if stage in stages else "initialization"
+    categories = {"http", "timeout", "tls", "network"}
+    category = getattr(error, "category", None)
+    if not isinstance(category, str) or category not in categories:
+        category = ("timeout" if isinstance(error, TimeoutError) else
+                    "storage" if isinstance(error, sqlite3.Error) else
+                    "invalid_response" if isinstance(error, (ValueError, KeyError, TypeError)) else
+                    "os_error" if isinstance(error, OSError) else "service")
+    detail = {"stage": stage, "category": category, "at": timestamp()}
+    status = getattr(error, "http_status", None)
+    if type(status) is int and 100 <= status <= 599:
+        detail["http_status"] = status
+    return detail
+
+
 def run_sync(directory, deadline, *, service=None, catalog=None, sleep=time.sleep):
-    """Keep cloud failures inside this phase; collection and inference are separate."""
+    """Return completed cycles; cloud failures stay inside this independent phase."""
     own_catalog = catalog is None
     catalog = catalog or LocalCatalog(directory)
+    completed_cycles = 0
     try:
         while time.monotonic() < deadline:
+            stage = "initialization"
             try:
                 if service is None:
                     from institution_worker import Service
                     service = Service(Path(directory))
                 service.sync_deadline = deadline
                 # Bounded seeding leaves room for uploads and progress reporting.
+                stage = "catalog_import"
                 imported = 0
                 for _ in range(8):
                     if time.monotonic() >= deadline:
@@ -219,6 +240,7 @@ def run_sync(directory, deadline, *, service=None, catalog=None, sleep=time.slee
                         break
                 accepted = 0
                 blocked = False
+                stage = "citation_sync"
                 for _ in range(20):
                     if time.monotonic() >= deadline:
                         break
@@ -227,23 +249,32 @@ def run_sync(directory, deadline, *, service=None, catalog=None, sleep=time.slee
                     blocked = blocked or result["capacity_blocked"]
                     if result["capacity_blocked"] or not result["accepted"]:
                         break
+                stage = "derived_sync"
                 events = sync_events(directory, catalog, service, deadline)
                 state = "capacity_blocked" if blocked else "idle"
-                catalog.set_meta("last_sync_at", timestamp())
+                stage = "status_report"
+                synced_at = timestamp()
+                status = report(catalog, service, state, sync_at=synced_at)
+                # A failed report must not make an offline worker look recently
+                # synchronized. Publication acknowledgements remain durable.
+                catalog.set_meta("last_sync_at", synced_at)
                 catalog.set_meta("sync_state", state)
-                status = report(catalog, service, state)
+                catalog.set_meta("sync_error", None)
+                completed_cycles += 1
                 print(f"Catalog sync: {imported} mirrored, {accepted} citation acknowledgements, "
                       f"{events} derived acknowledgements; {status['citation_pending']} citations pending; {state}", flush=True)
                 # Continue the initial mirror promptly without spinning on an empty queue.
                 pause = 2 if imported >= 2000 else 30
-            except (OSError, RuntimeError, ValueError, KeyError, TypeError) as error:
+            except (OSError, RuntimeError, ValueError, KeyError, TypeError, sqlite3.Error) as error:
+                detail = failure_details(error, stage)
                 catalog.set_meta("sync_state", "offline")
-                catalog.set_meta("sync_error", type(error).__name__)
-                print(f"Catalog sync deferred: {type(error).__name__}; committed local data retained", flush=True)
+                catalog.set_meta("sync_error", detail)
+                print(f"Catalog sync deferred: {json.dumps(detail, sort_keys=True)}; committed local data retained", flush=True)
                 pause = 60
             remaining = deadline - time.monotonic()
             if remaining > 0:
                 sleep(min(pause, remaining))
+        return completed_cycles
     finally:
         if own_catalog:
             catalog.close()
@@ -259,8 +290,12 @@ def main():
     from local_catalog_worker import phase_lock
     with phase_lock(args.state_dir, "catalog-sync") as acquired:
         if acquired:
-            run_sync(args.state_dir, time.monotonic() + args.max_seconds)
+            completed = run_sync(args.state_dir, time.monotonic() + args.max_seconds)
+            if not completed:
+                print("Catalog sync failed: no cycle completed; committed local data retained", flush=True)
+                return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
