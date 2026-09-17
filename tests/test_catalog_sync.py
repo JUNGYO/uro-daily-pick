@@ -211,6 +211,71 @@ class CatalogSyncTests(unittest.TestCase):
         self.assertEqual(self.catalog.stats()["pending_originals"], 1)
         self.assertIsNotNone(self.catalog.get_meta("last_sync_at"))
 
+    def test_capacity_cooldown_survives_reopen_and_allows_existing_updates_and_events(self):
+        self.catalog.upsert_papers([{**PAPER, "id": 7}], synced=True)
+        self.catalog.upsert_papers([{**PAPER, "abstract": "Corrected metadata"},
+            {**PAPER, "pmid": "124"}])
+        self.catalog.enqueue("original", ORIGINAL)
+        self.service.request.return_value = {"accepted": [{"pmid": "123", "id": 7}], "capacity_blocked": True}
+        self.assertEqual(sync_citations(self.catalog, self.service)["accepted"], 1)
+        retry_at = self.catalog.get_meta("capacity_retry_at")
+        self.assertGreater(retry_at, time.time())
+        self.catalog.close()
+        self.catalog = LocalCatalog(self.directory.name)
+        self.catalog.upsert_papers([{**PAPER, "abstract": "Another correction"}])
+        self.service.request.reset_mock()
+        self.service.request.return_value = {"accepted": [{"pmid": "123", "id": 7}], "capacity_blocked": False}
+        self.assertEqual(sync_citations(self.catalog, self.service)["accepted"], 1)
+        self.assertEqual([row["pmid"] for row in self.service.request.call_args.args[1]["p_papers"]], ["123"])
+        self.assertEqual(self.catalog.get_meta("capacity_retry_at"), retry_at)
+        self.assertEqual(sync_events(self.directory.name, self.catalog, self.service, time.monotonic() + 5), 1)
+        self.service.request.reset_mock()
+        self.assertEqual(sync_citations(self.catalog, self.service), {"accepted": 0, "capacity_blocked": True})
+        self.service.request.assert_not_called()
+        self.assertEqual(self.catalog.stats()["citation_pending"], 1)
+        self.assertEqual(self.catalog.stats()["pending_originals"], 0)
+
+    def test_new_registration_retries_after_ten_minutes_then_clears_capacity_state(self):
+        self.catalog.upsert_papers([PAPER])
+        self.service.request.return_value = {"accepted": [], "capacity_blocked": True}
+        with patch.object(catalog_sync.time, "time", return_value=1000):
+            sync_citations(self.catalog, self.service)
+        self.assertEqual(self.catalog.get_meta("capacity_retry_at"), 1600)
+        self.service.request.reset_mock()
+        with patch.object(catalog_sync.time, "time", return_value=1599):
+            sync_citations(self.catalog, self.service)
+        self.service.request.assert_not_called()
+        self.service.request.return_value = {"accepted": [{"pmid": "123", "id": 7}], "capacity_blocked": False}
+        with patch.object(catalog_sync.time, "time", return_value=1600):
+            self.assertEqual(sync_citations(self.catalog, self.service)["accepted"], 1)
+        self.assertIsNone(self.catalog.get_meta("capacity_retry_at"))
+        self.assertTrue(self.catalog.citation_is_synced("123"))
+
+    def test_cooldown_preserves_multiple_existing_batches_and_derived_publication_per_cycle(self):
+        self.catalog.upsert_papers([{**PAPER, "pmid": str(n), "id": 1000 + n} for n in range(1, 102)], synced=True)
+        self.catalog.upsert_papers([{**PAPER, "pmid": str(n), "abstract": "Updated metadata"} for n in range(1, 102)])
+        self.catalog.upsert_papers([{**PAPER, "pmid": "999"}])
+        self.catalog.enqueue("original", {**ORIGINAL, "p_pmid": "1"})
+        self.catalog.set_meta("capacity_retry_at", time.time() + 600)
+        def respond(path, *args, **kwargs):
+            if path == "papers":
+                return []
+            if path == "rpc/sync_institution_catalog":
+                return {"accepted": [{"pmid": p["pmid"], "id": 1000 + int(p["pmid"])}
+                    for p in args[0]["p_papers"]], "capacity_blocked": False}
+            return None
+        self.service.request.side_effect = respond
+        completed, _ = self.run_bounded(1)
+        batches = [call.args[1]["p_papers"] for call in self.service.request.call_args_list
+            if call.args[0] == "rpc/sync_institution_catalog"]
+        self.assertEqual(completed, 1)
+        self.assertEqual([len(batch) for batch in batches], [50, 50, 1])
+        self.assertFalse(any(row["pmid"] == "999" for batch in batches for row in batch))
+        self.assertEqual(self.catalog.stats()["synced_papers"], 101)
+        self.assertEqual(self.catalog.stats()["citation_pending"], 1)
+        self.assertEqual(self.catalog.stats()["pending_originals"], 0)
+        self.assertEqual(self.catalog.get_meta("sync_state"), "capacity_blocked")
+
 
 if __name__ == "__main__":
     unittest.main()

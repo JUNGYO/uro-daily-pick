@@ -15,6 +15,8 @@ from catalog_policy import AUTOMATIC_START_DATE
 from journal_registry import REGISTRY_VERSION
 from local_catalog import LocalCatalog, CITATION_FIELDS
 
+CAPACITY_RETRY_SECONDS = 600
+
 
 def timestamp():
     return datetime.now(timezone.utc).isoformat()
@@ -88,10 +90,26 @@ def observe_existing_documents(catalog, imported):
             continue
 
 
+def capacity_cooldown_active(catalog):
+    retry_at = catalog.get_meta("capacity_retry_at", 0)
+    now = time.time()
+    # A corrupt checkpoint or a clock adjustment must not defer work indefinitely.
+    return type(retry_at) in (int, float) and now < retry_at <= now + CAPACITY_RETRY_SECONDS
+
+
 def sync_citations(catalog, service, limit=50, *, batch=None):
     batch = catalog.pending_citations(limit=limit) if batch is None else batch
     if not batch:
         return {"accepted": 0, "capacity_blocked": False}
+    known_ids = {paper["pmid"] for paper in catalog.get_papers(
+        [item["paper"]["pmid"] for item in batch]) if type(paper.get("id")) is int and paper["id"] > 0}
+    if capacity_cooldown_active(catalog):
+        # pending_citations prioritizes cloud identities, so filtering this
+        # bounded batch cannot leave an eligible existing update behind new rows.
+        batch = [item for item in batch if item["paper"]["pmid"] in known_ids]
+        if not batch:
+            return {"accepted": 0, "capacity_blocked": True}
+    new_pmids = {item["paper"]["pmid"] for item in batch} - known_ids
     try:
         result = worker_rpc(service, "sync_institution_catalog", p_papers=[item["paper"] for item in batch])
     except RuntimeError as error:
@@ -122,6 +140,11 @@ def sync_citations(catalog, service, limit=50, *, batch=None):
     for receipt in result["accepted"]:
         item = sent[str(receipt["pmid"])]
         catalog.ack_citation(str(receipt["pmid"]), item["version"], receipt["id"])
+    if result["capacity_blocked"]:
+        catalog.set_meta("capacity_retry_at", time.time() + CAPACITY_RETRY_SECONDS)
+    elif new_pmids and new_pmids <= accepted:
+        # Existing-record updates can succeed while new admission remains paused.
+        catalog.set_meta("capacity_retry_at", None)
     return {"accepted": len(accepted), "capacity_blocked": result["capacity_blocked"]}
 
 
@@ -239,7 +262,9 @@ def run_sync(directory, deadline, *, service=None, catalog=None, sleep=time.slee
                     if count < 250:
                         break
                 accepted = 0
-                blocked = False
+                # Keep the capacity state visible during admission cooldown while
+                # allowing all normal batches of existing updates to continue.
+                blocked = capacity_cooldown_active(catalog)
                 stage = "citation_sync"
                 for _ in range(20):
                     if time.monotonic() >= deadline:
