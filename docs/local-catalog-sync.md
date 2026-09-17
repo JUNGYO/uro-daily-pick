@@ -8,6 +8,8 @@ The sync phase incrementally mirrors existing service citations, then sends boun
 
 Acknowledgements apply to the exact local revision sent. Interrupted uploads are replayable without duplicate PMIDs. Invalid individual records remain local and are deferred without blocking valid records. Summaries wait for their current citation and original receipt; source changes invalidate stale publication work. A server-rejected summary re-enters local validation and inference.
 
+When the service rejects new citations because its storage budget is full, the local worker waits ten minutes before probing new registrations again. This cooldown survives worker restarts. Updates to existing service citations and derived outputs keep their normal cadence. The database stops repeating its size check after a batch has already reached the budget, while retaining the per-insert check before that point. Updates that leave a paper's title and abstract unchanged preserve its search vector without rebuilding it.
+
 The administrator view distinguishes local citations, citations synchronized to the service, and pending revisions. Original and summary stages already in the service keep their existing counts. Local counters are independently reported with timestamps and stale-state handling. Locally stored, unsynchronized papers are not represented as available in service search.
 
 GitHub's daily workflow checks sync health and continues classification, recommendation and configured digest work. Its hourly catalog workflow is a read-only health check. Neither workflow performs the normal citation collection anymore. The old catalog command remains available for tests and explicit maintenance; its historic cloud checkpoints are preserved.
