@@ -6,7 +6,7 @@ No LLM needed — MeSH terms are curated by NLM experts.
 import os
 import re
 import time
-from collections import Counter
+from collections import Counter, deque
 import requests
 from common import supabase_headers
 from common import get_json, strings
@@ -14,6 +14,8 @@ from common import get_json, strings
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
 PAGE_SIZE = 100
+WRITE_BATCH_SIZE = 25
+SPLIT_ERROR_CODES = {"57014", "40P01"}
 
 # ── MeSH → study_type mapping ──
 MESH_STUDY_TYPE = {
@@ -201,6 +203,14 @@ def candidate_page(after_id, reclassify_all=False):
     return rows
 
 
+class ClassificationSaveError(RuntimeError):
+    """A sanitized failed write; only confirmed transaction errors permit splitting."""
+
+    def __init__(self, message, *, code=None):
+        super().__init__(message)
+        self.code = code
+
+
 def save_classifications(results):
     """Retry identical, source-bound assignments safely after an uncertain commit."""
     url = f"{SUPABASE_URL}/rest/v1/rpc/apply_paper_classifications"
@@ -208,13 +218,20 @@ def save_classifications(results):
     payload = {"p_results": results}
     for attempt in range(4):
         response = None
-        category = "unknown"
+        category, code = "unknown", None
         try:
             response = requests.post(url, headers=headers, json=payload, timeout=(10, 45))
             if response.status_code >= 400:
                 category = f"HTTP {response.status_code}"
                 if response.status_code not in (408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524):
                     raise RuntimeError(f"Classification save rejected ({category})")
+                try:
+                    error = response.json()
+                except ValueError:
+                    error = None
+                candidate = error.get("code") if isinstance(error, dict) else None
+                if isinstance(candidate, str) and re.fullmatch(r"[0-9A-Z]{5}|PGRST[0-9]{3}", candidate):
+                    code = candidate
             else:
                 outcome = response.json()
                 if (not isinstance(outcome, dict)
@@ -231,8 +248,11 @@ def save_classifications(results):
         finally:
             if response is not None:
                 response.close()
-        if attempt == 3:
-            raise RuntimeError(f"Classification save failed after 4 attempts ({category})") from None
+        if attempt == 3 or (code in SPLIT_ERROR_CODES and attempt >= 1):
+            detail = category + (f" code {code}" if code is not None else "")
+            raise ClassificationSaveError(
+                f"Classification save failed after {attempt + 1} attempts ({detail})", code=code,
+            ) from None
         time.sleep(min(2 ** (attempt + 1), 8))
 
 
@@ -241,6 +261,7 @@ def run_classification(*, max_seconds=600, after_id=0, reclassify_all=False):
     cursor, processed, updated, stale = after_id, 0, 0, 0
     type_counts = Counter()
     complete = False
+    write_size = WRITE_BATCH_SIZE
     while time.monotonic() < deadline:
         papers = candidate_page(cursor, reclassify_all)
         if not papers:
@@ -252,16 +273,45 @@ def run_classification(*, max_seconds=600, after_id=0, reclassify_all=False):
                                      paper.get("title"), paper.get("abstract"))
             results.append({"id": paper["id"], "source_hash": paper["classification_source_hash"],
                             "study_type": study_type})
-        outcome = save_classifications(results)
-        # Advance only after the complete batch was acknowledged. Source changes
-        # remain pending and are picked up from the beginning of the next run.
-        cursor = papers[-1]["id"]
-        processed += len(results)
-        updated += outcome["updated"]
-        stale += outcome["stale"]
-        type_counts.update(result["study_type"] for result in results)
-        print(f"Classification batch: {outcome['updated']} saved, {outcome['stale']} source changes deferred; "
-              f"{processed} processed, cursor {cursor}", flush=True)
+        pending = deque(results[start:start + write_size] for start in range(0, len(results), write_size))
+        budget_reached = False
+        while pending:
+            if time.monotonic() >= deadline:
+                budget_reached = True
+                break
+            batch = pending.popleft()
+            # A previous transaction may have reduced the cap for this run.
+            if len(batch) > write_size:
+                chunks = [batch[start:start + write_size] for start in range(0, len(batch), write_size)]
+                pending.extendleft(reversed(chunks))
+                continue
+            try:
+                outcome = save_classifications(batch)
+            except ClassificationSaveError as error:
+                if error.code not in SPLIT_ERROR_CODES or len(batch) == 1:
+                    print(f"Classification stopped after {processed} acknowledged records; cursor {cursor}", flush=True)
+                    raise
+                middle = len(batch) // 2
+                left, right = batch[:middle], batch[middle:]
+                write_size = min(write_size, len(right))
+                pending.extendleft((right, left))
+                print(f"Classification transaction {error.code}: retrying {len(batch)} records in smaller batches; "
+                      f"cursor {cursor}", flush=True)
+                continue
+            except RuntimeError:
+                print(f"Classification stopped after {processed} acknowledged records; cursor {cursor}", flush=True)
+                raise
+            # Advance only after each sub-batch is acknowledged. Source changes
+            # and untouched rows remain pending for the next run.
+            cursor = batch[-1]["id"]
+            processed += len(batch)
+            updated += outcome["updated"]
+            stale += outcome["stale"]
+            type_counts.update(result["study_type"] for result in batch)
+            print(f"Classification batch: {outcome['updated']} saved, {outcome['stale']} source changes deferred; "
+                  f"{processed} processed, cursor {cursor}", flush=True)
+        if budget_reached:
+            break
     return {"processed": processed, "updated": updated, "stale": stale, "cursor": cursor,
             "complete": complete, "types": dict(type_counts)}
 
