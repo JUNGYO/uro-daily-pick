@@ -1,4 +1,5 @@
 """Regressions for the observed production gateway/empty-response failures."""
+import json
 import sys
 import unittest
 from pathlib import Path
@@ -63,6 +64,54 @@ class ReadRecoveryTests(unittest.TestCase):
                 message = str(caught.exception)
                 self.assertIn(f"({category})", message)
                 self.assertNotIn("private", message)
+
+    @patch("common.time.sleep")
+    def test_final_transient_error_reports_only_valid_database_code(self, sleep):
+        for code in ("57014", "40P01", "XX000", "PGRST003"):
+            with self.subTest(code=code):
+                sleep.reset_mock()
+                body = json.dumps({"code": code, "message": "private message",
+                                   "details": "private SQL", "hint": "private hint"}).encode()
+                with patch("common.requests.get", return_value=response(500, body)) as get:
+                    with self.assertRaises(requests.RequestException) as caught:
+                        get_json("https://example.test/private-url", headers={"apikey": "private-key"})
+                self.assertEqual(str(caught.exception),
+                                 f"Database read failed after 4 attempts (http HTTP 500 code {code})")
+                self.assertEqual(get.call_count, 4)
+                self.assertEqual([call.args[0] for call in sleep.call_args_list], [2, 4, 8])
+
+    @patch("common.time.sleep")
+    def test_malformed_database_codes_cannot_expose_response_details(self, sleep):
+        codes = ("57014\n", "57014 private-key", "pgrst003", "PGRST03", "PGRST0034",
+                 "private-url", 57014, ["57014"], {"secret": "private-key"}, None)
+        for code in codes:
+            with self.subTest(code=code):
+                body = json.dumps({"code": code, "message": "private response"}).encode()
+                with patch("common.requests.get", return_value=response(500, body)):
+                    with self.assertRaises(requests.RequestException) as caught:
+                        get_json("https://example.test/private-url", headers={"apikey": "private-key"}, attempts=1)
+                self.assertEqual(str(caught.exception), "Database read failed after 1 attempts (http HTTP 500)")
+        sleep.assert_not_called()
+
+    @patch("common.time.sleep")
+    def test_non_object_and_non_json_error_bodies_keep_http_category(self, sleep):
+        for body in (b"", b"<html>private gateway failure</html>", b'["57014", "private-key"]',
+                     b'"private message"', b'null', b'{"message":"private response"}'):
+            with self.subTest(body=body):
+                with patch("common.requests.get", return_value=response(503, body)):
+                    with self.assertRaises(requests.RequestException) as caught:
+                        get_json("https://example.test/private-url", headers={"apikey": "private-key"}, attempts=1)
+                self.assertEqual(str(caught.exception), "Database read failed after 1 attempts (http HTTP 503)")
+        sleep.assert_not_called()
+
+    @patch("common.time.sleep")
+    def test_final_failure_does_not_reuse_prior_database_code(self, sleep):
+        with patch("common.requests.get", side_effect=[response(500, b'{"code":"57014"}'),
+                                                       requests.Timeout("private message")]):
+            with self.assertRaises(requests.RequestException) as caught:
+                get_json("https://example.test/private-url", headers={"apikey": "private-key"}, attempts=2)
+        self.assertEqual(str(caught.exception), "Database read failed after 2 attempts (timeout)")
+        sleep.assert_called_once_with(2)
 
 
 class WriteRecoveryTests(unittest.TestCase):

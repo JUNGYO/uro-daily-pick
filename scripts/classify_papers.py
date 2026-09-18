@@ -4,17 +4,16 @@ Uses PubMed MeSH terms + PublicationType + title/abstract patterns.
 No LLM needed — MeSH terms are curated by NLM experts.
 """
 import os
-import json
 import re
 import time
+from collections import Counter
 import requests
 from common import supabase_headers
-from common import get_json, paginate
-from xml.etree import ElementTree as ET
+from common import get_json, strings
 
 SUPABASE_URL = os.environ.get("SUPABASE_URL", "")
 SUPABASE_KEY = os.environ.get("SUPABASE_SERVICE_KEY", "")
-PUBMED_BASE = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils"
+PAGE_SIZE = 100
 
 # ── MeSH → study_type mapping ──
 MESH_STUDY_TYPE = {
@@ -183,92 +182,116 @@ def sb_get(path, params):
     return get_json(url, headers=headers, params=params)
 
 
-def sb_patch(paper_id, data):
-    url = f"{SUPABASE_URL}/rest/v1/papers?id=eq.{paper_id}"
-    headers = {
-        **supabase_headers(SUPABASE_KEY),
-        "Content-Type": "application/json", "Prefer": "return=minimal",
-    }
-    response = requests.patch(url, headers=headers, json=data, timeout=30)
-    response.raise_for_status()
-    return response
+def candidate_page(after_id, reclassify_all=False):
+    """Read only one bounded source snapshot; never enumerate the whole catalog."""
+    rows = sb_get("rpc/classification_candidates", {
+        "p_after_id": str(after_id), "p_limit": str(PAGE_SIZE),
+        "p_reclassify_all": str(reclassify_all).lower(),
+    })
+    if not isinstance(rows, list) or len(rows) > PAGE_SIZE:
+        raise ValueError("Invalid classification candidate page")
+    previous = after_id
+    for row in rows:
+        if (not isinstance(row, dict) or type(row.get("id")) is not int
+                or row["id"] <= previous
+                or not isinstance(row.get("classification_source_hash"), str)
+                or re.fullmatch(r"[0-9a-f]{64}", row["classification_source_hash"]) is None):
+            raise ValueError("Invalid classification snapshot or cursor")
+        previous = row["id"]
+    return rows
 
 
-def fetch_pubmed_metadata(pmids):
-    """Fetch MeSH + PublicationType from PubMed for given PMIDs."""
-    if not pmids:
-        return {}
-    r = requests.get(f"{PUBMED_BASE}/efetch.fcgi", params={
-        "db": "pubmed", "id": ",".join(pmids), "retmode": "xml", "email": os.environ.get("NCBI_EMAIL", ""),
-    }, timeout=30)
-    r.raise_for_status()
-    root = ET.fromstring(r.content)
+def save_classifications(results):
+    """Retry identical, source-bound assignments safely after an uncertain commit."""
+    url = f"{SUPABASE_URL}/rest/v1/rpc/apply_paper_classifications"
+    headers = {**supabase_headers(SUPABASE_KEY), "Content-Type": "application/json"}
+    payload = {"p_results": results}
+    for attempt in range(4):
+        response = None
+        category = "unknown"
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=(10, 45))
+            if response.status_code >= 400:
+                category = f"HTTP {response.status_code}"
+                if response.status_code not in (408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524):
+                    raise RuntimeError(f"Classification save rejected ({category})")
+            else:
+                outcome = response.json()
+                if (not isinstance(outcome, dict)
+                        or any(type(outcome.get(key)) is not int or outcome[key] < 0 for key in ("updated", "stale"))
+                        or outcome["updated"] + outcome["stale"] != len(results)):
+                    raise RuntimeError("Invalid classification save acknowledgement")
+                return outcome
+        except requests.Timeout:
+            category = "timeout"
+        except requests.ConnectionError:
+            category = "connection"
+        except ValueError:
+            category = "invalid_json"
+        finally:
+            if response is not None:
+                response.close()
+        if attempt == 3:
+            raise RuntimeError(f"Classification save failed after 4 attempts ({category})") from None
+        time.sleep(min(2 ** (attempt + 1), 8))
 
-    result = {}
-    for art in root.findall(".//PubmedArticle"):
-        pmid = (art.findtext(".//PMID") or "").strip()
-        mesh = [mh.findtext("DescriptorName", "") for mh in art.findall(".//MeshHeading")]
-        ptypes = [pt.text for pt in art.findall(".//PublicationType") if pt.text]
-        abstract = " ".join("".join(part.itertext()) for part in art.findall(".//Abstract/AbstractText"))
-        result[pmid] = {"mesh_terms": mesh, "pub_types": ptypes, "abstract": abstract}
-    return result
+
+def run_classification(*, max_seconds=600, after_id=0, reclassify_all=False):
+    deadline = time.monotonic() + max_seconds
+    cursor, processed, updated, stale = after_id, 0, 0, 0
+    type_counts = Counter()
+    complete = False
+    while time.monotonic() < deadline:
+        papers = candidate_page(cursor, reclassify_all)
+        if not papers:
+            complete = True
+            break
+        results = []
+        for paper in papers:
+            study_type, _ = classify(strings(paper.get("mesh_terms")), strings(paper.get("pub_types")),
+                                     paper.get("title"), paper.get("abstract"))
+            results.append({"id": paper["id"], "source_hash": paper["classification_source_hash"],
+                            "study_type": study_type})
+        outcome = save_classifications(results)
+        # Advance only after the complete batch was acknowledged. Source changes
+        # remain pending and are picked up from the beginning of the next run.
+        cursor = papers[-1]["id"]
+        processed += len(results)
+        updated += outcome["updated"]
+        stale += outcome["stale"]
+        type_counts.update(result["study_type"] for result in results)
+        print(f"Classification batch: {outcome['updated']} saved, {outcome['stale']} source changes deferred; "
+              f"{processed} processed, cursor {cursor}", flush=True)
+    return {"processed": processed, "updated": updated, "stale": stale, "cursor": cursor,
+            "complete": complete, "types": dict(type_counts)}
 
 
 def main():
     if not SUPABASE_URL or not SUPABASE_KEY:
         raise SystemExit("ERROR: SUPABASE_URL and SUPABASE_SERVICE_KEY required")
 
-    # Get all papers
-    papers = paginate(sb_get, "papers", {
-        "select": "id,pmid,title,mesh_terms,study_type",
-        "order": "id",
-        **({} if os.environ.get("RECLASSIFY_ALL") == "true" else {"or": "(study_type.is.null,study_type.eq.other)"}),
-        "limit": "1000",
-    }, size=100)
-
-    # Filter unclassified; operators may explicitly backfill historical classifications.
-    to_classify = [p for p in papers if os.environ.get("RECLASSIFY_ALL") == "true" or not p.get("study_type") or p["study_type"] == "other"]
-    print(f"=== Classifying {len(to_classify)} / {len(papers)} papers ===")
-
-    if not to_classify:
-        print("All papers already classified.")
-        return
-
-    # Fetch fresh MeSH from PubMed (in batches of 50)
-    from collections import Counter
-    type_counts = Counter()
-
-    for i in range(0, len(to_classify), 50):
-        batch = to_classify[i:i+50]
-        pmids = [p["pmid"] for p in batch]
-
-        print(f"\n  Fetching PubMed metadata for batch {i//50 + 1}...")
-        meta = fetch_pubmed_metadata(pmids)
-        time.sleep(0.5)
-
-        for paper in batch:
-            pmid = paper["pmid"]
-            if pmid not in meta:
-                raise ValueError(f"Missing PubMed metadata for PMID {pmid}")
-            pm = meta[pmid]
-            mesh = pm.get("mesh_terms") or paper.get("mesh_terms") or []
-            ptypes = pm.get("pub_types", [])
-
-            study_type, tags = classify(mesh, ptypes, paper.get("title"), pm.get("abstract"))
-
-            sb_patch(paper["id"], {
-                "study_type": study_type,
-                "pub_types": ptypes,
-                "mesh_terms": mesh,
-            })
-
-            type_counts[study_type] += 1
-            print(f"    {pmid} -> {study_type:20s} | {tags}")
-
-    print(f"\n=== Summary ===")
-    for st, c in type_counts.most_common():
-        print(f"  {c:3d}x {st}")
-    print("Done.")
+    try:
+        max_seconds = int(os.environ.get("CLASSIFICATION_MAX_SECONDS", "600"))
+        after_id = int(os.environ.get("CLASSIFICATION_AFTER_ID", "0"))
+        if not 1 <= max_seconds <= 3600 or not 0 <= after_id <= 9223372036854775807:
+            raise ValueError
+    except ValueError:
+        raise SystemExit("Invalid classification time budget or resume cursor") from None
+    reclassify_all = os.environ.get("RECLASSIFY_ALL") == "true"
+    if after_id and not reclassify_all:
+        raise SystemExit("CLASSIFICATION_AFTER_ID is only for an explicit RECLASSIFY_ALL pass")
+    print("=== Classifying stored citation metadata in resumable batches ===", flush=True)
+    result = run_classification(max_seconds=max_seconds, after_id=after_id, reclassify_all=reclassify_all)
+    status = ("eligible pass complete." if result["complete"] else
+              "time budget reached; resume this explicit pass at the saved cursor." if reclassify_all else
+              "time budget reached; unfinished records remain pending.")
+    message = f"Classification: {result['updated']} saved, {result['stale']} source changes deferred; {status}"
+    print(message, flush=True)
+    if reclassify_all and not result["complete"]:
+        print(f"Resume this explicit pass with RECLASSIFY_ALL=true CLASSIFICATION_AFTER_ID={result['cursor']}", flush=True)
+    if os.environ.get("GITHUB_STEP_SUMMARY"):
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as output:
+            output.write(message + "\n")
 
 
 if __name__ == "__main__":

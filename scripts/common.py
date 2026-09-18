@@ -1,5 +1,6 @@
 """Small, shared data contracts used by batch jobs (no side effects on import)."""
 import json
+import re
 import time
 
 import requests
@@ -17,7 +18,7 @@ def get_json(url, *, headers, params=None, attempts=4):
     """Retry transient read failures without logging credentials or response bodies."""
     for attempt in range(attempts):
         response = None
-        category, status = "unknown", None
+        category, status, code = "unknown", None, None
         try:
             response = requests.get(url, headers={**headers, "Connection": "close"},
                                     params=params, timeout=(10, 45))
@@ -27,6 +28,13 @@ def get_json(url, *, headers, params=None, attempts=4):
             if response is None or response.status_code not in (408, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524):
                 raise
             category, status = "http", response.status_code
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = None
+            candidate = payload.get("code") if isinstance(payload, dict) else None
+            if isinstance(candidate, str) and re.fullmatch(r"[0-9A-Z]{5}|PGRST[0-9]{3}", candidate):
+                code = candidate
         except requests.Timeout:
             category = "timeout"
         except requests.ConnectionError:
@@ -38,6 +46,8 @@ def get_json(url, *, headers, params=None, attempts=4):
                 response.close()
         if attempt + 1 == attempts:
             detail = category + (f" HTTP {status}" if status is not None else "")
+            if code is not None:
+                detail += f" code {code}"
             raise requests.RequestException(f"Database read failed after {attempts} attempts ({detail})") from None
         time.sleep(min(2 ** (attempt + 1), 8))
 
