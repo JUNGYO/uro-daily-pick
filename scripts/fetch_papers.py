@@ -119,9 +119,9 @@ def fetch_details(pmids):
     return papers
 
 
-def classify_study_type(title, abstract, pub_types):
+def classify_study_type(title, abstract, pub_types, mesh_terms=None):
     """Use the same conservative classifier during ingestion and backfill."""
-    return classify([], pub_types, title, abstract)[0]
+    return classify(mesh_terms, pub_types, title, abstract)[0]
 
 
 def parse_article(article):
@@ -184,7 +184,7 @@ def parse_article(article):
         paper_type = "editorial"
 
     # Study type classification
-    study_type = classify_study_type(title_lower, abstract.lower(), pub_types_lower)
+    study_type = classify_study_type(title_lower, abstract.lower(), pub_types_lower, mesh_terms)
 
     notices=[]
     for node in article.findall('.//CommentsCorrections'):

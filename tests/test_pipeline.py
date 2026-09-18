@@ -30,7 +30,6 @@ class PipelineTests(unittest.TestCase):
     def test_database_failures_are_not_treated_as_data_or_success(self):
         calls = [
             (classify.sb_get, ("papers", {}), "get"),
-            (classify.sb_patch, (1, {}), "patch"),
             (summary.sb_get, ("papers", {}), "get"),
             (summary.sb_patch, (1, {}), "patch"),
             (digest.sb_get, ("profiles", {}), "get"),

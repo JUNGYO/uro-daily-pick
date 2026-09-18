@@ -36,7 +36,7 @@
 2. **Migration:** 기존 `001`–`005` 이후 `006_rpc_authorization.sql`, `007_digest_preferences.sql`, `008_service_contracts.sql`, `009_fulltext_storage.sql`을 순서대로 한 번 적용합니다. JSON 정규화·인덱스 생성이 있어 배치와 겹치지 않는 시간에 반영합니다.
 3. **인증:** Supabase 이메일 확인·이메일 변경 확인을 활성화합니다. 앱 루트, `reset-password`, `settings` URL을 redirect 허용 목록에 등록하고 운영 SMTP·가입 rate limit을 점검합니다.
 4. **환경변수:** 아래 설정을 등록합니다. `FROM_EMAIL`은 Resend에서 검증된 발신 도메인의 주소가 필수입니다.
-5. **Staging 실행:** 메일을 제외한 수집·분류·요약·추천을 먼저 실행합니다. 과거 오분류는 `RECLASSIFY_ALL=true`로 분류 작업을 한 번 실행해 재계산할 수 있습니다. PubMed 요청과 DB 수정이 발생합니다.
+5. **Staging 실행:** 메일을 제외한 수집·분류·요약·추천을 먼저 실행합니다. 분류는 저장된 서지정보를 사용하며 완료 상태를 배치별로 기록합니다. `RECLASSIFY_ALL=true`는 2000년 이후 문헌의 명시적 전체 분류 점검에 사용합니다. 시간 예산과 재개 방법은 [분류 운영 문서](incremental-classification.md)를 따릅니다. DB 수정이 발생합니다.
 6. **실제 계정 확인:** 가입 확인 → 온보딩 → 추천·피드백 → 컬렉션 → 비밀번호·이메일 확인 → 테스트 계정 삭제. 운영자가 관리하는 수신 계정으로 메일과 재실행 중복 방지를 확인합니다.
 7. **배포:** DB 계약을 먼저 반영한 후 프론트엔드·workflow를 배포합니다. CI 실패 시 Pages 배포를 중단합니다. `python scripts/check_service.py`로 API 계약과 최근 수집 시각을 읽기 전용으로 확인합니다.
 
