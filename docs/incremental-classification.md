@@ -9,7 +9,8 @@ preflight checks both new RPCs. The RPCs are restricted to `service_role`; exist
 reader permissions are unchanged.
 
 The classifier reads up to 100 pending citations in ascending ID order, classifies
-and saves that batch, then reads the next batch. An indexed completion version is
+them and saves at most 25 per transaction. It records progress after each saved
+chunk, then reads the next page. An indexed completion version is
 independent of the result: `other` is a valid completed classification. The normal
 scope remains publications from 2000 onward. Existing records receive one initial
 classification pass; migration itself does not rewrite their classification.
@@ -26,6 +27,13 @@ The default processing budget is 600 seconds, configurable with
 scope. Saved batches remain complete and unfinished work is selected on the next
 normal run. Transport failures still fail the job; they are not reported as normal
 budget exhaustion.
+
+Confirmed statement timeouts (`57014`) and deadlocks (`40P01`) cause the failed
+write chunk to be divided after a bounded retry. The reduced chunk size remains
+in effect for the rest of that run. Each request retains its original source
+fingerprints, so an uncertain committed result can be replayed safely. A failed
+single-record write still fails the job; no unacknowledged work is counted as
+complete. The time budget is checked before each chunk, including split chunks.
 
 `RECLASSIFY_ALL=true` explicitly walks all date-eligible citations, including
 completed records. If its time budget is reached, the log prints the last saved
