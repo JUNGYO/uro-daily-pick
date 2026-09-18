@@ -28,9 +28,12 @@ function CompletionBar({ label, value, total }) {
 }
 
 export default function CollectionOverview({ catalog }) {
-  const metadata = catalog.automatic_papers;
-  const originals = catalog.originals_acquired;
-  const summaries = catalog.summaries_ready;
+  const countsInitializing = catalog.counts_available === false;
+  const serviceCount = (key) => (countsInitializing ? null : catalog[key]);
+  const metadata = serviceCount("automatic_papers");
+  const originals = serviceCount("originals_acquired");
+  const summaries = serviceCount("summaries_ready");
+  const countsUpdatedAt = Date.parse(catalog.counts_updated_at);
   const storage = catalog.storage;
   const used = storage?.database_bytes;
   const budget = storage?.budget_bytes;
@@ -127,6 +130,19 @@ export default function CollectionOverview({ catalog }) {
         </section>
       )}
       {localAvailable && <h3 className="text-sm font-medium text-text1 mb-3">서비스 반영 현황</h3>}
+      {countsInitializing && (
+        <p role="status" className="text-sm text-text2 mb-3">
+          서비스 반영 수치를 집계 중입니다. 집계가 끝나면 자동으로 표시됩니다.
+        </p>
+      )}
+      {!countsInitializing && Number.isFinite(countsUpdatedAt) && (
+        <p className="text-xs text-text2 mb-3">
+          서비스 집계 시각:{" "}
+          <time dateTime={new Date(countsUpdatedAt).toISOString()}>
+            {new Date(countsUpdatedAt).toLocaleString("ko-KR")}
+          </time>
+        </p>
+      )}
       <ol aria-label="문헌 처리 단계" className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {stages.map((stage, index) => (
           <li key={stage.label} className="rounded-xl border border-border p-4 min-w-0">
@@ -201,11 +217,11 @@ export default function CollectionOverview({ catalog }) {
         <summary className="cursor-pointer min-h-10 flex items-center">기존 문헌 정보 보관 현황</summary>
         <dl className="grid grid-cols-2 gap-2 pb-2">
           <dt>등록된 서지 정보 합계</dt>
-          <dd className="text-right">{count(catalog.catalog_papers)}편</dd>
+          <dd className="text-right">{count(serviceCount("catalog_papers"))}편</dd>
           <dt>2000년 이전 · 자동 처리 제외</dt>
-          <dd className="text-right">{count(catalog.archived_papers)}편</dd>
+          <dd className="text-right">{count(serviceCount("archived_papers"))}편</dd>
           <dt>발행일 미확인 · 자동 처리 제외</dt>
-          <dd className="text-right">{count(catalog.undated_papers)}편</dd>
+          <dd className="text-right">{count(serviceCount("undated_papers"))}편</dd>
         </dl>
       </details>
     </div>

@@ -18,6 +18,64 @@ const localReport = (overrides = {}) => ({
   ...overrides,
 });
 
+it("keeps local progress visible and service counts unknown during initial aggregation", () => {
+  render(
+    <CollectionOverview
+      catalog={{
+        counts_available: false,
+        counts_updated_at: null,
+        automatic_papers: 0,
+        originals_acquired: 0,
+        summaries_ready: 0,
+        catalog_papers: 0,
+        archived_papers: 0,
+        undated_papers: 0,
+        local_catalog: localReport(),
+      }}
+    />,
+  );
+  expect(screen.getByRole("status")).toHaveTextContent("서비스 반영 수치를 집계 중입니다");
+  const local = screen.getByRole("region", { name: "수집 및 동기화" });
+  expect(within(local).getByText("로컬 수집 완료").parentElement).toHaveTextContent("200편");
+  const stages = within(screen.getByRole("list", { name: "문헌 처리 단계" })).getAllByRole("listitem");
+  expect(stages).toHaveLength(3);
+  for (const stage of stages) {
+    expect(stage).toHaveTextContent("—편");
+    expect(stage).not.toHaveTextContent("0편");
+  }
+  expect(screen.getByText("등록된 서지 정보 합계").nextElementSibling).toHaveTextContent("—편");
+  expect(screen.queryByRole("meter")).not.toBeInTheDocument();
+  expect(screen.queryByText(/서비스 집계 시각/)).not.toBeInTheDocument();
+});
+
+it("reveals completed service measurements with their own timestamp", () => {
+  const local_catalog = localReport();
+  const view = render(<CollectionOverview catalog={{ counts_available: false, local_catalog }} />);
+  const updated = "2026-09-18T01:00:00.000Z";
+  view.rerender(
+    <CollectionOverview
+      catalog={{
+        counts_available: true,
+        counts_updated_at: updated,
+        automatic_papers: 100,
+        originals_acquired: 9,
+        summaries_ready: 4,
+        local_catalog,
+      }}
+    />,
+  );
+  expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  expect(screen.getByText(/서비스 집계 시각/).querySelector("time")).toHaveAttribute("datetime", updated);
+  expect(screen.getByRole("meter", { name: "등록 문헌 중 원문 확보율" })).toHaveAttribute(
+    "aria-valuenow",
+    "9",
+  );
+  expect(screen.getByText("로컬 수집 완료").parentElement).toHaveTextContent("200편");
+  view.rerender(<CollectionOverview catalog={{ counts_available: true, counts_updated_at: "invalid" }} />);
+  expect(screen.queryByText(/서비스 집계 시각/)).not.toBeInTheDocument();
+  expect(document.body).not.toHaveTextContent("Invalid Date");
+});
+
 it("distinguishes durable local collection and pending publication from actual service counts", () => {
   render(
     <CollectionOverview

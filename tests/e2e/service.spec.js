@@ -273,7 +273,7 @@ test("admin remains usable when catalog fails and retries that section", async (
     page.getByRole("heading", { name: "Admin Dashboard" }),
   ).toBeVisible();
   const catalog = page.getByRole("region", { name: "문헌 처리 현황" });
-  await expect(catalog.getByRole("alert")).toBeVisible();
+  await expect(catalog.getByRole("alert")).toContainText("서버 집계 시간이 초과되었습니다");
   await expect(
     page.getByRole("region", { name: "자동 처리 상태" }),
   ).toBeVisible();
@@ -282,6 +282,26 @@ test("admin remains usable when catalog fails and retries that section", async (
   await expect(catalog.getByRole("alert")).toHaveCount(0);
   await expect(catalog).toContainText("문헌 정보 등록");
   await expect(catalog).toContainText("본문 요약 완료");
+});
+
+test("mobile admin preserves local progress while service counts are initializing", async ({ page }, testInfo) => {
+  await page.setViewportSize({ width: 320, height: 844 });
+  await page.goto("admin?scenario=admin-counts-initializing");
+  const panel = page.getByRole("region", { name: "문헌 처리 현황", exact: true });
+  await expect(panel.getByRole("status")).toContainText("서비스 반영 수치를 집계 중입니다");
+  const local = panel.getByRole("region", { name: "수집 및 동기화", exact: true });
+  await expect(local.getByText("로컬 수집 완료", { exact: true }).locator("..")).toContainText("200편");
+  const stages = panel.getByRole("list", { name: "문헌 처리 단계", exact: true }).getByRole("listitem");
+  await expect(stages).toHaveCount(3);
+  for (let i = 0; i < 3; i++) {
+    await expect(stages.nth(i)).toContainText("—편");
+    await expect(stages.nth(i)).not.toContainText("0편");
+  }
+  await expect(panel.getByRole("meter", { name: "등록 문헌 중 원문 확보율" })).toHaveCount(0);
+  await expect(panel.getByText(/서비스 집계 시각/)).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "자동 처리 상태" })).toContainText("다음 실행 대기");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.screenshot({ path: testInfo.outputPath("admin-counts-initializing-320.png"), fullPage: true });
 });
 
 test("mobile admin distinguishes metadata, originals and summaries with accurate progress", async ({

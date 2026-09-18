@@ -72,6 +72,7 @@ try {
  LANGUAGE plpgsql SECURITY DEFINER SET search_path='' AS $$ BEGIN RAISE EXCEPTION 'aggregate sentinel'; END $$;
  SET ROLE service_role;`);
  assert.equal((await health()).local_papers,100,'Heartbeat does not execute catalog aggregates');
- await assert.rejects(db.query('SELECT public.catalog_backfill_status()'),/aggregate sentinel/);
+ assert.equal((await scalar('SELECT public.catalog_backfill_status() r')).local_catalog.local_papers,100,
+  'Administrative status also avoids the obsolete wide aggregate after metrics migration');
  console.log('Catalog sync health: lightweight report access, report/cycle freshness, enabled-worker selection and service/admin boundaries passed.');
 } finally {await db.close();}

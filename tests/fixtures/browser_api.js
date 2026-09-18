@@ -955,12 +955,9 @@ export const supabase = {
         db.profiles = [];
         return {};
       }
-      if (name === "admin_fulltext_status")
+      if (name === "admin_worker_status")
         return {
           data: {
-            ready_bodies: 5,
-            local_bodies: 5,
-            ready_summaries: 5,
             workers: [
               {
                 name: "Z8",
@@ -980,6 +977,8 @@ export const supabase = {
       if (name === "admin_catalog_status")
         return {
           data: {
+            counts_available: scenario !== "admin-counts-initializing",
+            counts_updated_at: scenario === "admin-counts-initializing" ? null : "2026-09-18T01:00:00.000Z",
             catalog_papers: 5,
             automatic_papers: 4,
             originals_acquired: 3,
@@ -992,7 +991,7 @@ export const supabase = {
             newest_publication: "2026-09-14",
             metadata_examined: 5,
             metadata_unavailable: 0,
-            ...(scenario === "admin-local-catalog" ? {
+            ...(["admin-local-catalog", "admin-counts-initializing"].includes(scenario) ? {
               local_catalog: {
                 available: true,
                 stale: false,
@@ -1008,6 +1007,14 @@ export const supabase = {
                 sync_state: "capacity_blocked",
                 last_sync_at: new Date().toISOString(),
               },
+            } : {}),
+            ...(scenario === "admin-counts-initializing" ? {
+              catalog_papers: null,
+              automatic_papers: null,
+              originals_acquired: null,
+              summaries_ready: null,
+              undated_papers: null,
+              archived_papers: null,
             } : {}),
             storage: {
               database_bytes: 450 * 1048576,
