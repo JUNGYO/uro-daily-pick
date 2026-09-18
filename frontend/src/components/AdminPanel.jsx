@@ -1,6 +1,19 @@
 import { useEffect, useState } from "react";
 import { supabase } from "../lib/supabase";
 
+function errorMessage(error) {
+  switch (error?.code) {
+    case "42501":
+      return "관리자 권한을 확인할 수 없습니다. 로그인 상태를 확인해 주세요.";
+    case "57014":
+      return "서버 집계 시간이 초과되었습니다. 잠시 후 다시 시도해 주세요.";
+    case "PGRST003":
+      return "서버가 혼잡하여 조회가 지연되고 있습니다. 잠시 후 다시 시도해 주세요.";
+    default:
+      return "이 항목을 불러오지 못했습니다. 다시 시도해 주세요.";
+  }
+}
+
 export default function AdminPanel({ title, rpc, params, refresh, children, list = false, pollMs = 0 }) {
   const [state, setState] = useState({ data: null, loading: true, error: "", updated: null });
   const [retry, setRetry] = useState(0);
@@ -56,10 +69,7 @@ export default function AdminPanel({ title, rpc, params, refresh, children, list
         finish((old) => ({
           ...old,
           loading: false,
-          error:
-            error?.code === "42501"
-              ? "관리자 권한을 확인할 수 없습니다. 로그인 상태를 확인해 주세요."
-              : "이 항목을 불러오지 못했습니다. 다시 시도해 주세요.",
+          error: errorMessage(error),
         }));
       }
     };
@@ -101,7 +111,8 @@ export default function AdminPanel({ title, rpc, params, refresh, children, list
       {state.data !== null && children(state.data)}
       {state.updated && (
         <p className="text-xs text-text3 mt-3">
-          {state.error || state.loading ? "이전 조회 결과" : "최근 조회"}: {state.updated.toLocaleString()}
+          {state.error || state.loading ? "이전 조회 결과" : "최근 응답 확인"}:{" "}
+          {state.updated.toLocaleString()}
         </p>
       )}
     </section>

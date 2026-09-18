@@ -66,8 +66,8 @@ export default function Admin() {
         </AdminPanel>
         <IssueReview />
         <IntegrityReview />
-        <AdminPanel title="자동 처리 상태" rpc="admin_fulltext_status" refresh={retry} pollMs={30000}>
-          {(fulltexts) => <ProcessingHealth workers={fulltexts?.workers || []} />}
+        <AdminPanel title="자동 처리 상태" rpc="admin_worker_status" refresh={retry} pollMs={30000}>
+          {(status) => <ProcessingHealth workers={status?.workers || []} />}
         </AdminPanel>
 
         <AdminPanel title="서비스 이용 현황" rpc="admin_stats" refresh={retry}>
@@ -86,8 +86,8 @@ export default function Admin() {
                 <StatCard
                   icon={FileText}
                   label="등록 문헌 정보"
-                  value={stats?.total_papers || 0}
-                  sub={`+${stats?.papers_7d || 0} this week`}
+                  value={Number.isFinite(stats?.total_papers) ? stats.total_papers : "—"}
+                  sub={Number.isFinite(stats?.papers_7d) ? `+${stats.papers_7d} this week` : "집계 중"}
                   color="#187A36"
                 />
                 <StatCard

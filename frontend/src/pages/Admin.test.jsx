@@ -21,6 +21,8 @@ function response(name) {
         ? { total_papers: 138225, total_users: 9 }
         : name === "admin_catalog_status"
           ? {
+              counts_available: true,
+              counts_updated_at: "2026-09-18T01:00:00.000Z",
               catalog_papers: 138225,
               automatic_papers: 90000,
               originals_acquired: 500,
@@ -29,8 +31,8 @@ function response(name) {
               qwen_summaries: 427,
               awaiting_qwen: 89573,
             }
-          : name === "admin_fulltext_status"
-            ? { local_bodies: 427, ready_summaries: 427, workers: [] }
+          : name === "admin_worker_status"
+            ? { workers: [] }
             : [],
   };
 }
@@ -137,7 +139,8 @@ it("polls only collection and worker status, preserving visible data during back
       .slice(callsBefore.length)
       .map(([name]) => name)
       .sort(),
-  ).toEqual(["admin_catalog_status", "admin_fulltext_status"]);
+  ).toEqual(["admin_catalog_status", "admin_worker_status"]);
+  expect(mock.rpc.mock.calls.some(([name]) => name === "admin_fulltext_status")).toBe(false);
   const catalog = within(screen.getByRole("region", { name: "문헌 처리 현황" }));
   expect(catalog.getByText("90,000")).toBeVisible();
   expect(catalog.queryByRole("status")).not.toBeInTheDocument();
@@ -152,15 +155,51 @@ it("polls only collection and worker status, preserving visible data during back
     vi.advanceTimersByTime(30000);
   });
   expect(catalog.getByText("90,001")).toBeVisible();
-  expect(catalog.getByRole("alert")).toBeVisible();
+  expect(catalog.getByRole("alert")).toHaveTextContent("서버 집계 시간이 초과되었습니다");
   expect(catalog.getByText(/이전 조회 결과/)).toBeVisible();
+  expect(catalog.getByText(/서비스 집계 시각/).querySelector("time")).toHaveAttribute(
+    "datetime",
+    "2026-09-18T01:00:00.000Z",
+  );
   for (const name of callsBefore.filter(
-    (name) => !["admin_catalog_status", "admin_fulltext_status"].includes(name),
+    (name) => !["admin_catalog_status", "admin_worker_status"].includes(name),
   )) {
     expect(mock.rpc.mock.calls.filter(([called]) => called === name)).toHaveLength(
       callsBefore.filter((called) => called === name).length,
     );
   }
+});
+
+it.each([
+  ["42501", "관리자 권한을 확인할 수 없습니다"],
+  ["57014", "서버 집계 시간이 초과되었습니다"],
+  ["PGRST003", "서버가 혼잡하여 조회가 지연되고 있습니다"],
+  ["XX000", "이 항목을 불러오지 못했습니다"],
+])("shows a safe, distinct message for %s without exposing server details", async (code, message) => {
+  mock.rpc.mockImplementation(() => query({ error: { code, message: "private SQL and credentials" } }));
+  render(
+    <AdminPanel title="Status" rpc="admin_worker_status">
+      {() => <p>Unexpected data</p>}
+    </AdminPanel>,
+  );
+  expect(await screen.findByRole("alert")).toHaveTextContent(message);
+  expect(document.body).not.toHaveTextContent(/private SQL|credentials|Unexpected data/);
+});
+
+it("shows unknown paper totals while their initial measurement is pending", async () => {
+  mock.rpc.mockImplementation((name) =>
+    query(
+      name === "admin_stats"
+        ? { data: { total_users: 9, total_papers: null, papers_7d: null } }
+        : response(name),
+    ),
+  );
+  render(<Admin />);
+  const stats = within(screen.getByRole("region", { name: "서비스 이용 현황" }));
+  const label = await stats.findByText("등록 문헌 정보");
+  expect(label.parentElement).toHaveTextContent("—");
+  expect(stats.getByText("집계 중")).toBeVisible();
+  expect(stats.queryByText("+0 this week")).not.toBeInTheDocument();
 });
 
 it("pauses status polling while hidden and refreshes immediately on returning", async () => {
