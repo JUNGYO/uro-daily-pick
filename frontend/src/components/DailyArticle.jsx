@@ -2,7 +2,7 @@ import { Link } from "react-router-dom";
 import { Tag, User2, BookOpen, FlaskConical, Clock, Star, TrendingUp, Zap } from "lucide-react";
 import { keywordPattern } from "../lib/keywords";
 import { paperLink } from "../lib/workspace";
-import { EvidenceLinks, IntegrityNotice, SummaryContent } from "./ReadingContent";
+import { EvidenceDisclosure, IntegrityNotice, SummaryContent } from "./ReadingContent";
 
 // Preserve the original reading screen's study-type and recommendation vocabulary.
 const TYPES = {
@@ -60,12 +60,13 @@ function Highlight({ text, terms }) {
 
 export default function DailyArticle({ rec, reason, canRead, returnTo, titleRef, studyOpen, setStudyOpen }) {
   const p = rec.paper;
-  const evidence = (claim) => <EvidenceLinks paper={p} claim={claim} canRead={canRead} returnTo={returnTo} />;
   const facts = FIELDS.map(([key, label]) => [
     key,
     label,
     p.research_details?.[key] || p.structured_data?.[key],
   ]).filter(([, , value]) => value && !["N/A", "Not reported", "확인 안됨"].includes(value));
+  const coreFacts = facts.filter(([key]) => FIELDS.slice(0, 4).some(([field]) => field === key));
+  const extraFacts = facts.filter(([key]) => FIELDS.slice(4).some(([field]) => field === key));
   const qa = (p.qa_data || []).filter(
     (item) => item && typeof item.q === "string" && typeof item.a === "string",
   );
@@ -124,24 +125,23 @@ export default function DailyArticle({ rec, reason, canRead, returnTo, titleRef,
         )}
       </div>
       <IntegrityNotice paper={p} />
-      <SummaryContent paper={p} evidence={evidence} abstract={false} facts={false} />
+      <SummaryContent paper={p} abstract={false} facts={false} />
       {(facts.length > 0 || qa.length > 0) && (
         <details
           className="today-study"
           open={studyOpen}
-          onToggle={(e) => setStudyOpen(e.currentTarget.open)}
+          onToggle={(e) => {
+            if (e.target === e.currentTarget) setStudyOpen(e.currentTarget.open);
+          }}
         >
           <summary>
             Details &amp; Q&amp;A <span>· 연구 상세</span>
           </summary>
           <dl className="today-facts">
-            {facts.map(([key, label, value]) => (
+            {coreFacts.map(([key, label, value]) => (
               <div key={key} className={key === "key_finding" ? "today-key-finding" : ""}>
                 <dt>{label}:</dt>
-                <dd>
-                  {value}
-                  {evidence(key)}
-                </dd>
+                <dd>{value}</dd>
               </div>
             ))}
           </dl>
@@ -149,11 +149,24 @@ export default function DailyArticle({ rec, reason, canRead, returnTo, titleRef,
             <section className="today-qa" key={i}>
               <h2>Q. {item.q}</h2>
               <p>{item.a}</p>
-              {evidence("qa_" + (i + 1))}
             </section>
           ))}
+          {extraFacts.length > 0 && (
+            <details className="today-extra-study" key={p.pmid}>
+              <summary>추가 연구 정보</summary>
+              <dl className="today-facts today-extra-facts">
+                {extraFacts.map(([key, label, value]) => (
+                  <div key={key}>
+                    <dt>{label}:</dt>
+                    <dd>{value}</dd>
+                  </div>
+                ))}
+              </dl>
+            </details>
+          )}
         </details>
       )}
+      <EvidenceDisclosure paper={p} canRead={canRead} returnTo={returnTo} />
       {p.abstract && (
         <section className="today-abstract" aria-label="초록">
           <h2>

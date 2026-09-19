@@ -66,6 +66,33 @@ const papers = Array.from({ length: 5 }, (_, i) => ({
     },
   ],
 }));
+if (scenario === "reading-evidence" || scenario === "reading-evidence-no-access") {
+  Object.assign(papers[0], {
+    structured_data: {
+      study_design: "Predictive biomarker analysis using discovery and validation cohorts from two randomized controlled trials (interface fixture)",
+      sample_size: "255 participants in the discovery cohort and 563 in the validation cohort",
+      population: "Patients with localized high-risk prostate cancer and no or minimal comorbidity",
+      key_finding: "A prespecified interaction was evaluated across the two study cohorts. This is simulated content for interface testing.",
+    },
+    research_details: {
+      intervention: "Radiotherapy combined with systemic treatment (interface fixture)",
+      comparator: "Standard treatment (interface fixture)",
+      follow_up: "Median follow-up of 10.36 years and 10.55 years",
+      outcome: "All-cause mortality",
+      limitations: "Limited representation across population groups; postrandomization analysis requires prospective validation.",
+    },
+    evidence: {
+      content_hash: "a".repeat(64),
+      claims: {
+        summary_1: ["p-0000001"], summary_2: ["p-0000002", "table-0000001"],
+        summary_3: ["p-0000003"], study_design: ["p-0000001", "p-0000004"],
+        sample_size: ["p-0000002"], population: ["p-0000004"],
+        key_finding: ["p-0000002", "figure-0000001"], limitations: ["p-0000003"],
+        qa_1: ["p-0000003"],
+      },
+    },
+  });
+}
 const db = {
   reader_states: [],
   saved_searches: [],
@@ -753,7 +780,7 @@ export const supabase = {
                 state: state(paper.id),
                 opinion: db.feedbacks.find((f) => f.paper_id === paper.id)
                   ?.action,
-                access: { can_read: scenario.startsWith("admin") },
+                access: { can_read: scenario.startsWith("admin") || scenario === "reading-evidence" },
                 issues: db.summary_issues.filter(
                   (i) => i.paper_id === paper.id,
                 ),
