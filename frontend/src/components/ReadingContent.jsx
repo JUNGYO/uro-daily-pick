@@ -69,23 +69,46 @@ export function EvidenceLinks({ paper, claim, canRead, returnTo }) {
   );
 }
 
-export function StudyFacts({ paper, fields = FIELDS, evidence = () => null }) {
+export function EvidenceDisclosure({ paper, canRead, returnTo, claims }) {
+  const available = (
+    claims || [
+      ...summaryLines(paper).map((_, i) => ["summary_" + (i + 1), "요약 " + (i + 1)]),
+      ...FIELDS,
+      ...(paper.qa_data || []).map((_, i) => ["qa_" + (i + 1), "Q&A " + (i + 1)]),
+    ]
+  ).filter(([claim]) => paper.evidence?.claims?.[claim]?.length);
+  if (!canRead || !available.length) return null;
+  return (
+    <details className="reading-evidence" key={paper.pmid}>
+      <summary>요약·연구 근거 보기</summary>
+      <dl>
+        {available.map(([claim, label]) => (
+          <div key={claim}>
+            <dt>{label}</dt>
+            <dd>
+              <EvidenceLinks paper={paper} claim={claim} canRead={canRead} returnTo={returnTo} />
+            </dd>
+          </div>
+        ))}
+      </dl>
+    </details>
+  );
+}
+
+export function StudyFacts({ paper, fields = FIELDS }) {
   return (
     <dl className="reader-facts">
       {fields.map(([key, label]) => (
         <div key={key}>
           <dt>{label}</dt>
-          <dd>
-            {paper.research_details?.[key] || paper.structured_data?.[key] || "확인 안됨"}
-            {evidence(key)}
-          </dd>
+          <dd>{paper.research_details?.[key] || paper.structured_data?.[key] || "확인 안됨"}</dd>
         </div>
       ))}
     </dl>
   );
 }
 
-export function SummaryContent({ paper: p, evidence = () => null, abstract = true, facts = true }) {
+export function SummaryContent({ paper: p, abstract = true, facts = true }) {
   return (
     <>
       {hasFulltextSummary(p) ? (
@@ -93,10 +116,7 @@ export function SummaryContent({ paper: p, evidence = () => null, abstract = tru
           <h2>본문 기반 세 줄 요약</h2>
           <ol>
             {summaryLines(p).map((line, i) => (
-              <li key={i}>
-                {line}
-                {evidence("summary_" + (i + 1))}
-              </li>
+              <li key={i}>{line}</li>
             ))}
           </ol>
           <p className="reader-muted">AI 요약 · {new Date(p.summarized_at).toLocaleDateString("ko-KR")}</p>
@@ -122,17 +142,16 @@ export function SummaryContent({ paper: p, evidence = () => null, abstract = tru
   );
 }
 
-export function StudyContent({ paper: p, evidence = () => null }) {
+export function StudyContent({ paper: p }) {
   return (
     <>
-      <StudyFacts paper={p} evidence={evidence} />
+      <StudyFacts paper={p} />
       <h2 className="mt-8">Q&A</h2>
       {p.qa_data?.length ? (
         p.qa_data.map((qa, i) => (
           <section className="reading-qa" key={i}>
             <h3>{qa.q}</h3>
             <p>{qa.a}</p>
-            {evidence("qa_" + (i + 1))}
           </section>
         ))
       ) : (

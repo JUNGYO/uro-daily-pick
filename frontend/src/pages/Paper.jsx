@@ -22,7 +22,7 @@ import {
   IntegrityNotice,
   SummaryContent,
   StudyContent,
-  EvidenceLinks,
+  EvidenceDisclosure,
 } from "../components/ReadingContent";
 export { FIELDS };
 export default function Paper() {
@@ -94,16 +94,6 @@ export default function Paper() {
   }
   const p = r.data?.paper ? normalizePaper(r.data.paper) : null;
   const s = r.data?.state || {};
-  function evidence(id) {
-    return (
-      <EvidenceLinks
-        paper={p}
-        claim={id}
-        canRead={r.data?.access?.can_read && !r.data?.offline}
-        returnTo={location.pathname + location.search}
-      />
-    );
-  }
   return (
     <ReaderPage title={p?.title || "논문 상세"}>
       <Link className="text-accent underline" to={safeReturn(location.state?.returnTo || "/discover")}>
@@ -200,8 +190,16 @@ export default function Paper() {
                 </button>
               ))}
             </div>
-            {tab === "summary" && <SummaryContent paper={p} evidence={evidence} />}
-            {tab === "study" && <StudyContent paper={p} evidence={evidence} />}
+            {tab === "summary" && <SummaryContent paper={p} />}
+            {tab === "study" && <StudyContent paper={p} />}
+            {["summary", "study"].includes(tab) && (
+              <EvidenceDisclosure
+                key={tab}
+                paper={p}
+                canRead={r.data?.access?.can_read && !r.data?.offline}
+                returnTo={location.pathname + location.search}
+              />
+            )}
             {tab === "original" && (
               <>
                 <h2>원문과 근거 확인</h2>
