@@ -1,4 +1,3 @@
-import { Link } from "react-router-dom";
 import { hasFulltextSummary, summaryLines } from "../lib/summary";
 
 export const FIELDS = [
@@ -47,51 +46,6 @@ export function IntegrityNotice({ paper: p }) {
         </div>
       )}
     </>
-  );
-}
-
-export function EvidenceLinks({ paper, claim, canRead, returnTo }) {
-  const refs = paper.evidence?.claims?.[claim];
-  if (!canRead || !refs?.length) return null;
-  return (
-    <span className="reading-evidence-links">
-      {refs.map((ref, i) => (
-        <Link
-          key={ref}
-          to={`/fulltext/${paper.pmid}?source=${encodeURIComponent(paper.evidence.content_hash)}#${encodeURIComponent(ref)}`}
-          state={{ returnTo }}
-        >
-          근거 {refs.length > 1 ? i + 1 : "확인"} ·{" "}
-          {ref.startsWith("figure-") ? "그림" : ref.startsWith("table-") ? "표" : "본문"}
-        </Link>
-      ))}
-    </span>
-  );
-}
-
-export function EvidenceDisclosure({ paper, canRead, returnTo, claims }) {
-  const available = (
-    claims || [
-      ...summaryLines(paper).map((_, i) => ["summary_" + (i + 1), "요약 " + (i + 1)]),
-      ...FIELDS,
-      ...(paper.qa_data || []).map((_, i) => ["qa_" + (i + 1), "Q&A " + (i + 1)]),
-    ]
-  ).filter(([claim]) => paper.evidence?.claims?.[claim]?.length);
-  if (!canRead || !available.length) return null;
-  return (
-    <details className="reading-evidence" key={paper.pmid}>
-      <summary>요약·연구 근거 보기</summary>
-      <dl>
-        {available.map(([claim, label]) => (
-          <div key={claim}>
-            <dt>{label}</dt>
-            <dd>
-              <EvidenceLinks paper={paper} claim={claim} canRead={canRead} returnTo={returnTo} />
-            </dd>
-          </div>
-        ))}
-      </dl>
-    </details>
   );
 }
 

@@ -17,13 +17,7 @@ import {
 } from "../lib/workspace";
 import { ReaderPage, Resource, useResource } from "../components/ReaderUI";
 import { useReading } from "../lib/useReading";
-import {
-  FIELDS,
-  IntegrityNotice,
-  SummaryContent,
-  StudyContent,
-  EvidenceDisclosure,
-} from "../components/ReadingContent";
+import { FIELDS, IntegrityNotice, SummaryContent, StudyContent } from "../components/ReadingContent";
 export { FIELDS };
 export default function Paper() {
   const { pmid } = useParams(),
@@ -192,14 +186,6 @@ export default function Paper() {
             </div>
             {tab === "summary" && <SummaryContent paper={p} />}
             {tab === "study" && <StudyContent paper={p} />}
-            {["summary", "study"].includes(tab) && (
-              <EvidenceDisclosure
-                key={tab}
-                paper={p}
-                canRead={r.data?.access?.can_read && !r.data?.offline}
-                returnTo={location.pathname + location.search}
-              />
-            )}
             {tab === "original" && (
               <>
                 <h2>원문과 근거 확인</h2>

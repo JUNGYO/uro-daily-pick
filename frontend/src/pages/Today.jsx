@@ -323,7 +323,6 @@ export default function Today() {
                         key={p.pmid}
                         rec={rec}
                         reason={selected.reason}
-                        canRead={data.access?.can_read}
                         returnTo={returnTo}
                         titleRef={titleRef}
                         studyOpen={studyOpen}
