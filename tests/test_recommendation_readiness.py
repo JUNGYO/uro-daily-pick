@@ -101,6 +101,36 @@ class RecommendationReadinessTests(unittest.TestCase):
         self.assertEqual(payload["p_date"], datetime.now(timezone(timedelta(hours=9))).date().isoformat())
         self.assertEqual({r["paper_id"] for r in payload["p_recs"]}, set(range(3, 7)))
 
+    def test_prior_recommendations_are_excluded_even_without_reading_or_personalization(self):
+        for personalized in (True, False):
+            with self.subTest(personalized=personalized), \
+                 patch.multiple(recs, SUPABASE_URL="https://example.test", SUPABASE_KEY="fixture"), \
+                 patch.object(recs, "get_catalog_papers", return_value=[ready_paper(n) for n in range(1, 8)]), \
+                 patch.object(recs, "get_all_profiles", return_value=[{"id": "reader", "keywords": ["prostate"], "personalization_enabled": personalized}]), \
+                 patch.object(recs, "get_all_feedbacks_likes", return_value=[]), \
+                 patch.object(recs, "get_user_feedbacks", return_value=[]), \
+                 patch.object(recs, "get_user_reads", return_value=[]), \
+                 patch.object(recs, "get_prior_recommendation_ids", return_value={1, 2, 3}) as history, \
+                 patch.object(recs, "sb", return_value=[]) as database, \
+                 contextlib.redirect_stdout(io.StringIO()):
+                recs.main()
+            writes = [call.args[2] for call in database.call_args_list if call.args[0] == "POST"]
+            self.assertEqual({r["paper_id"] for r in writes[0]["p_recs"]}, {4, 5, 6, 7})
+            history.assert_called_once_with("reader", writes[0]["p_date"])
+
+    def test_recommendation_history_is_paginated_and_strictly_before_the_requested_day(self):
+        with patch.object(recs, "sb", side_effect=[[{"paper_id": n} for n in range(500)], [{"paper_id": 900}]]) as get:
+            ids = recs.get_prior_recommendation_ids("reader", "2026-09-20")
+        self.assertEqual(len(ids), 501)
+        self.assertIn(900, ids)
+        for call in get.call_args_list:
+            self.assertEqual(call.kwargs["params"]["user_id"], "eq.reader")
+            self.assertEqual(call.kwargs["params"]["rec_date"], "lt.2026-09-20")
+        self.assertEqual(get.call_args.kwargs["params"]["offset"], "500")
+        with patch.object(recs, "sb", return_value=[{"paper_id": "unexpected"}]):
+            with self.assertRaises(ValueError):
+                recs.get_prior_recommendation_ids("reader", "2026-09-20")
+
 
 if __name__ == "__main__":
     unittest.main()

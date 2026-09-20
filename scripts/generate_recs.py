@@ -135,6 +135,17 @@ def get_user_reads(user_id):
     })
 
 
+def get_prior_recommendation_ids(user_id, day):
+    """A recommendation stays consumed even when the reader never opens it."""
+    rows = paginate(lambda path, params: sb("GET", path, params=params), "recommendations", {
+        "select": "paper_id", "user_id": f"eq.{user_id}", "rec_date": f"lt.{day}",
+        "order": "id.asc",
+    })
+    if any(not isinstance(row, dict) or type(row.get("paper_id")) is not int for row in rows):
+        raise ValueError("Invalid recommendation history")
+    return {row["paper_id"] for row in rows}
+
+
 def get_all_feedbacks_likes():
     """For collaborative filtering: all users' likes."""
     return paginate(lambda path, params: sb("GET", path, params), "feedbacks", {"select": "user_id,paper_id", "action": "eq.like", "order": "id"})
@@ -453,7 +464,7 @@ def main():
         reads = get_user_reads(uid)
 
         fb_map = {f["paper_id"]: f["action"] for f in feedbacks}
-        seen_ids = set(fb_map.keys())
+        seen_ids = set(fb_map.keys()) | get_prior_recommendation_ids(uid, today)
         if personalized:
             seen_ids.update(r["paper_id"] for r in reads)
 
@@ -496,7 +507,7 @@ def main():
         recs = [{"paper_id": p["id"], "score": score, "reasons": reasons} for p, score, reasons in top5]
         sb("POST", "rpc/replace_daily_recommendations", {"p_user_id": uid, "p_date": today, "p_recs": recs})
 
-        print(f"  Generated {len(top5)} recommendations")
+        print(f"  Submitted {len(top5)} recommendation candidates; valid same-day picks are preserved")
 
     print("Done.")
 

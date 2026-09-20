@@ -379,20 +379,6 @@
 .today-key-finding {
   width: 100%;
 }
-.today-extra-study {
-  margin-top: 12px;
-  border-top: 1px solid #d6dfe8;
-}
-.today-extra-study > summary {
-  cursor: pointer;
-  color: #536173;
-  font-size: 14px;
-  min-height: 44px;
-  align-content: center;
-}
-.today-extra-facts > div {
-  grid-template-columns: 100px minmax(0, 1fr);
-}
 .today-qa {
   background: #fffaf1;
   border: 1px solid #f3e5cd;
