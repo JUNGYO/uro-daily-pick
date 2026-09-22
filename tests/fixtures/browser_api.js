@@ -1050,6 +1050,19 @@ export const supabase = {
           },
           error: null,
         };
+      if (name === "admin_integrity_queue") {
+        const rows = scenario === "admin-integrity" ? Array.from({ length: 23 }, (_, i) => ({
+          id: 700 + i, pmid: String(700 + i), title: `Notice fixture ${i + 1}`,
+          integrity_status: i < 2 ? "retracted" : i < 4 ? "concern" : "corrected",
+          related_notices: [{ relation: i < 2 ? "RetractionIn" : i < 4 ? "ExpressionOfConcernIn" : "ErratumIn", pmid: String(900 + i) }],
+          summary_source_hash: i === 4 ? "a".repeat(64) : null,
+        })) : [];
+        const filtered = rows.filter(p => !args.p_status || args.p_status === "all" || p.integrity_status === args.p_status);
+        const page = Math.min(args.p_page || 0, Math.max(0, Math.ceil(filtered.length / 10) - 1));
+        return { data: { counts: { total: rows.length, retracted: rows.filter(p => p.integrity_status === "retracted").length,
+          concern: rows.filter(p => p.integrity_status === "concern").length, corrected: rows.filter(p => p.integrity_status === "corrected").length },
+          total: filtered.length, items: filtered.slice(page * 10, page * 10 + 10), page, page_size: 10 }, error: null };
+      }
       if (name === "admin_journal_fulltext_counts")
         return {data: {
           counts_available: scenario !== "admin-counts-initializing",

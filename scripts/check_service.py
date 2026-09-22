@@ -29,7 +29,7 @@ def main():
                     "/rpc/record_research_export", "/rpc/research_document_exports", "/rpc/research_graph",
                     "/rpc/sync_institution_catalog", "/rpc/report_institution_catalog", "/rpc/catalog_sync_health",
                     "/rpc/classification_candidates", "/rpc/apply_paper_classifications",
-                    "/rpc/admin_worker_status", "/rpc/bootstrap_admin_catalog_metrics", "/rpc/admin_journal_fulltext_counts"]
+                    "/rpc/admin_worker_status", "/rpc/bootstrap_admin_catalog_metrics", "/rpc/admin_journal_fulltext_counts", "/rpc/admin_integrity_queue"]
         missing = [path for path in required if path not in paths]
         if missing:
             raise SystemExit("Missing database contracts: " + ", ".join(missing))
