@@ -22,6 +22,11 @@ ORIGINAL = {"p_pmid": "123", "p_title": PAPER["title"], "p_doi": PAPER["doi"],
                  "characters": 5000, "section_count": 3, "source_url": "https://example.org/paper"}}
 
 
+def event_receipts(path, data=None, **kwargs):
+    assert path == 'rpc/sync_institution_events'
+    return [{**{k: e[k] for k in ('pmid', 'kind', 'version')}, 'status': 'accepted'} for e in data['p_events']]
+
+
 class CatalogSyncTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory()
@@ -67,13 +72,13 @@ class CatalogSyncTests(unittest.TestCase):
     def test_receipt_network_failure_is_replayable_after_reopen(self):
         self.catalog.upsert_papers([{**PAPER, "id": 7}], synced=True)
         self.catalog.enqueue("original", ORIGINAL)
-        self.service.rpc.side_effect = RuntimeError("Service temporarily unavailable")
+        self.service.request.side_effect = RuntimeError("Service temporarily unavailable")
         with self.assertRaises(RuntimeError):
             sync_events(self.directory.name, self.catalog, self.service, time.monotonic() + 30)
         self.catalog.close()
         self.catalog = LocalCatalog(self.directory.name)
         self.assertEqual(self.catalog.stats()["pending_originals"], 1)
-        self.service.rpc.side_effect = None
+        self.service.request.side_effect = event_receipts
         self.assertEqual(sync_events(self.directory.name, self.catalog, self.service, time.monotonic() + 30), 1)
         self.assertEqual(self.catalog.stats()["pending_originals"], 0)
 
@@ -83,6 +88,42 @@ class CatalogSyncTests(unittest.TestCase):
             import_cloud_page(self.catalog, self.service)
         self.assertEqual(self.catalog.stats()["local_papers"], 0)
         self.assertEqual(self.catalog.get_meta("cloud_import_cursor", 0), 0)
+
+    def test_batched_receipts_validate_entire_response_before_any_ack(self):
+        self.catalog.upsert_papers([{**PAPER, 'id': 7}], synced=True)
+        self.catalog.enqueue('original', ORIGINAL)
+        self.service.request.return_value = [{'pmid': '123', 'kind': 'original', 'version': 999, 'status': 'accepted'}]
+        with self.assertRaises(ValueError):
+            sync_events(self.directory.name, self.catalog, self.service, time.monotonic() + 10)
+        self.assertEqual(self.catalog.stats()['pending_originals'], 1)
+
+    def test_newer_event_survives_inflight_batch_ack(self):
+        self.catalog.upsert_papers([{**PAPER, 'id': 7}], synced=True)
+        self.catalog.enqueue('original', ORIGINAL)
+        def respond(path, data):
+            receipts = event_receipts(path, data)
+            self.catalog.enqueue('original', ORIGINAL)
+            return receipts
+        self.service.request.side_effect = respond
+        self.assertEqual(sync_events(self.directory.name, self.catalog, self.service, time.monotonic() + 10), 0)
+        self.assertEqual(self.catalog.stats()['pending_originals'], 1)
+
+    def test_available_backlog_drains_without_thirty_second_pauses(self):
+        self.catalog.upsert_papers([{**PAPER, 'pmid':str(n), 'id':n} for n in range(1, 131)], synced=True)
+        for n in range(1, 131):
+            self.catalog.enqueue('original', {**ORIGINAL, 'p_pmid':str(n)})
+        def respond(path, data=None, **kwargs):
+            if path == 'papers':
+                return []
+            if path == 'rpc/sync_institution_events':
+                self.assertLessEqual(len(data['p_events']), 10)
+                return event_receipts(path, data)
+            return None
+        self.service.request.side_effect = respond
+        self.run_bounded(1)
+        self.assertEqual(self.catalog.stats()['pending_originals'], 0)
+        self.assertEqual(sum(c.args[0]=='papers' for c in self.service.request.call_args_list), 1)
+        self.assertLessEqual(sum(c.args[0]=='rpc/report_institution_catalog' for c in self.service.request.call_args_list), 2)
 
     def test_old_remote_snapshot_cannot_replace_new_pending_citation(self):
         self.catalog.upsert_papers([{**PAPER, "title": "Updated local citation"}])
@@ -228,7 +269,9 @@ class CatalogSyncTests(unittest.TestCase):
         self.assertEqual(sync_citations(self.catalog, self.service)["accepted"], 1)
         self.assertEqual([row["pmid"] for row in self.service.request.call_args.args[1]["p_papers"]], ["123"])
         self.assertEqual(self.catalog.get_meta("capacity_retry_at"), retry_at)
+        self.service.request.side_effect = event_receipts
         self.assertEqual(sync_events(self.directory.name, self.catalog, self.service, time.monotonic() + 5), 1)
+        self.service.request.side_effect = None
         self.service.request.reset_mock()
         self.assertEqual(sync_citations(self.catalog, self.service), {"accepted": 0, "capacity_blocked": True})
         self.service.request.assert_not_called()
@@ -263,12 +306,14 @@ class CatalogSyncTests(unittest.TestCase):
             if path == "rpc/sync_institution_catalog":
                 return {"accepted": [{"pmid": p["pmid"], "id": 1000 + int(p["pmid"])}
                     for p in args[0]["p_papers"]], "capacity_blocked": False}
+            if path == "rpc/sync_institution_events":
+                return event_receipts(path, *args, **kwargs)
             return None
         self.service.request.side_effect = respond
         completed, _ = self.run_bounded(1)
         batches = [call.args[1]["p_papers"] for call in self.service.request.call_args_list
             if call.args[0] == "rpc/sync_institution_catalog"]
-        self.assertEqual(completed, 1)
+        self.assertGreaterEqual(completed, 2)
         self.assertEqual([len(batch) for batch in batches], [50, 50, 1])
         self.assertFalse(any(row["pmid"] == "999" for batch in batches for row in batch))
         self.assertEqual(self.catalog.stats()["synced_papers"], 101)

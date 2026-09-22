@@ -126,7 +126,7 @@ it("treats a null stats response as failure but a null list as empty", async () 
   expect(await screen.findByText("No likes yet")).toBeVisible();
 });
 
-it("polls only collection and worker status, preserving visible data during background refresh", async () => {
+it("polls collection, worker and journal counts, preserving visible data during background refresh", async () => {
   vi.useFakeTimers();
   render(<Admin />);
   await act(async () => {});
@@ -149,7 +149,7 @@ it("polls only collection and worker status, preserving visible data during back
       .slice(callsBefore.length)
       .map(([name]) => name)
       .sort(),
-  ).toEqual(["admin_catalog_status", "admin_worker_status"]);
+  ).toEqual(["admin_catalog_status", "admin_journal_fulltext_counts", "admin_worker_status"]);
   expect(mock.rpc.mock.calls.some(([name]) => name === "admin_fulltext_status")).toBe(false);
   const catalog = within(screen.getByRole("region", { name: "문헌 처리 현황" }));
   expect(catalog.getByText("90,000")).toBeVisible();
@@ -172,7 +172,7 @@ it("polls only collection and worker status, preserving visible data during back
     "2026-09-18T01:00:00.000Z",
   );
   for (const name of callsBefore.filter(
-    (name) => !["admin_catalog_status", "admin_worker_status"].includes(name),
+    (name) => !["admin_catalog_status", "admin_journal_fulltext_counts", "admin_worker_status"].includes(name),
   )) {
     expect(mock.rpc.mock.calls.filter(([called]) => called === name)).toHaveLength(
       callsBefore.filter((called) => called === name).length,

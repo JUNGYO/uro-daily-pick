@@ -185,6 +185,22 @@ class LocalCatalogTests(unittest.TestCase):
         self.catalog.upsert_papers([paper("2", "Correction")])
         self.assertEqual(self.catalog.pending_citations(1)[0]["paper"]["pmid"], "2")
 
+    def test_ready_publications_include_fresh_and_old_and_skip_blocked_dependencies(self):
+        self.catalog.upsert_papers([{**paper(str(n)), 'id':n} for n in range(1, 121)], synced=True)
+        for n in range(1, 121):
+            self.catalog.enqueue('original', original(str(n)))
+        self.catalog.upsert_papers([paper('121')])
+        self.catalog.enqueue('original', original('121'))
+        self.catalog.enqueue('summary', summary('60'))
+        selected = self.catalog.ready_outbox_batch(20)
+        originals = {e['pmid'] for e in selected if e['kind']=='original'}
+        self.assertTrue({'1','120','60'} <= originals)
+        self.assertNotIn('121', originals)
+        self.assertFalse(any(e['kind']=='summary' for e in selected))
+        self.catalog.defer_outbox('60','summary',1,time.time()+60,'original_pending')
+        self.catalog.ack_outbox('60','original',1)
+        self.assertTrue(any(e['pmid']=='60' and e['kind']=='summary' for e in self.catalog.ready_outbox_batch(20)))
+
     def test_wal_commit_before_checkpoint_crash_replays_without_loss_or_duplicates(self):
         store = LocalStore(self.catalog)
         job = {**backfill.job_for("A journal"), "pmids": ["1", "2"], "processed": 0}

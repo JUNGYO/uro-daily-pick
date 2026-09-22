@@ -178,7 +178,7 @@ export default function Admin() {
           </AdminPanel>
 
           {/* Journal distribution */}
-          <AdminPanel title="저널별 원문 확보" rpc="admin_journal_fulltext_counts" refresh={retry}>
+          <AdminPanel title="저널별 원문 확보" rpc="admin_journal_fulltext_counts" refresh={retry} pollMs={30000}>
             {({ counts_available, journals }) =>
               !counts_available ? (
                 <p role="status" className="text-sm text-text3">

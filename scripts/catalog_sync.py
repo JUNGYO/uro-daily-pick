@@ -23,7 +23,7 @@ def timestamp():
 
 
 def worker_rpc(service, name, **values):
-    if name not in {"sync_institution_catalog", "report_institution_catalog"}:
+    if name not in {"sync_institution_catalog", "report_institution_catalog", "sync_institution_events"}:
         raise ValueError("Unsupported catalog RPC")
     return service.request("rpc/" + name,
         {"p_worker_id": service.config["id"], "p_token": service.token, **values})
@@ -158,10 +158,40 @@ def reject_summary(directory, catalog, event):
         record_summary_attempt(db, event["pmid"], source_hash, "publication_rejected", time.time())
 
 
-def sync_events(directory, catalog, service, deadline, limit=50):
-    from summary_queue import SummaryPublicationRejected
+def publish_events(directory, catalog, service, events):
+    from local_catalog import _publication
+    for event in events:
+        _publication(event['kind'], event['payload'])
+    receipts = worker_rpc(service, 'sync_institution_events', p_events=events)
+    sent = {(e['pmid'], e['kind'], e['version']): e for e in events}
+    seen = set()
+    if not isinstance(receipts, list) or len(receipts) != len(events):
+        raise ValueError('Incomplete publication acknowledgement')
+    for receipt in receipts:
+        if (not isinstance(receipt, dict) or set(receipt) != {'pmid', 'kind', 'version', 'status'}
+                or type(receipt['version']) is not int or receipt['status'] not in {'accepted', 'rejected'}):
+            raise ValueError('Invalid publication acknowledgement')
+        identity = (receipt['pmid'], receipt['kind'], receipt['version'])
+        if identity not in sent or identity in seen:
+            raise ValueError('Publication acknowledgement does not match sent revision')
+        seen.add(identity)
     completed = 0
-    for event in catalog.outbox_batch(limit=limit):
+    for receipt in receipts:
+        event = sent[(receipt['pmid'], receipt['kind'], receipt['version'])]
+        if receipt['status'] == 'accepted':
+            completed += int(catalog.ack_outbox(event['pmid'], event['kind'], event['version']))
+        else:
+            if event['kind'] == 'summary':
+                reject_summary(directory, catalog, event)
+            catalog.defer_outbox(event['pmid'], event['kind'], event['version'],
+                time.time() + 3600, 'publication_rejected')
+    return completed
+
+
+def sync_events(directory, catalog, service, deadline, limit=50):
+    completed = 0
+    batch = []
+    for event in catalog.ready_outbox_batch(limit=limit):
         if time.monotonic() >= deadline:
             break
         if not catalog.citation_is_synced(event["pmid"]):
@@ -187,23 +217,12 @@ def sync_events(directory, catalog, service, deadline, limit=50):
             catalog.defer_outbox(event["pmid"], event["kind"], event["version"],
                 time.time() + 60, "original_pending")
             continue
-        name = "register_institution_original" if event["kind"] == "original" else "publish_institution_summary"
-        try:
-            service.rpc(name, **event["payload"])
-        except SummaryPublicationRejected:
-            reject_summary(directory, catalog, event)
-            catalog.defer_outbox(event["pmid"], event["kind"], event["version"],
-                time.time() + 86400, "publication_rejected")
-            continue
-        except (ValueError, RuntimeError) as error:
-            # Identity validation failures do not repeatedly block unrelated papers.
-            if isinstance(error, ValueError) or str(error) in {"Service HTTP 400", "Service HTTP 409", "Service HTTP 422"}:
-                catalog.defer_outbox(event["pmid"], event["kind"], event["version"],
-                    time.time() + 3600, "publication_rejected")
-                continue
-            raise
-        catalog.ack_outbox(event["pmid"], event["kind"], event["version"])
-        completed += 1
+        batch.append(event)
+        if len(batch) >= 10:
+            completed += publish_events(directory, catalog, service, batch)
+            batch = []
+    if batch and time.monotonic() < deadline:
+        completed += publish_events(directory, catalog, service, batch)
     return completed
 
 
@@ -243,6 +262,8 @@ def run_sync(directory, deadline, *, service=None, catalog=None, sleep=time.slee
     own_catalog = catalog is None
     catalog = catalog or LocalCatalog(directory)
     completed_cycles = 0
+    next_import = next_report = 0
+    reported_state = None
     try:
         while time.monotonic() < deadline:
             stage = "initialization"
@@ -254,19 +275,20 @@ def run_sync(directory, deadline, *, service=None, catalog=None, sleep=time.slee
                 # Bounded seeding leaves room for uploads and progress reporting.
                 stage = "catalog_import"
                 imported = 0
-                for _ in range(8):
+                for _ in range(2 if time.monotonic() >= next_import else 0):
                     if time.monotonic() >= deadline:
                         break
                     count = import_cloud_page(catalog, service)
                     imported += count
                     if count < 250:
+                        next_import = time.monotonic() + 60
                         break
                 accepted = 0
                 # Keep the capacity state visible during admission cooldown while
                 # allowing all normal batches of existing updates to continue.
                 blocked = capacity_cooldown_active(catalog)
                 stage = "citation_sync"
-                for _ in range(20):
+                for _ in range(2):
                     if time.monotonic() >= deadline:
                         break
                     result = sync_citations(catalog, service)
@@ -276,21 +298,29 @@ def run_sync(directory, deadline, *, service=None, catalog=None, sleep=time.slee
                         break
                 stage = "derived_sync"
                 events = sync_events(directory, catalog, service, deadline)
-                state = "capacity_blocked" if blocked else "idle"
+                active = bool(imported or accepted or events)
+                state = "capacity_blocked" if blocked else "syncing" if active else "idle"
                 stage = "status_report"
                 synced_at = timestamp()
-                status = report(catalog, service, state, sync_at=synced_at)
+                if time.monotonic() >= next_report or state != reported_state:
+                    status = report(catalog, service, state, sync_at=synced_at)
+                    next_report = time.monotonic() + 30
+                    reported_state = state
+                else:
+                    status = None
                 # A failed report must not make an offline worker look recently
                 # synchronized. Publication acknowledgements remain durable.
-                catalog.set_meta("last_sync_at", synced_at)
+                if status is not None:
+                    catalog.set_meta("last_sync_at", synced_at)
                 catalog.set_meta("sync_state", state)
                 catalog.set_meta("sync_error", None)
                 completed_cycles += 1
                 print(f"Catalog sync: {imported} mirrored, {accepted} citation acknowledgements, "
-                      f"{events} derived acknowledgements; {status['citation_pending']} citations pending; {state}", flush=True)
-                # Continue the initial mirror promptly without spinning on an empty queue.
-                pause = 2 if imported >= 2000 else 30
+                      f"{events} derived acknowledgements; {state}", flush=True)
+                # Drain available work continuously; idle wake-up checks are local.
+                pause = 0.1 if active else 2
             except (OSError, RuntimeError, ValueError, KeyError, TypeError, sqlite3.Error) as error:
+                reported_state = None
                 detail = failure_details(error, stage)
                 catalog.set_meta("sync_state", "offline")
                 catalog.set_meta("sync_error", detail)
