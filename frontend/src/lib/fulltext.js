@@ -1,5 +1,6 @@
 import { supabase } from "./supabase";
 import { withTimeout } from "./data";
+import { readingLayout, sourceLocations } from "./originalText";
 
 // Deployment-controlled public origin; never take a destination from a URL or profile.
 export function fulltextOrigin() {
@@ -59,22 +60,14 @@ export async function readOriginal(pmid, userId, signal) {
               /^image\/(png|jpeg|gif|webp|tiff|bmp)$/.test(f.content_type))),
       )
     : [];
-  const blocks = Array.isArray(article.blocks)
-    ? article.blocks
-        .filter(
-          (b) =>
-            b &&
-            /^(p|table|figure)-[0-9]{7}$/.test(b.id) &&
-            Number.isInteger(b.start) &&
-            Number.isInteger(b.end) &&
-            b.start >= 0 &&
-            b.end > b.start &&
-            b.end <= article.content_text.length &&
-            b.text === article.content_text.slice(b.start, b.end),
-        )
-        .slice(0, 4000)
-    : [];
-  return { ...article, blocks, figures, figure_status: article.figure_status || "pending" };
+  const blocks = sourceLocations(article.content_text, article.blocks);
+  return {
+    ...article,
+    blocks,
+    figures,
+    reading_layout: readingLayout(article.content_text, article.content_hash, article.reading_layout),
+    figure_status: article.figure_status || "pending",
+  };
 }
 
 export async function readOriginalImage(pmid, assetId, userId, signal) {

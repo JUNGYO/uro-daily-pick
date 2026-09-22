@@ -21,6 +21,7 @@ from common import supabase_headers
 from bs4 import BeautifulSoup
 from defusedxml import ElementTree as ET
 from pypdf import PdfReader
+from document_layout import build_layout
 
 MAX_BYTES = 20 * 1024 * 1024
 MAX_CHARS = 600_000
@@ -106,10 +107,50 @@ def fetch_elsevier(pmid, *, deadline=None, request_gate=None):
     return download(url, headers, deadline=deadline, request_gate=request_gate), url
 
 
+def _span_attribute(value):
+    try:
+        number = int(value or 1)
+    except (ValueError, TypeError):
+        return 1
+    return number if 1 <= number <= 1000 else 1
+
+
+def _xml_layout_units(element):
+    local = lambda node: node.tag.rsplit('}', 1)[-1] if isinstance(node.tag, str) else ''
+    flatten = lambda node: ' '.join(' '.join(node.itertext()).split())
+    kind = {'title': 'heading', 'section-title': 'heading', 'p': 'paragraph',
+            'para': 'paragraph', 'table': 'table', 'fig': 'figure', 'list-item': 'paragraph'}
+    name = local(element)
+    if name in kind:
+        unit = {'kind': kind[name], 'text': flatten(element)}
+        if name == 'table':
+            unit['rows'] = [[{'text': flatten(cell), 'header': local(cell) == 'th',
+                             'rowspan': _span_attribute(cell.get('rowspan')),
+                             'colspan': _span_attribute(cell.get('colspan'))}
+                            for cell in row if local(cell) in ('td', 'th')]
+                           for row in element.iter() if local(row) == 'tr']
+        yield unit
+    else:
+        for child in element:
+            yield from _xml_layout_units(child)
+
+
+def _html_layout_unit(node):
+    kind = 'table' if node.name == 'table' else 'paragraph'
+    unit = {'kind': kind, 'text': node.get_text(' ', strip=True)}
+    if kind == 'table':
+        unit['rows'] = [[{'text': cell.get_text(' ', strip=True), 'header': cell.name == 'th',
+                         'rowspan': _span_attribute(cell.get('rowspan')),
+                         'colspan': _span_attribute(cell.get('colspan'))}
+                        for cell in row.find_all(['td', 'th'], recursive=False)]
+                       for row in node.find_all('tr') if row.find_parent('table') is node]
+    return unit
+
+
 def parse_document(content):
     if not content or len(content) > MAX_BYTES:
         raise ValueError("Empty or oversized document")
-    sections, license_text = [], None
+    sections, section_units, license_text = [], [], None
     if content.startswith(b"%PDF-"):
         reader = PdfReader(io.BytesIO(content))
         if reader.is_encrypted:
@@ -118,6 +159,7 @@ def parse_document(content):
             raise ValueError("PDF exceeds 300 pages")
         for index, page in enumerate(reader.pages, 1):
             sections.append({"title": f"Page {index}", "text": page.extract_text() or ""})
+            section_units.append([])  # PDF text has no reliable native paragraph/table tags.
         kind = "pdf"
     else:
         # XML needs a real article body; abstracts and API metadata are not full text.
@@ -139,6 +181,7 @@ def parse_document(content):
                     text = " ".join(" ".join(child.itertext()).split())
                     if text:
                         sections.append({"title": title, "text": text})
+                        section_units.append(list(_xml_layout_units(child)))
                 license_text = next((" ".join(n.itertext()).strip() for n in root.iter() if local(n) == "license"), None)
         if sections:
             kind = "xml"
@@ -151,7 +194,7 @@ def parse_document(content):
                 if soup.select_one(selector) is not None), None)
             if body is None:
                 raise ValueError("No article body (login/challenge/metadata response)")
-            title, paragraphs = "Body", []
+            title, paragraphs, units = "Body", [], []
             for node in body.select("h1, h2, h3, p, table, div.para, div.section-paragraph, div.u-margin-s-bottom[id]"):
                 if node.find_parent("table"):
                     continue
@@ -163,11 +206,14 @@ def parse_document(content):
                 if node.name.startswith("h"):
                     if paragraphs:
                         sections.append({"title": title, "text": "\n".join(paragraphs)})
-                    title, paragraphs = node.get_text(" ", strip=True), []
+                        section_units.append(units)
+                    title, paragraphs, units = node.get_text(" ", strip=True), [], []
                 else:
                     paragraphs.append(node.get_text(" ", strip=True))
+                    units.append(_html_layout_unit(node))
             if paragraphs:
                 sections.append({"title": title, "text": "\n".join(paragraphs)})
+                section_units.append(units)
             kind = "html"
     text = "\n\n".join(f"{s['title']}\n{s['text']}" for s in sections if s["text"].strip())
     if len(text) < 500:
@@ -176,7 +222,8 @@ def parse_document(content):
         raise ValueError("Extracted document too large")
     if re.search(r"(verify you are human|enable javascript and cookies|checking your browser|access denied)", text[:2000], re.I):
         raise ValueError("Access challenge is not article text")
-    return {"content_text": text, "sections": sections, "license": license_text,
+    layout = build_layout(text, sections, section_units)
+    return {"content_text": text, "sections": sections, "license": license_text, "reading_layout": layout,
             "content_hash": hashlib.sha256(text.encode()).hexdigest(), "source": kind}
 
 

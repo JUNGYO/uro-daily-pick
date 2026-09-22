@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parent))
 from evidence import source_blocks
+from document_layout import validate_layout
 import argparse
 from collections import deque
 import hashlib
@@ -116,10 +117,28 @@ class Archive:
                 return {"pmid": pmid, "title": str(paper.get("title") or "Article " + pmid)[:2000],
                         "doi": str(paper.get("doi") or "")[:500], "content_text": text,
                         "content_hash": doc["content_hash"], "format": "extracted_text", "blocks": source_blocks(text),
+                        "reading_layout": self.layout(root, pmid, doc),
                         **self.figures(pmid,doc['content_hash'])}
             except (OSError, ValueError, TypeError, KeyError):
                 found_invalid = True
         raise ViewerError(503 if found_invalid else 404, "document_unavailable" if found_invalid else "not_found")
+
+    def layout(self, root, pmid, doc):
+        try:
+            value = doc.get('reading_layout')
+            if value is None:
+                path = root / (pmid + '.layout.json')
+                if path.is_symlink() or path.resolve(strict=True) != path:
+                    return None
+                with path.open('rb') as stream:
+                    raw = stream.read(MAX_FILE_BYTES + 1)
+                if len(raw) > MAX_FILE_BYTES:
+                    return None
+                value = json.loads(raw)
+            return validate_layout(value, doc['content_text'], doc['content_hash'])
+        except (OSError, ValueError, KeyError, TypeError):
+            # A bad optional layout must never hide or alter the verified original.
+            return None
 
     def figures(self, pmid, content_hash):
         path=self.roots[0]/(pmid+'.images.json')

@@ -22,6 +22,7 @@ from urllib.parse import urlencode, urlsplit, urlunsplit
 from urllib.request import Request, build_opener, HTTPSHandler
 
 from fulltext import FulltextUnavailable, NoRedirect, fetch_oa, parse_document
+from document_layout import validate_layout
 from evidence import validate_metadata
 from local_summary import MODEL_LABEL, SummaryBudgetExpired, ensure_server, generate_summary, summary_payload, literature_inference_scope
 from catalog_policy import AUTOMATIC_START_DATE
@@ -335,6 +336,8 @@ def cached_paper_matches(saved, paper):
 def verify_cached_body(document):
     if hashlib.sha256(document["content_text"].encode()).hexdigest()!=document["content_hash"]:
         raise ValueError("Cached body hash mismatch")
+    if document.get('reading_layout') is not None:
+        validate_layout(document['reading_layout'], document['content_text'], document['content_hash'])
     return document
 
 
@@ -351,11 +354,18 @@ def atomic_replace(temporary, path):
 
 
 def save_json(path, value):
+    if isinstance(value, dict) and isinstance(value.get('document'), dict):
+        verify_cached_body(value['document'])
     temporary=path.with_suffix(path.suffix+".pending")
     with temporary.open("w",encoding="utf-8") as output:
         json.dump(value,output,ensure_ascii=False)
         output.flush()
         os.fsync(output.fileno())
+    if isinstance(value, dict) and 'document' in value:
+        stored = json.loads(temporary.read_text(encoding='utf-8'))
+        if stored != value:
+            raise ValueError('Original serialization verification failed')
+        verify_cached_body(stored['document'])
     atomic_replace(temporary, path)
 
 
