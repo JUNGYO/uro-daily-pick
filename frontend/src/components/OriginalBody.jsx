@@ -2,10 +2,33 @@ import { useMemo } from "react";
 import { originalParagraphs } from "../lib/originalText";
 
 export default function OriginalBody({ article, activeId, onFigure }) {
-  const paragraphs = useMemo(
-    () => originalParagraphs(article.content_text, article.blocks, article.reading_layout),
-    [article.content_text, article.blocks, article.reading_layout],
-  );
+  const paragraphs = useMemo(() => {
+    const result = [];
+    for (const paragraph of originalParagraphs(
+      article.content_text,
+      article.blocks,
+      article.reading_layout,
+    )) {
+      const previous = result.at(-1);
+      // Legacy XML stores a section label before the identical publisher title.
+      // Show it once, but keep both source locations on that same heading.
+      if (
+        paragraph.kind === "heading" &&
+        previous?.kind === "heading" &&
+        paragraph.runs
+          .map((r) => r.text)
+          .join("")
+          .trim() ===
+          previous.runs
+            .map((r) => r.text)
+            .join("")
+            .trim()
+      ) {
+        previous.aliases.push(...paragraph.runs.filter((r) => r.id));
+      } else result.push({ ...paragraph, aliases: [] });
+    }
+    return result;
+  }, [article.content_text, article.blocks, article.reading_layout]);
   return paragraphs.map((paragraph) => (
     <div key={paragraph.start} className="mb-4 last:mb-0">
       {paragraph.rows ? (
@@ -33,7 +56,12 @@ export default function OriginalBody({ article, activeId, onFigure }) {
           </table>
         </div>
       ) : paragraph.kind === "heading" ? (
-        <h2 className="original-paragraph font-semibold mt-6 mb-2">
+        <h2
+          className={`original-paragraph font-semibold mt-6 mb-2 ${paragraph.aliases.some((run) => run.id === activeId) ? "bg-amber-100 rounded-sm outline outline-2 outline-amber-400" : ""}`}
+        >
+          {paragraph.aliases.map((run) => (
+            <span key={run.id} id={run.id} tabIndex={-1} aria-hidden="true" />
+          ))}
           <SourceRuns runs={paragraph.runs} activeId={activeId} />
         </h2>
       ) : (
