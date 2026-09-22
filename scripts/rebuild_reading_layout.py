@@ -1,8 +1,9 @@
 """Rebuild source-bound reading layouts from existing local originals; no downloads.
 
 The original JSON, source hash, summaries and evidence remain unchanged. A verified
-sidecar is written atomically only when re-parsing the cached source reproduces
-the existing text exactly. Re-running skips valid completed sidecars.
+sidecar is written atomically when a cached source reproduces the existing text
+exactly. Otherwise, only verified stored section/paragraph boundaries are used;
+unavailable publisher table structure is never invented.
 """
 import argparse
 from collections import Counter
@@ -14,7 +15,7 @@ from pathlib import Path
 import time
 import uuid
 
-from document_layout import validate_layout
+from document_layout import build_layout, validate_layout
 from fulltext import parse_document, MAX_BYTES
 
 
@@ -36,16 +37,31 @@ def rebuild(path, *, apply=False):
         return 'already_verified'
     except (OSError, ValueError, TypeError, KeyError):
         pass
-    source = next((path.with_suffix(ext) for ext in ('.xml','.html','.pdf')
-                   if path.with_suffix(ext).is_file()), None)
-    if source is None:
-        return 'source_unavailable'
-    if source.is_symlink() or source.resolve() != source or source.stat().st_size > MAX_BYTES:
-        return 'unsafe_source'
-    parsed = parse_document(source.read_bytes())
-    if parsed['content_hash'] != digest or parsed['content_text'] != text:
-        return 'source_version_differs'
-    layout = validate_layout(parsed['reading_layout'], text, digest)
+    layout, source_found = None, False
+    for ext in ('.xml', '.html', '.pdf'):
+        source = path.with_suffix(ext)
+        if not source.is_file():
+            continue
+        source_found = True
+        if source.is_symlink() or source.resolve() != source or source.stat().st_size > MAX_BYTES:
+            return 'unsafe_source'
+        try:
+            parsed = parse_document(source.read_bytes())
+        except ValueError:
+            continue
+        if parsed['content_hash'] == digest and parsed['content_text'] == text:
+            layout = validate_layout(parsed['reading_layout'], text, digest)
+            break
+    stored_sections = layout is None
+    if stored_sections:
+        sections = doc.get('sections', [])
+        canonical = '\n\n'.join(s['title']+'\n'+s['text'] for s in sections if s['text'].strip())
+        if not sections or canonical != text:
+            return 'source_version_differs' if source_found else 'source_unavailable'
+        units = [[{'kind':'paragraph','text':line} for line in s['text'].splitlines() if line.strip()]
+                 for s in sections]
+        layout = build_layout(text, sections, units)
+        layout['structure_source'] = 'stored_sections'
     if not apply:
         return 'verified_dry_run'
     if path.read_bytes() != before:
@@ -65,7 +81,7 @@ def rebuild(path, *, apply=False):
             temporary.unlink(missing_ok=True)
         except OSError:
             pass  # A uniquely named, incomplete sidecar is never served.
-    return 'restored'
+    return 'restored_stored_sections' if stored_sections else 'restored'
 
 
 def main():
@@ -98,7 +114,7 @@ def main():
             for future in futures:
                 item = future.result()
                 counts[item['status']] += 1
-                if item['status'] not in ('restored','already_verified','verified_dry_run'):
+                if item['status'] not in ('restored','restored_stored_sections','already_verified','verified_dry_run'):
                     pending.append(item)
             if time.monotonic()-last >= 20:
                 checkpoint()

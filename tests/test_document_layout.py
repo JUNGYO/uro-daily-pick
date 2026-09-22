@@ -95,8 +95,13 @@ class DocumentLayoutTests(unittest.TestCase):
             sidecar=path.with_suffix('.layout.json')
             sidecar.unlink()
             path.with_suffix('.xml').write_bytes(self.xml().replace(b'579',b'580'))
-            self.assertEqual(rebuild(path,apply=True), 'source_version_differs')
-            self.assertFalse(sidecar.exists())
+            self.assertEqual(rebuild(path,apply=True), 'restored_stored_sections')
+            self.assertEqual(json.loads(sidecar.read_bytes())['structure_source'], 'stored_sections')
+            self.assertFalse(any(b.get('rows') for b in json.loads(sidecar.read_bytes())['blocks']))
+            self.assertEqual(path.read_bytes(),before)
+            sidecar.unlink()
+            path.with_suffix('.xml').unlink()
+            self.assertEqual(rebuild(path,apply=True), 'restored_stored_sections')
             self.assertEqual(path.read_bytes(),before)
 
 
