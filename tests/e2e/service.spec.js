@@ -280,8 +280,8 @@ test("admin remains usable when catalog fails and retries that section", async (
   await expect(page.getByText("Total Users", { exact: true })).toBeVisible();
   await catalog.getByRole("button", { name: "다시 시도" }).click();
   await expect(catalog.getByRole("alert")).toHaveCount(0);
-  await expect(catalog).toContainText("문헌 정보 등록");
-  await expect(catalog).toContainText("본문 요약 완료");
+  await expect(catalog).toContainText("서지정보 반영");
+  await expect(catalog).toContainText("본문 요약 반영");
 });
 
 test("mobile admin preserves local progress while service counts are initializing", async ({ page }, testInfo) => {
@@ -290,7 +290,7 @@ test("mobile admin preserves local progress while service counts are initializin
   const panel = page.getByRole("region", { name: "문헌 처리 현황", exact: true });
   await expect(panel.getByRole("status")).toContainText("서비스 반영 수치를 집계 중입니다");
   const local = panel.getByRole("region", { name: "수집 및 동기화", exact: true });
-  await expect(local.getByText("로컬 수집 완료", { exact: true }).locator("..")).toContainText("200편");
+  await expect(local.getByText("서지정보 로컬 저장", { exact: true }).locator("..")).toContainText("200편");
   const stages = panel.getByRole("list", { name: "문헌 처리 단계", exact: true }).getByRole("listitem");
   await expect(stages).toHaveCount(3);
   for (let i = 0; i < 3; i++) {
@@ -344,8 +344,8 @@ test("mobile admin separates local catalog sync from published counts at capacit
     await page.goto("admin?scenario=admin-local-catalog");
     const panel = page.getByRole("region", { name: "문헌 처리 현황", exact: true });
     const local = panel.getByRole("region", { name: "수집 및 동기화", exact: true });
-    await expect(local.getByText("로컬 수집 완료", { exact: true }).locator("..")).toContainText("200편");
-    await expect(local.getByText("서비스 동기화 완료", { exact: true }).locator("..")).toContainText("4편");
+    await expect(local.getByText("서지정보 로컬 저장", { exact: true }).locator("..")).toContainText("200편");
+    await expect(local.getByText("서지정보 서비스 반영", { exact: true }).locator("..")).toContainText("4편");
     await expect(local.getByText("서지정보 동기화 대기", { exact: true }).locator("..")).toContainText("196편");
     await expect(local).toContainText("로컬 원문 35편 · 로컬 본문 요약 18편");
     await expect(local).toContainText("서비스 반영 대기: 원문 확보 정보 32편 · 본문 요약 16편");

@@ -49,6 +49,7 @@ export default function CollectionOverview({ catalog }) {
     scope.urology_journals + scope.ancillary_journals === scope.target_journals;
   const local = catalog.local_catalog;
   const localAvailable = local?.available === true;
+  const pendingCounts = [local?.pending_originals, local?.pending_summaries, local?.citation_pending];
   const reportedAt = Date.parse(local?.reported_at);
   const localFresh =
     localAvailable &&
@@ -57,23 +58,23 @@ export default function CollectionOverview({ catalog }) {
     Date.now() - reportedAt <= 2 * 3600000 &&
     reportedAt <= Date.now() + 5 * 60000;
   const localStages = [
-    { label: "로컬 수집 완료", value: local?.local_papers },
-    { label: "서비스 동기화 완료", value: local?.synced_papers },
+    { label: "서지정보 로컬 저장", value: local?.local_papers },
+    { label: "서지정보 서비스 반영", value: local?.synced_papers },
     { label: "서지정보 동기화 대기", value: local?.citation_pending },
   ];
   const stages = [
-    { label: "문헌 정보 등록", value: metadata, description: "제목·저자·발행일 등 서지 정보" },
+    { label: "서지정보 반영", value: metadata, description: "제목·저자·발행일 등 서지 정보" },
     {
-      label: "원문 확보",
+      label: "원문 확보 정보 반영",
       value: originals,
-      description: "본문을 확보한 논문",
+      description: "보관된 원문의 확보 정보가 서비스에 등록된 논문",
       total: metadata,
       progress: "등록 문헌 중 원문 확보율",
     },
     {
-      label: "본문 요약 완료",
+      label: "본문 요약 반영",
       value: summaries,
-      description: "확보한 본문으로 요약한 논문",
+      description: "본문 기반 요약이 서비스에 등록된 논문",
       total: originals,
       progress: "확보 원문 중 요약 완료율",
     },
@@ -109,6 +110,10 @@ export default function CollectionOverview({ catalog }) {
           <p className="text-xs text-text2 mt-3">
             로컬 원문 {count(local.local_originals)}편 · 로컬 본문 요약 {count(local.local_summaries)}편
           </p>
+          <p className="text-xs text-text3 mt-2">
+            로컬은 저장 완료 수, 서비스 반영은 등록 완료 수입니다. 원문 파일은 로컬에 보관하며 확보 정보와
+            요약을 별도로 동기화합니다.
+          </p>
           <p className="text-xs text-text2 mt-2">
             서비스 반영 대기: 원문 확보 정보 {count(local.pending_originals)}편 · 본문 요약{" "}
             {count(local.pending_summaries)}편
@@ -116,7 +121,11 @@ export default function CollectionOverview({ catalog }) {
           <p className="text-xs text-text2 mt-2">
             {localFresh
               ? {
-                  idle: "동기화 대기",
+                  idle: !pendingCounts.every(known)
+                    ? "동기화 상태 확인 필요"
+                    : pendingCounts.some((n) => n > 0)
+                      ? "미반영 자료를 주기적으로 동기화 중"
+                      : "동기화 완료",
                   syncing: "동기화 중",
                   capacity_blocked: "저장공간 확보 후 동기화 예정",
                   offline: "연결 복구 후 동기화 예정",

@@ -3,6 +3,44 @@ import { cleanup, render, screen, within } from "@testing-library/react";
 import CollectionOverview, { ProcessingHealth } from "./CollectionOverview";
 afterEach(cleanup);
 
+it("distinguishes stored originals from published receipts and pending periodic synchronization", () => {
+  const view = render(
+    <CollectionOverview
+      catalog={{
+        originals_acquired: 32811,
+        local_catalog: localReport({
+          sync_state: "idle",
+          citation_pending: 0,
+          pending_originals: 18713,
+          pending_summaries: 1416,
+        }),
+      }}
+    />,
+  );
+  expect(screen.getByText(/로컬은 저장 완료 수, 서비스 반영은 등록 완료 수/)).toBeVisible();
+  expect(screen.getByText(/미반영 자료를 주기적으로 동기화 중/)).toBeVisible();
+  expect(screen.getByText("02 · 원문 확보 정보 반영")).toBeVisible();
+  view.rerender(
+    <CollectionOverview
+      catalog={{
+        local_catalog: localReport({
+          sync_state: "idle",
+          citation_pending: 0,
+          pending_originals: 0,
+          pending_summaries: 0,
+        }),
+      }}
+    />,
+  );
+  expect(screen.getByText(/동기화 완료 · 마지막 보고/)).toBeVisible();
+  view.rerender(
+    <CollectionOverview
+      catalog={{ local_catalog: localReport({ sync_state: "idle", pending_originals: undefined }) }}
+    />,
+  );
+  expect(screen.getByText(/동기화 상태 확인 필요/)).toBeVisible();
+});
+
 const localReport = (overrides = {}) => ({
   available: true,
   stale: false,
@@ -36,7 +74,7 @@ it("keeps local progress visible and service counts unknown during initial aggre
   );
   expect(screen.getByRole("status")).toHaveTextContent("서비스 반영 수치를 집계 중입니다");
   const local = screen.getByRole("region", { name: "수집 및 동기화" });
-  expect(within(local).getByText("로컬 수집 완료").parentElement).toHaveTextContent("200편");
+  expect(within(local).getByText("서지정보 로컬 저장").parentElement).toHaveTextContent("200편");
   const stages = within(screen.getByRole("list", { name: "문헌 처리 단계" })).getAllByRole("listitem");
   expect(stages).toHaveLength(3);
   for (const stage of stages) {
@@ -70,7 +108,7 @@ it("reveals completed service measurements with their own timestamp", () => {
     "aria-valuenow",
     "9",
   );
-  expect(screen.getByText("로컬 수집 완료").parentElement).toHaveTextContent("200편");
+  expect(screen.getByText("서지정보 로컬 저장").parentElement).toHaveTextContent("200편");
   view.rerender(<CollectionOverview catalog={{ counts_available: true, counts_updated_at: "invalid" }} />);
   expect(screen.queryByText(/서비스 집계 시각/)).not.toBeInTheDocument();
   expect(document.body).not.toHaveTextContent("Invalid Date");
@@ -88,8 +126,8 @@ it("distinguishes durable local collection and pending publication from actual s
     />,
   );
   const local = screen.getByRole("region", { name: "수집 및 동기화" });
-  expect(within(local).getByText("로컬 수집 완료").parentElement).toHaveTextContent("200편");
-  expect(within(local).getByText("서비스 동기화 완료").parentElement).toHaveTextContent("100편");
+  expect(within(local).getByText("서지정보 로컬 저장").parentElement).toHaveTextContent("200편");
+  expect(within(local).getByText("서지정보 서비스 반영").parentElement).toHaveTextContent("100편");
   expect(within(local).getByText("서지정보 동기화 대기").parentElement).toHaveTextContent("100편");
   expect(local).toHaveTextContent("서비스 반영 대기: 원문 확보 정보 26편 · 본문 요약 14편");
   expect(screen.getByRole("meter", { name: "등록 문헌 중 원문 확보율" })).toHaveAttribute(
@@ -118,7 +156,7 @@ it("explains stored local work at capacity without claiming a live collector fro
 it("retains reported counts with a stale label and never infers current collection from old or future reports", () => {
   const view = render(<CollectionOverview catalog={{ local_catalog: localReport({ stale: true }) }} />);
   expect(screen.getByText(/최근 수집 상태를 확인할 수 없습니다/)).toBeVisible();
-  expect(screen.getByText("로컬 수집 완료").parentElement).toHaveTextContent("200편");
+  expect(screen.getByText("서지정보 로컬 저장").parentElement).toHaveTextContent("200편");
   for (const reported_at of [
     new Date(Date.now() - 3 * 3600000).toISOString(),
     "invalid",
@@ -137,7 +175,7 @@ it("does not invent local counts when no worker has reported", () => {
     />,
   );
   expect(screen.queryByRole("region", { name: "수집 및 동기화" })).not.toBeInTheDocument();
-  expect(screen.queryByText("로컬 수집 완료")).not.toBeInTheDocument();
+  expect(screen.queryByText("서지정보 로컬 저장")).not.toBeInTheDocument();
 });
 
 it("shows the server-provided journal target separately from actual collection counts", () => {

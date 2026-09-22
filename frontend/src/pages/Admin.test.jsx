@@ -15,6 +15,16 @@ function query(result) {
   return promise;
 }
 function response(name) {
+  if (name === "admin_integrity_queue")
+    return {
+      data: {
+        counts: { total: 0, corrected: 0, concern: 0, retracted: 0 },
+        items: [],
+        total: 0,
+        page: 0,
+        page_size: 10,
+      },
+    };
   return {
     data:
       name === "admin_stats"
@@ -56,7 +66,7 @@ it("keeps successful panels visible and retries only the failed catalog", async 
   expect(await screen.findByText("138225")).toBeVisible();
   const catalog = within(screen.getByRole("region", { name: "문헌 처리 현황" }));
   expect(await catalog.findByRole("alert")).toBeVisible();
-  expect(catalog.queryByText(/문헌 정보 등록/)).not.toBeInTheDocument();
+  expect(catalog.queryByText(/서지정보 반영/)).not.toBeInTheDocument();
   failed = false;
   const count = mock.rpc.mock.calls.length;
   fireEvent.click(catalog.getByRole("button", { name: "다시 시도" }));
