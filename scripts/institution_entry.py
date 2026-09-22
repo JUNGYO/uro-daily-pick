@@ -72,7 +72,7 @@ def main():
             if phase in {"catalog", "sync"}:
                 script = "local_catalog_worker.py" if phase == "catalog" else "catalog_sync.py"
                 command = [sys.executable, "-u", str(release / script),
-                           "--state-dir", str(state), "--max-seconds", "3300"]
+                           "--state-dir", str(state), "--max-seconds", "3560" if phase == "sync" else "3300"]
             else:
                 command = [sys.executable, "-u", str(release / "institution_worker.py"),
                     "--state-dir", str(state), "--node", str(release / "node.exe"),
@@ -84,7 +84,8 @@ def main():
         results = []
         for phase, process in processes:
             try:
-                code = process.wait(timeout=max(1, 3480 - (time.monotonic() - started)))
+                limit = 3590 if phase == 'sync' else 3480
+                code = process.wait(timeout=max(1, limit - (time.monotonic() - started)))
             except subprocess.TimeoutExpired:
                 stop_child(process)
                 code = process.returncode

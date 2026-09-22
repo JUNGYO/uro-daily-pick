@@ -106,6 +106,10 @@ class LocalCatalog:
             CREATE TABLE IF NOT EXISTS catalog_jobs(job_key TEXT PRIMARY KEY,data TEXT NOT NULL);
             CREATE TABLE IF NOT EXISTS catalog_citation_retry(
                 pmid TEXT PRIMARY KEY,version INTEGER NOT NULL,next_retry REAL NOT NULL,error TEXT);
+            CREATE INDEX IF NOT EXISTS catalog_outbox_ready
+                ON catalog_outbox(kind,updated_at,pmid) WHERE pending=1;
+            CREATE INDEX IF NOT EXISTS catalog_pending_citations
+                ON catalog_papers(updated_at,pmid) WHERE version!=synced_version;
         """)
         self.db.commit()
 
@@ -268,6 +272,7 @@ class LocalCatalog:
             self.db.execute("UPDATE catalog_papers SET synced_version=version,remote_state=? WHERE pmid=? AND version=?",
                             (_json(remote), str(pmid), version))
             self.db.execute("DELETE FROM catalog_citation_retry WHERE pmid=?", (str(pmid),))
+            self.db.execute("UPDATE catalog_outbox SET next_retry=0,error=NULL WHERE pmid=? AND pending=1 AND error='citation_pending'", (str(pmid),))
             return True
 
     def defer_citation(self, pmid, version, retry_after, error):
@@ -386,10 +391,50 @@ class LocalCatalog:
         return self.db.execute("SELECT 1 FROM catalog_outbox WHERE pmid=? AND kind=? AND pending=1",
                                (_pmid(pmid), kind)).fetchone() is not None
 
+    def ready_outbox_batch(self, limit=50):
+        """Reserve room for new completions, old backlog and summary prerequisites.
+
+        Blocked citations/summaries do not consume the bounded publication batch.
+        All reads are metadata-only; no document archive scan is required.
+        """
+        limit = max(0, int(limit))
+        if not limit:
+            return []
+        now = time.time()
+        eligible = """FROM catalog_outbox o JOIN catalog_papers p ON p.pmid=o.pmid
+            WHERE o.pending=1 AND o.next_retry<=? AND p.version=p.synced_version
+            AND o.kind=? AND (o.kind='original' OR NOT EXISTS (
+                SELECT 1 FROM catalog_outbox parent WHERE parent.pmid=o.pmid
+                AND parent.kind='original' AND parent.pending=1))"""
+        selected = {}
+        def take(kind, order, count, extra="", extra_params=()):
+            rows = self.db.execute("SELECT o.pmid,o.kind,o.payload,o.version " + eligible + extra
+                + " ORDER BY " + order + " LIMIT ?", (now, kind, *extra_params, count))
+            for row in rows:
+                if len(selected) >= limit:
+                    break
+                selected.setdefault((row['pmid'], row['kind']), {
+                    'pmid': row['pmid'], 'kind': row['kind'],
+                    'payload': json.loads(row['payload']), 'version': row['version']})
+        quota = max(1, limit // 5)
+        # A freshly completed summary need not wait for the entire original backlog.
+        take('original', 'o.updated_at,o.pmid', quota, """ AND EXISTS (
+            SELECT 1 FROM catalog_outbox child WHERE child.pmid=o.pmid
+            AND child.kind='summary' AND child.pending=1
+            AND (child.next_retry<=? OR child.error='original_pending'))""", (now,))
+        for kind in ('summary', 'original'):
+            take(kind, 'o.updated_at DESC,o.pmid', quota)
+            take(kind, 'o.updated_at,o.pmid', quota)
+        for kind in ('summary', 'original'):
+            take(kind, 'o.updated_at,o.pmid', limit)
+        return list(selected.values())
+
     def ack_outbox(self, pmid, kind, version):
         with self._write():
             cursor = self.db.execute("""UPDATE catalog_outbox SET pending=0,next_retry=0,error=NULL
                 WHERE pmid=? AND kind=? AND version=? AND pending=1""", (_pmid(pmid), kind, version))
+            if cursor.rowcount and kind == 'original':
+                self.db.execute("UPDATE catalog_outbox SET next_retry=0,error=NULL WHERE pmid=? AND kind='summary' AND pending=1 AND error='original_pending'", (str(pmid),))
             return bool(cursor.rowcount)
 
     def defer_outbox(self, pmid, kind, version, retry_after, error):
