@@ -9,6 +9,7 @@ $ErrorActionPreference='Stop'
 $root=[IO.Path]::GetFullPath($InstallRoot).TrimEnd('\')
 $source=(Resolve-Path -LiteralPath (Join-Path $ReleasePath 'fulltext_viewer.py')).Path
 $sourceEvidence=(Resolve-Path -LiteralPath (Join-Path $ReleasePath 'evidence.py')).Path
+$sourceLayout=(Resolve-Path -LiteralPath (Join-Path $ReleasePath 'document_layout.py')).Path
 $name='UroDailyPick-Original-Viewer'
 $config=Join-Path $root 'config.json'
 $report=Join-Path $root 'update-result.json'
@@ -28,6 +29,9 @@ try {
  $stamp=Get-Date -Format yyyyMMddHHmmss
  $backup=Join-Path $root ('viewer-before-'+$stamp+'.py')
  $activeEvidence=Join-Path (Split-Path -Parent $active) 'evidence.py'
+ $activeLayout=Join-Path (Split-Path -Parent $active) 'document_layout.py'
+ $layoutBackup=Join-Path $root ('layout-before-'+$stamp+'.py')
+ if(Test-Path -LiteralPath $activeLayout){Copy-Item -LiteralPath $activeLayout -Destination $layoutBackup}
  $evidenceBackup=Join-Path $root ('evidence-before-'+$stamp+'.py')
  if(Test-Path -LiteralPath $activeEvidence){Copy-Item -LiteralPath $activeEvidence -Destination $evidenceBackup}
  $configBackup=Join-Path $root ('config-before-'+$stamp+'.json')
@@ -42,6 +46,8 @@ try {
  $changed=$true
  Copy-Item -LiteralPath $source -Destination $active -Force
  Copy-Item -LiteralPath $sourceEvidence -Destination $activeEvidence -Force
+ Copy-Item -LiteralPath $sourceLayout -Destination $activeLayout -Force
+ if((Get-FileHash -LiteralPath $activeLayout -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $sourceLayout -Algorithm SHA256).Hash){throw 'Layout module hash mismatch'}
  if((Get-FileHash -LiteralPath $activeEvidence -Algorithm SHA256).Hash -ne (Get-FileHash -LiteralPath $sourceEvidence -Algorithm SHA256).Hash){throw 'Evidence module hash mismatch'}
  if((Get-FileHash -LiteralPath $active -Algorithm SHA256).Hash -ne $expectedHash){throw 'Installed script hash mismatch'}
  $settings | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $config -Encoding utf8
@@ -64,6 +70,7 @@ try {
    Stop-ScheduledTask -TaskName $name -ErrorAction SilentlyContinue
    Copy-Item -LiteralPath $backup -Destination $active -Force
    if(Test-Path -LiteralPath $evidenceBackup){Copy-Item -LiteralPath $evidenceBackup -Destination $activeEvidence -Force}
+   if(Test-Path -LiteralPath $layoutBackup){Copy-Item -LiteralPath $layoutBackup -Destination $activeLayout -Force}
    Copy-Item -LiteralPath $configBackup -Destination $config -Force
    Start-ScheduledTask -TaskName $name
    $result.restored=$true

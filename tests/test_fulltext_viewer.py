@@ -65,6 +65,18 @@ class ViewerTests(unittest.TestCase):
         self.identity.authorize.assert_not_called()
         self.assertNotIn(BODY.encode(), body)
 
+    def test_source_bound_layout_sidecar_and_invalid_layout_fallback(self):
+        digest=self.document['document']['content_hash']
+        path=self.root/'documents/12345.layout.json'
+        layout={'version':1,'content_hash':digest,'blocks':[{'kind':'paragraph','start':0,'end':len(BODY)}]}
+        path.write_text(json.dumps(layout),encoding='utf-8')
+        self.assertEqual(self.archive.read('12345')['reading_layout'],layout)
+        for broken in ({**layout,'content_hash':'0'*64},{**layout,'blocks':[]}):
+            path.write_text(json.dumps(broken),encoding='utf-8')
+            result=self.archive.read('12345')
+            self.assertIsNone(result['reading_layout'])
+            self.assertEqual(result['content_text'],BODY)
+
     def test_denied_and_expired_identity_do_not_read_article(self):
         for status in (401, 403, 503):
             with self.subTest(status=status):

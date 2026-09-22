@@ -4,6 +4,7 @@ import { Link, useParams, useLocation } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { readOriginal } from "../lib/fulltext";
 import ArticleFigure from "../components/ArticleFigure";
+import OriginalBody from "../components/OriginalBody";
 import { ErrorNotice, Loading } from "../components/Status";
 
 export default function FullText() {
@@ -162,45 +163,20 @@ export default function FullText() {
                 className="panel whitespace-pre-wrap break-words leading-[1.85]"
                 style={{ fontSize, overflowWrap: "anywhere" }}
               >
-                {article.blocks?.length
-                  ? article.blocks.map((block) => (
-                      <p
-                        key={block.id}
-                        id={block.id}
-                        tabIndex={-1}
-                        className={
-                          location.hash === "#" + block.id &&
-                          (!expectedHash || article.content_hash === expectedHash)
-                            ? "reader-evidence"
-                            : "mb-4"
-                        }
-                      >
-                        {block.text}
-                        {block.id.startsWith("figure-") &&
-                          (() => {
-                            const number = block.text.match(/^\s*Fig(?:ure)?[.]?\s+(\d+)/i)?.[1];
-                            const figure = article.figures.find(
-                              (f) => f.label.match(/Fig(?:ure)?[.]?\s*(\d+)/i)?.[1] === number,
-                            );
-                            return number && figure ? (
-                              <button
-                                className="btn-secondary block mt-3"
-                                onClick={() => {
-                                  setTab("figures");
-                                  requestAnimationFrame(() => {
-                                    const target = document.getElementById("figure-view-" + figure.key);
-                                    target?.scrollIntoView({ block: "center" });
-                                    target?.focus({ preventScroll: true });
-                                  });
-                                }}
-                              >
-                                이 그림 보기
-                              </button>
-                            ) : null;
-                          })()}
-                      </p>
-                    ))
-                  : article.content_text}
+                <OriginalBody
+                  article={article}
+                  activeId={
+                    !expectedHash || article.content_hash === expectedHash ? location.hash.slice(1) : ""
+                  }
+                  onFigure={(figure) => {
+                    setTab("figures");
+                    requestAnimationFrame(() => {
+                      const target = document.getElementById("figure-view-" + figure.key);
+                      target?.scrollIntoView({ block: "center" });
+                      target?.focus({ preventScroll: true });
+                    });
+                  }}
+                />
               </article>
             </div>
             <div id="figures-panel" role="tabpanel" aria-labelledby="figures-tab" hidden={tab !== "figures"}>

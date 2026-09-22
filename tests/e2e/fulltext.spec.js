@@ -22,6 +22,80 @@ const article = {
   content_text: body,
 };
 
+for (const width of [1440, 390, 320]) {
+  test(`long original keeps words, source anchors and all text at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 900 });
+    const prefix =
+      "The study describes clinical assessment and careful specimen handling. ";
+    const line =
+      prefix.repeat(19).padEnd(1392, " ") +
+      " entirel" +
+      "y at the clinician's discretion. The second part continues the same paragraph.";
+    const text =
+      line +
+      "\n\nA second paragraph contains 𝛼 and 🧬 symbols.\nThe final paragraph must remain visible.";
+    const characters = [...text];
+    let offset = 0;
+    const blocks = text.split("\n").flatMap((value) => {
+      const result = [];
+      const stop = offset + [...value].length;
+      for (let start = offset; start < stop; start += 1400) {
+        const end = Math.min(start + 1400, stop);
+        result.push({
+          id: `p-${String(start).padStart(7, "0")}`,
+          start,
+          end,
+          text: characters.slice(start, end).join(""),
+        });
+      }
+      offset = stop + 1;
+      return result;
+    });
+    const hash = "a".repeat(64);
+    await page.route("https://articles.example.test/v1/fulltext/*", (route) =>
+      route.fulfill({
+        json: { ...article, content_text: text, content_hash: hash, blocks },
+      }),
+    );
+    await page.goto(
+      `/uro-daily-pick/fulltext/12345670?scenario=admin&source=${hash}#p-0001400`,
+    );
+    const reader = page.getByRole("article");
+    await expect(reader.locator("#p-0001400")).toBeFocused();
+    const paragraphs = reader.locator(".original-paragraph");
+    expect(
+      await paragraphs.evaluateAll((items) =>
+        items.map((el) => el.textContent).join("\n"),
+      ),
+    ).toBe(text);
+    expect(await paragraphs.first().innerText()).toBe(line);
+    await expect(reader).toContainText(
+      "The final paragraph must remain visible.",
+    );
+    expect(
+      await reader
+        .locator("#p-0001400")
+        .evaluate((el) => getComputedStyle(el).display),
+    ).toBe("inline");
+    await reader.scrollIntoViewIfNeeded();
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    expect(
+      (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze())
+        .violations,
+    ).toEqual([]);
+    await page.screenshot({
+      path: testInfo.outputPath("continuous-original.png"),
+      fullPage: true,
+    });
+  });
+}
+
 test("mobile figures load with login, retry, enlarge and download inside the reader", async ({
   page,
 }, testInfo) => {
@@ -96,6 +170,92 @@ test("mobile figures load with login, retry, enlarge and download inside the rea
   await page.getByRole("button", { name: "Logout", exact: true }).click();
   await expect(page.locator("figure img")).toHaveCount(0);
 });
+
+for (const width of [1440, 390, 320]) {
+  test(`stored publisher structure reads as paragraphs and table cells at ${width}px`, async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width, height: 1000 });
+    const text =
+      "Results\nThe 𝛼 biomarker was evaluated in two groups.\nGroup N A 123 B 456\nFigure 1 Study workflow.\nFinal intact sentence.";
+    const position = (value) => [...text.slice(0, text.indexOf(value))].length;
+    const range = (value, kind) => ({
+      kind,
+      start: position(value),
+      end: position(value) + [...value].length,
+    });
+    const table = range("Group N A 123 B 456", "table");
+    const cell = (value, header = false) => ({
+      ...range(value),
+      header,
+      rowspan: 1,
+      colspan: 1,
+    });
+    table.rows = [
+      [cell("Group", true), cell("N", true)],
+      [cell("A"), cell("123")],
+      [cell("B"), cell("456")],
+    ];
+    const hash = "b".repeat(64);
+    const layout = {
+      version: 1,
+      content_hash: hash,
+      blocks: [
+        range("Results", "heading"),
+        range("The 𝛼 biomarker was evaluated in two groups.", "paragraph"),
+        table,
+        range("Figure 1 Study workflow.", "figure"),
+        range("Final intact sentence.", "paragraph"),
+      ],
+    };
+    let start = 0;
+    const blocks = text.split("\n").map((value) => {
+      const block = {
+        id: `p-${String(start).padStart(7, "0")}`,
+        start,
+        end: start + [...value].length,
+        text: value,
+      };
+      start = block.end + 1;
+      return block;
+    });
+    await page.route("https://articles.example.test/v1/fulltext/*", (route) =>
+      route.fulfill({
+        json: {
+          ...article,
+          content_text: text,
+          content_hash: hash,
+          blocks,
+          reading_layout: layout,
+        },
+      }),
+    );
+    await page.goto("/uro-daily-pick/fulltext/12345670?scenario=admin");
+    const reader = page.getByRole("article");
+    await expect(
+      reader.getByRole("heading", { name: "Results" }),
+    ).toBeVisible();
+    await expect(reader.getByRole("table")).toBeVisible();
+    await expect(reader.getByRole("columnheader")).toHaveText(["Group", "N"]);
+    await expect(reader.getByRole("cell")).toHaveText(["A", "123", "B", "456"]);
+    expect((await reader.textContent()).replace(/\s/g, "")).toBe(
+      text.replace(/\s/g, ""),
+    );
+    expect(
+      await page.evaluate(
+        () => document.documentElement.scrollWidth <= innerWidth,
+      ),
+    ).toBe(true);
+    expect(
+      (await new AxeBuilder({ page }).withTags(["wcag2a", "wcag2aa"]).analyze())
+        .violations,
+    ).toEqual([]);
+    await page.screenshot({
+      path: testInfo.outputPath("structured-original.png"),
+      fullPage: true,
+    });
+  });
+}
 
 for (const width of [390, 320]) {
   test(`owner reads original inside mobile service at ${width}px and logout clears it`, async ({
