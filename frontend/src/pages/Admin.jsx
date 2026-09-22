@@ -178,22 +178,31 @@ export default function Admin() {
           </AdminPanel>
 
           {/* Journal distribution */}
-          <AdminPanel title="Journals" rpc="admin_journal_dist" refresh={retry} list>
-            {(journals) => (
-              <>
-                <div className="space-y-1.5 max-h-[240px] overflow-y-auto">
-                  {journals.map((j, i) => (
-                    <div key={i} className="flex items-center justify-between text-[0.778rem]">
-                      <span className="text-text2 truncate flex-1 mr-2">{j.journal}</span>
-                      <span className="text-text3 font-mono shrink-0">{j.paper_count}</span>
-                      {j.recent_count > 0 && (
-                        <span className="text-accent text-[0.667rem] ml-1 shrink-0">+{j.recent_count}</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </>
-            )}
+          <AdminPanel title="저널별 원문 확보" rpc="admin_journal_fulltext_counts" refresh={retry}>
+            {({ counts_available, journals }) =>
+              !counts_available ? (
+                <p role="status" className="text-sm text-text3">
+                  원문 확보 현황을 집계 중입니다.
+                </p>
+              ) : (
+                <>
+                  <p className="text-xs text-text3 mb-3">서비스에 반영된 원문 · 상위 30개 저널</p>
+                  {journals.length === 0 && <p className="text-sm text-text3">확보된 원문이 없습니다.</p>}
+                  <div className="space-y-1.5 max-h-[240px] overflow-y-auto">
+                    {journals.map((j, i) => (
+                      <div key={i} className="flex items-center justify-between text-[0.778rem]">
+                        <span className="text-text2 truncate flex-1 mr-2" title={j.journal || "저널 미상"}>
+                          {j.journal || "저널 미상"}
+                        </span>
+                        <span className="text-text3 font-mono shrink-0">
+                          {j.fulltext_count.toLocaleString("ko-KR")}편
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )
+            }
           </AdminPanel>
         </div>
 
