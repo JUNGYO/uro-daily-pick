@@ -1050,6 +1050,14 @@ export const supabase = {
           },
           error: null,
         };
+      if (name === "admin_journal_fulltext_counts")
+        return {data: {
+          counts_available: scenario !== "admin-counts-initializing",
+          journals: scenario === "admin-counts-initializing" ? null : [
+            {journal:"The Journal of urology",fulltext_count:2},
+            {journal:"European urology",fulltext_count:1},
+          ],
+        },error:null};
       if (name === "admin_stats")
         return {
           data: {
