@@ -40,6 +40,23 @@ test("peer review remains an honest placeholder without credential persistence",
   expect(keys.some(k=>/api.?key|gemini|openai/i.test(k))).toBe(false);
 });
 
+test("existing project library imports with supported search provenance",async({page})=>{
+  await open(page);
+  await page.getByRole("button",{name:"검색·가져오기",exact:true}).click();
+  await page.getByRole("button",{name:"프로젝트 문헌 가져오기",exact:true}).click();
+  await expect(page.getByText("저장했습니다.",{exact:true})).toBeVisible();
+  const calls=await page.evaluate(()=>window.__reviewFixture.calls);
+  const searches=calls.filter(x=>x.name==='review_save_search');
+  expect(searches.length).toBeGreaterThan(0);
+  const allowed=['import_format','journal','from','to','topic','kind','keywords','page','language','date_field','coverage_note'];
+  for(const search of searches){
+    expect(search.args.p_payload.source).toBe('Project library');
+    expect(Object.keys(search.args.p_payload.limits).every(k=>allowed.includes(k))).toBe(true);
+    expect(search.args.p_payload.status).toBe('partial');
+  }
+  expect(calls.some(x=>x.name==='review_import_records'&&x.args.p_items.length>0)).toBe(true);
+});
+
 test("project reader cannot submit protocols or numerical analysis",async({page})=>{
   await open(page,"review-reader");await expect(page.getByRole("button",{name:"연구계획 저장"})).toBeDisabled();
   await page.getByRole("button",{name:"분석·내보내기",exact:true}).click();
