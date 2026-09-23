@@ -375,7 +375,21 @@ def main():
         print("Viewer configuration valid")
         return
     with ViewerServer(int(config.get("port", 18451)), archive, identity, config["origin"]) as server:
-        server.serve_forever(poll_interval=0.5)
+        # Optional project API is a separate loopback server under the same
+        # restricted reader identity. It has no archive or enrollment reference.
+        review_server = None
+        if config.get('review_service') is True:
+            from review_service import Gateway, ServiceClient, Server, handler_for
+            gateway = Gateway(ServiceClient(config['supabase_url'], config['public_key']), config['origin'],
+                              Path(__file__).parent / 'review-engines')
+            review_server = Server(('127.0.0.1', 18452), handler_for(gateway))
+            threading.Thread(target=review_server.serve_forever, daemon=True).start()
+        try:
+            server.serve_forever(poll_interval=0.5)
+        finally:
+            if review_server:
+                review_server.shutdown()
+                review_server.server_close()
 
 
 if __name__ == "__main__":

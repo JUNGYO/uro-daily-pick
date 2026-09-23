@@ -4,6 +4,7 @@ import { useAuth } from "../lib/auth";
 import { supabase } from "../lib/supabase";
 import { checked } from "../lib/data";
 import { rpc, searchArgsV2, searchDateFields, expandQuery } from "../lib/workspace";
+import ReviewTransfer from "../components/ReviewTransfer";
 import {
   ReaderPage,
   PaperCard,
@@ -382,6 +383,22 @@ export default function Discover() {
                 </a>
               </div>
             )}
+            <ReviewTransfer
+              key={params.toString()}
+              papers={r.data.items}
+              provenance={{
+                source: "Uro Daily Pick 문헌 탐색",
+                query: JSON.stringify(searchArgsV2(params)),
+                total: r.data.total,
+                limits: {
+                  journal: params.get("journal") || "",
+                  from: params.get("from") || "",
+                  to: params.get("to") || "",
+                  page: Number(params.get("page") || 0),
+                  coverage_note: "서비스 등록 문헌 중 선택한 페이지 · 전체 문헌 검색 완료가 아님",
+                },
+              }}
+            />
             {r.data.items.map((p) => (
               <PaperCard
                 key={p.id}

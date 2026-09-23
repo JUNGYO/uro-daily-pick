@@ -9,8 +9,10 @@ files/
 .claude/
 
 .venv/
+.review-runtime/
 .env.*
 !.env.example
 .fulltext-cache/
 frontend/test-results/
+test-results/
 frontend/playwright-report/
