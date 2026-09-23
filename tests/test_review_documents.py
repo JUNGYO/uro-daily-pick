@@ -33,6 +33,7 @@ class ReviewDocumentsTests(unittest.TestCase):
         with self.assertRaises(ValueError):parse_import('Title,Year\nTrial,2020','csv',{'title':'Missing column'})
         p=parse_import('Title,Year\nTrial,2020','csv',{'title':'Title','year':'Year'});self.assertEqual(p['source_count'],1)
         self.assertIn("'=HYPERLINK",csv_text([['=HYPERLINK(\"evil\")']]))
+        self.assertEqual(csv_text([[-0.125,None]]),'\ufeff-0.125,\r\n')
     def test_records_with_invalid_identifiers_are_reported(self):
         p=parse_import('TY  - JOUR\nTI  - Good\nER  -\nTY  - JOUR\nTI  - Bad\nDO  - invalid\nER  -','ris')
         self.assertEqual(p['source_count'],2);self.assertEqual(len(p['items']),1);self.assertEqual(p['errors'][0]['record'],2)

@@ -174,7 +174,7 @@ def csl(reports):
 def csv_text(rows):
     out=io.StringIO();writer=csv.writer(out)
     for row in rows:
-        writer.writerow([("'"+str(v)) if re.match(r'^\s*[=+@-]|^[\t\r]',str(v)) else str(v) if v is not None else '' for v in row])
+        writer.writerow([("'"+v) if isinstance(v,str) and re.match(r'^\s*[=+@-]|^[\t\r]',v) else str(v) if v is not None else '' for v in row])
     return '\ufeff'+out.getvalue()
 
 
