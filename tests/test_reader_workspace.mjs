@@ -51,6 +51,14 @@ try{
  assert.equal((await db.query('SELECT note FROM public.reader_states')).rows[0].note,'private');
  await db.query("SELECT public.reader_opinion(1,'dislike')");assert.equal((await db.query('SELECT saved FROM public.reader_states')).rows[0].saved,true);
  await db.query("INSERT INTO public.collections(id,user_id,name,keywords) VALUES(10,$1,'Project',ARRAY['prostate'])",[a]);
+ await db.query("INSERT INTO public.collections(id,user_id,name,keywords) VALUES(11,$1,'Empty project','{}')",[a]);
+ await db.exec('RESET ROLE; REVOKE SELECT ON public.papers FROM authenticated');
+ await user(a);
+ assert.deepEqual((await db.query('SELECT public.project_recommendations(11) r')).rows[0].r,[], 'Empty projects must not touch the paper catalog');
+ await assert.rejects(db.query('SELECT public.project_recommendations(10)'),{code:'42501'});
+ await user(c);await assert.rejects(db.query('SELECT public.project_recommendations(11)'),{code:'42501'});
+ await db.exec('RESET ROLE; GRANT SELECT ON public.papers TO authenticated');
+ await user(a);
  await db.query('INSERT INTO public.collection_papers VALUES(10,1,now())');
  await db.query("SELECT public.project_members(10,'reader@example.test','reader')");
  await user(b);assert.equal((await db.query('SELECT * FROM public.reader_states')).rows.length,0);
