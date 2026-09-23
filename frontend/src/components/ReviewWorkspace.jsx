@@ -899,7 +899,7 @@ function Sources({ project, user, canEdit, action, searches }) {
                 await importCatalogPage(project.id, result.items, {
                   source: "Project library",
                   query: "Project " + project.id,
-                  limits: { page, selection: "project_page" },
+                  limits: { page },
                   total: result.total,
                 });
                 page++;
