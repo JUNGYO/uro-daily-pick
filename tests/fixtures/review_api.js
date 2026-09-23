@@ -19,7 +19,10 @@ export function reviewRpc(name,args,readOnly=false){
   if(name==="review_analysis")return data(r.runs.find(x=>x.id===args.p_id));
   if(readOnly)return {error:{message:"Project editor required",code:"42501"}};
   if(name==="review_save_protocol"){r.protocol={version:r.protocol.version+1,payload:args.p_payload};return data(r.protocol);}
-  if(name==="review_import_records")return data({imported:args.p_items.length,existing_reports:0});
+  if(name==="review_import_records") {
+    for(const item of args.p_items) if(!r.reports.some(x=>x.paper_id===item.paper_id))r.reports.push({id:id(100+r.reports.length),paper_id:item.paper_id,bibliography:item.bibliography,ta_decision:"pending",ft_decision:"pending",revision:1});
+    return data({imported:args.p_items.length,existing_reports:0});
+  }
   if(name==="review_start_analysis") {const row={id:args.p_run_id,status:"queued",config:args.p_config,created_at:new Date().toISOString(),input_hash:"b".repeat(64),input_manifest:{observations:r.observations}};r.runs.push(row);return data(row);}
   const kinds={report:"reports",study:"studies",observation:"observations",assessment:"assessments",search:"searches"};
   if(name.startsWith("review_save_")){const key=kinds[name.replace("review_save_","")];if(!key)return undefined;const old=r[key].find(x=>x.id===args.p_id);const row={...old,...args.p_payload,id:args.p_id,revision:(old?.revision||0)+1};if(old)Object.assign(old,row);else r[key].push(row);return data(row);}

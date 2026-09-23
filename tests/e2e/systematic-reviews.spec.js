@@ -40,21 +40,10 @@ test("peer review remains an honest placeholder without credential persistence",
   expect(keys.some(k=>/api.?key|gemini|openai/i.test(k))).toBe(false);
 });
 
-test("existing project library imports with supported search provenance",async({page})=>{
-  await open(page);
-  await page.getByRole("button",{name:"검색·가져오기",exact:true}).click();
-  await page.getByRole("button",{name:"프로젝트 문헌 가져오기",exact:true}).click();
-  await expect(page.getByText("저장했습니다.",{exact:true})).toBeVisible();
-  const calls=await page.evaluate(()=>window.__reviewFixture.calls);
-  const searches=calls.filter(x=>x.name==='review_save_search');
-  expect(searches.length).toBeGreaterThan(0);
-  const allowed=['import_format','journal','from','to','topic','kind','keywords','page','language','date_field','coverage_note'];
-  for(const search of searches){
-    expect(search.args.p_payload.source).toBe('Project library');
-    expect(Object.keys(search.args.p_payload.limits).every(k=>allowed.includes(k))).toBe(true);
-    expect(search.args.p_payload.status).toBe('partial');
-  }
-  expect(calls.some(x=>x.name==='review_import_records'&&x.args.p_items.length>0)).toBe(true);
+test("project sources link to discovery without a second library import",async({page})=>{
+  await open(page);await page.getByRole("button",{name:"검색·가져오기",exact:true}).click();
+  await expect(page.getByRole("button",{name:"프로젝트 문헌 가져오기",exact:true})).toHaveCount(0);
+  await expect(page.getByRole("link",{name:"문헌 탐색",exact:true}).last()).toHaveAttribute("href",/discover\?project=1/);
 });
 
 test("switching populated review stages never renders the previous record type",async({page})=>{
@@ -80,11 +69,11 @@ test("project reader cannot submit protocols or numerical analysis",async({page}
 
 test("discovery transfers selected metadata and records the actual search scope",async({page})=>{
   await page.goto('/uro-daily-pick/discover?scenario=review&q=prostate');
-  await page.getByRole("button",{name:"연구 프로젝트로 가져오기",exact:true}).click();
+  await page.getByRole("button",{name:"프로젝트에 추가",exact:true}).click();
   await page.getByLabel("대상 프로젝트").selectOption("1");
-  await page.getByRole("button",{name:"이 페이지 선택",exact:true}).click();
-  await page.getByRole("button",{name:/선택 \d+편 가져오기/}).click();
-  await expect(page.getByRole("link",{name:"프로젝트에서 선별하기"})).toBeVisible();
+  await page.getByRole("button",{name:"이 페이지 전체 선택",exact:true}).click();
+  await page.getByRole("button",{name:/선택 \d+편 추가/}).click();
+  await expect(page.getByRole("link",{name:"문헌 선별로 이어가기"})).toBeVisible();
   const calls=await page.evaluate(()=>window.__reviewFixture.calls);
   const search=calls.find(x=>x.name==='review_save_search');expect(search.args.p_payload.status).toBe('partial');expect(search.args.p_payload.query).toContain('prostate');
   const imported=calls.find(x=>x.name==='review_import_records');expect(imported.args.p_items.length).toBeGreaterThan(0);

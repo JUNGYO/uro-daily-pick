@@ -87,7 +87,7 @@ it("uses the server total for paging and preserves the memo query on the last pa
   await screen.findByRole("link", { name: "Unsaved research note 20" });
   fireEvent.click(screen.getByRole("button", { name: "다음 페이지" }));
   await waitFor(() =>
-    expect(mocks.rpc).toHaveBeenLastCalledWith("search_library", {
+    expect(mocks.rpc).toHaveBeenCalledWith("search_library", {
       p_query: "needle",
       p_tab: "notes",
       p_page: 1,

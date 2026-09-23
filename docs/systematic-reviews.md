@@ -5,6 +5,22 @@ can additionally organize a systematic review through protocol, searches,
 screening, study linkage, extraction, assessments and reproducible analysis.
 Searching the service is not presented as a complete systematic search.
 
+## Connected literature workflow
+
+Discovery and the personal library use the existing paper cards for selection,
+with private saved state and project screening status beside each paper. The
+selected project survives navigation between discovery, library and projects.
+Adding a paper to a project also registers it for screening; it does not mark it
+eligible or alter personal saved state. Existing project papers are reconciled
+with explicitly incomplete historical provenance, not invented search dates.
+
+The project document list includes imported external references. Catalog and
+external references also remain available in the research writing workspace.
+Existing notes, human screening decisions and frozen analyses are preserved.
+Stage and report links return to the same review record after reading a paper.
+Migration 041 uses existing membership checks, private capture triggers and
+authenticated, bounded read functions. No additional public data access exists.
+
 ## Implementation
 
 - Python handles RIS, NBIB, CSL-JSON, BibTeX and mapped CSV parsing, numerical

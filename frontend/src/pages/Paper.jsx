@@ -295,7 +295,7 @@ export default function Paper() {
                           await checked(
                             supabase.from("collection_papers").upsert({ collection_id: id, paper_id: p.id }),
                           );
-                          setMessage("프로젝트에 추가했습니다.");
+                          setMessage("프로젝트 문헌 목록과 선별 대기에 추가했습니다.");
                         });
                     }}
                   >

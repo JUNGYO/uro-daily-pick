@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import { ErrorNotice, Loading } from "./Status";
 import { paperLink } from "../lib/workspace";
+import { PaperFlowActions } from "./ReviewTransfer";
 export function useResource(load, deps) {
   const [data, setData] = useState(null),
     [error, setError] = useState(""),
@@ -75,9 +76,13 @@ export function PaperCard({ paper, compare, onCompare, extra }) {
         </span>
       </div>
       <h2>
-        <Link to={paperLink(paper)} state={{ returnTo: location.pathname + location.search }}>
-          {paper.title}
-        </Link>
+        {paper.external ? (
+          paper.title
+        ) : (
+          <Link to={paperLink(paper)} state={{ returnTo: location.pathname + location.search }}>
+            {paper.title}
+          </Link>
+        )}
       </h2>
       <p className="reader-muted">{paper.journal}</p>
       {paper.insight && <p>{paper.insight}</p>}
@@ -90,6 +95,7 @@ export function PaperCard({ paper, compare, onCompare, extra }) {
         </label>
       )}
       {extra}
+      <PaperFlowActions paper={paper} />
     </article>
   );
 }

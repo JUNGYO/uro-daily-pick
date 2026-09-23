@@ -3,6 +3,9 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { supabase } from "../lib/supabase";
 import { checked, appUrl } from "../lib/data";
+import { screeningLabel, projectLink, scopedLink } from "../lib/projectFlow";
+import "../components/projectFlow.css";
+import ProjectProgress from "../components/ProjectProgress";
 import { rpc } from "../lib/workspace";
 import {
   ReaderPage,
@@ -26,7 +29,8 @@ export default function Projects() {
     [message, setMessage] = useState(""),
     [selected, setSelected] = useState([]),
     [members, setMembers] = useState(null),
-    [confirm, setConfirm] = useState(false);
+    [confirm, setConfirm] = useState(false),
+    [reviewDirty, setReviewDirty] = useState(false);
   const r = useResource(
     async () => ({
       projects: await checked(
@@ -38,9 +42,9 @@ export default function Projects() {
   );
   const detail = useResource(
     async () =>
-      id && !reviewOpen
+      id && !reviewOpen && !researchOpen
         ? {
-            ...(await rpc(query ? "project_papers_v2" : "project_papers", {
+            ...(await rpc("project_documents", {
               p_id: id,
               p_page: page,
               ...(query ? { p_query: query } : {}),
@@ -65,15 +69,42 @@ export default function Projects() {
   }
   return (
     <ReaderPage
-      title={reviewOpen && project ? project.name : "프로젝트·공동 서재"}
+      title={project ? project.name : "연구 프로젝트"}
       description={
-        reviewOpen
-          ? "문헌 선별과 원문 수치를 연결하고, 고정한 입력으로 분석합니다."
-          : "프로젝트별 문헌·메모·관심 주제를 관리합니다. 공유는 초대를 수락한 계정에만 적용됩니다."
+        project
+          ? "문헌을 모으고, 선별하고, 분석하는 하나의 연구 공간입니다."
+          : "관심 문헌을 프로젝트에 모아 연구 정리와 메타분석을 이어가세요."
       }
     >
-      <Link to="/library">← 내 서재</Link>
-      <div hidden={reviewOpen}>
+      <div className="project-context">
+        <label>
+          현재 프로젝트{" "}
+          <select
+            aria-label="현재 프로젝트"
+            value={id || ""}
+            onChange={(e) => {
+              if (reviewDirty && !window.confirm("저장하지 않은 입력을 닫고 이동할까요?")) return;
+              setParams(e.target.value ? { project: e.target.value } : {});
+              setReviewDirty(false);
+              setMembers(null);
+            }}
+          >
+            <option value="">프로젝트 목록</option>
+            {r.data?.projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="reader-actions">
+          <Link to={scopedLink("/discover", id)}>문헌 추가</Link>
+          <Link to={scopedLink("/library", id)}>서재에서 선택</Link>
+        </div>
+      </div>
+      {r.error && <p role="alert">{r.error}</p>}
+      <p role="status">{message}</p>
+      <div hidden={!!id}>
         <form
           className="reader-search"
           onSubmit={(e) => {
@@ -93,7 +124,7 @@ export default function Projects() {
             프로젝트 만들기
           </button>
         </form>
-        <p role="status">{message}</p>
+
         <Resource resource={r}>
           {r.data?.invitations.map((i) => (
             <div className="reader-notice" key={i.id}>
@@ -149,22 +180,27 @@ export default function Projects() {
       </div>
       {project && (
         <>
-          {!reviewOpen && <h2>{project.name}</h2>}
-          <div className="reader-actions">
-            {!researchOpen && !reviewOpen && (
-              <button
-                className={researchOpen ? "btn-primary" : "btn-secondary"}
-                aria-expanded={researchOpen}
-                onClick={() => {
-                  const next = new URLSearchParams(params);
-                  if (researchOpen) next.delete("view");
-                  else next.set("view", "research");
-                  setParams(next);
+          <nav className="project-nav" aria-label="프로젝트 작업">
+            {[
+              ["", "문헌 목록"],
+              ["research", "연구 정리"],
+              ["review", "체계적고찰·메타분석"],
+            ].map(([view, label]) => (
+              <Link
+                key={view}
+                to={"/projects?" + new URLSearchParams({ project: id, ...(view ? { view } : {}) })}
+                aria-current={(params.get("view") || "") === view ? "page" : undefined}
+                onClick={(e) => {
+                  if (reviewDirty && !window.confirm("저장하지 않은 입력을 닫고 이동할까요?"))
+                    e.preventDefault();
+                  else setReviewDirty(false);
                 }}
               >
-                {researchOpen ? "문헌 목록으로" : "연구 정리"}
-              </button>
-            )}
+                {label}
+              </Link>
+            ))}
+          </nav>
+          <div className="reader-actions">
             <button
               className="btn-secondary"
               onClick={() =>
@@ -176,11 +212,6 @@ export default function Projects() {
             >
               프로젝트 주소 복사
             </button>
-            {!researchOpen && !reviewOpen && (
-              <button className="btn-secondary" onClick={() => setParams({ project: id, view: "review" })}>
-                체계적고찰·메타분석
-              </button>
-            )}
             {owner && !researchOpen && !reviewOpen && (
               <button
                 className="btn-secondary"
@@ -209,44 +240,49 @@ export default function Projects() {
               <ReviewWorkspace
                 key={project.id}
                 project={project}
+                onDirtyChange={setReviewDirty}
                 onClose={() => setParams({ project: id })}
               />
             </Suspense>
           )}
           <div hidden={researchOpen || reviewOpen}>
+            {!researchOpen && !reviewOpen && <ProjectProgress project={project} />}
             {owner && (
-              <form
-                key={id}
-                className="reader-card"
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const keywords = new FormData(e.currentTarget)
-                    .get("keywords")
-                    .split(",")
-                    .map((s) => s.trim())
-                    .filter(Boolean)
-                    .slice(0, 30);
-                  run(async () => {
-                    await checked(supabase.from("collections").update({ keywords }).eq("id", id));
-                    detail.reload();
-                    r.reload();
-                    setMessage("이 프로젝트의 추천 주제를 저장했습니다.");
-                  });
-                }}
-              >
-                <label>
-                  프로젝트 추천 주제 · 영문 키워드, 쉼표로 구분
-                  <input
-                    className="w-full"
-                    name="keywords"
-                    defaultValue={(project.keywords || []).join(", ")}
-                    maxLength={600}
-                  />
-                </label>
-                <button className="btn-secondary" disabled={busy}>
-                  주제 저장
-                </button>
-              </form>
+              <details>
+                <summary>프로젝트 추천 설정</summary>
+                <form
+                  key={id}
+                  className="reader-card"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    const keywords = new FormData(e.currentTarget)
+                      .get("keywords")
+                      .split(",")
+                      .map((s) => s.trim())
+                      .filter(Boolean)
+                      .slice(0, 30);
+                    run(async () => {
+                      await checked(supabase.from("collections").update({ keywords }).eq("id", id));
+                      detail.reload();
+                      r.reload();
+                      setMessage("이 프로젝트의 추천 주제를 저장했습니다.");
+                    });
+                  }}
+                >
+                  <label>
+                    프로젝트 추천 주제 · 영문 키워드, 쉼표로 구분
+                    <input
+                      className="w-full"
+                      name="keywords"
+                      defaultValue={(project.keywords || []).join(", ")}
+                      maxLength={600}
+                    />
+                  </label>
+                  <button className="btn-secondary" disabled={busy}>
+                    주제 저장
+                  </button>
+                </form>
+              </details>
             )}
             {members && owner && (
               <section className="reader-card">
@@ -344,77 +380,75 @@ export default function Projects() {
                   {!detail.data.items.length && (
                     <p>
                       {query ? "검색 조건에 일치하는 문헌이 없습니다. " : ""}
-                      문헌 상세의 메모·보관에서 이 프로젝트에 추가할 수 있습니다.{" "}
-                      <Link to="/discover">문헌 찾기</Link>
+                      탐색이나 내 서재에서 선택한 문헌이 이 목록과 선별 대기에 함께 반영됩니다.{" "}
+                      <Link to={scopedLink("/discover", id)}>문헌 찾기</Link>
                     </p>
                   )}
                   {detail.data.items.map((p) => (
                     <PaperCard
-                      key={p.id}
+                      key={p.report_id || p.id}
                       paper={p}
                       compare={selected.includes(p.pmid)}
-                      onCompare={(x) => setSelected((prev) => selectComparison(prev, x))}
+                      onCompare={
+                        p.external ? undefined : (x) => setSelected((prev) => selectComparison(prev, x))
+                      }
                       extra={
                         <>
-                          {detail.data.can_edit ? (
-                            <form
-                              key={JSON.stringify([p.id, id, p.note || "", p.tags || []])}
-                              onSubmit={(e) => {
-                                e.preventDefault();
-                                const f = new FormData(e.currentTarget);
-                                run(async () => {
-                                  await checked(
-                                    supabase.from("project_notes").upsert({
-                                      collection_id: id,
-                                      paper_id: p.id,
-                                      note: f.get("note"),
-                                      tags: f
-                                        .get("tags")
-                                        .split(",")
-                                        .map((x) => x.trim())
-                                        .filter(Boolean)
-                                        .slice(0, 20),
-                                      updated_by: user.id,
-                                      updated_at: new Date().toISOString(),
-                                    }),
-                                  );
-                                  setMessage("프로젝트 메모를 저장했습니다.");
-                                });
-                              }}
-                            >
-                              <label>
-                                공동 메모
-                                <textarea name="note" defaultValue={p.note || ""} maxLength={6000} />
-                              </label>
-                              <label>
-                                태그
-                                <input name="tags" defaultValue={(p.tags || []).join(", ")} maxLength={600} />
-                              </label>
-                              <div className="reader-actions">
-                                <button className="btn-secondary" disabled={busy}>
-                                  메모 저장
-                                </button>
-                                <button
-                                  type="button"
-                                  className="btn-secondary"
-                                  disabled={busy}
-                                  onClick={() =>
-                                    run(async () => {
-                                      await checked(
-                                        supabase
-                                          .from("collection_papers")
-                                          .delete()
-                                          .eq("collection_id", id)
-                                          .eq("paper_id", p.id),
-                                      );
-                                      detail.reload();
-                                    })
-                                  }
-                                >
-                                  프로젝트에서 제외
-                                </button>
-                              </div>
-                            </form>
+                          <div className="project-document-state">
+                            <span>{screeningLabel(p)}</span>
+                            <Link to={projectLink(id, p.report_id)}>선별 기록 열기</Link>
+                          </div>
+                          {p.external ? (
+                            <p className="reader-muted">
+                              외부에서 가져온 문헌 · 선별 기록에서 서지와 원문 출처를 확인하세요.
+                            </p>
+                          ) : detail.data.can_edit ? (
+                            <details>
+                              <summary>공동 메모·태그{p.note ? " · 저장됨" : ""}</summary>
+                              <form
+                                key={JSON.stringify([p.id, id, p.note || "", p.tags || []])}
+                                onSubmit={(e) => {
+                                  e.preventDefault();
+                                  const f = new FormData(e.currentTarget);
+                                  run(async () => {
+                                    await checked(
+                                      supabase.from("project_notes").upsert({
+                                        collection_id: id,
+                                        paper_id: p.id,
+                                        note: f.get("note"),
+                                        tags: f
+                                          .get("tags")
+                                          .split(",")
+                                          .map((x) => x.trim())
+                                          .filter(Boolean)
+                                          .slice(0, 20),
+                                        updated_by: user.id,
+                                        updated_at: new Date().toISOString(),
+                                      }),
+                                    );
+                                    setMessage("프로젝트 메모를 저장했습니다.");
+                                  });
+                                }}
+                              >
+                                <label>
+                                  공동 메모
+                                  <textarea name="note" defaultValue={p.note || ""} maxLength={6000} />
+                                </label>
+                                <label>
+                                  태그
+                                  <input
+                                    name="tags"
+                                    defaultValue={(p.tags || []).join(", ")}
+                                    maxLength={600}
+                                  />
+                                </label>
+                                <div className="reader-actions">
+                                  <button className="btn-secondary" disabled={busy}>
+                                    메모 저장
+                                  </button>
+                                </div>
+                              </form>
+                            </details>
                           ) : (
                             <p>{p.note || "공동 메모 없음"}</p>
                           )}

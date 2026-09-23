@@ -131,6 +131,7 @@ test("projects support topic suggestions, notes and revocation", async ({
   await page
     .getByRole("button", { name: "Upcoming journal club", exact: true })
     .click();
+  await page.getByText("프로젝트 추천 설정", {exact:true}).click();
   await page.getByLabel(/프로젝트 추천 주제/).fill("prostate");
   await page.getByRole("button", { name: "주제 저장" }).click();
   await page
@@ -141,6 +142,7 @@ test("projects support topic suggestions, notes and revocation", async ({
   const row = page
     .locator("article")
     .filter({ hasText: "Personalized treatment" });
+  await row.locator("details summary").click();
   await row.getByLabel("공동 메모").fill("Discuss endpoints at journal club.");
   await row.getByRole("button", { name: "메모 저장", exact: true }).click();
   await page.getByRole("button", { name: "공유 권한 관리" }).click();

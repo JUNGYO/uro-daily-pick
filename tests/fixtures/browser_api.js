@@ -1,4 +1,4 @@
-import { reviewRpc } from "./review_api";
+import { reviewRpc, reviewFixture } from "./review_api";
 const scenario =
   new URLSearchParams(location.search).get("scenario") || "reader";
 const today = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
@@ -904,14 +904,16 @@ export const supabase = {
             last_seen_at: s.last_seen_at || new Date().toISOString(),
           })),
         };
+      if (name === "workspace_paper_context") return { data: args.p_papers.map(id => ({paper_id:id,saved:!!db.reader_states.find(s=>s.paper_id===id)?.saved,projects:reviewFixture.reports.filter(r=>r.paper_id===id).map(r=>({id:1,name:db.collections[0].name,report_id:r.id,ta_decision:r.ta_decision,ft_decision:r.ft_decision}))})) };
       if (name === "project_invitations") return { data: [] };
-      if (name === "project_papers" || name === "project_papers_v2") {
+      if (name === "project_papers" || name === "project_papers_v2" || name === "project_documents") {
         const term = (args.p_query || "").trim().toLowerCase(), page = args.p_page || 0;
         const items = db.collection_papers
           .filter((c) => c.collection_id === args.p_id)
           .sort((a, b) => String(b.added_at || "").localeCompare(String(a.added_at || "")) || b.paper_id - a.paper_id)
           .map((c) => ({
             ...card(db.papers.find((p) => p.id === c.paper_id)),
+            ...(name === "project_documents" ? {report_id:reviewFixture.reports.find(r=>r.paper_id===c.paper_id)?.id,ta_decision:"pending",ft_decision:"pending"} : {}),
             ...db.project_notes.find(
               (n) =>
                 n.collection_id === c.collection_id &&
