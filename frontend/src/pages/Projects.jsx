@@ -38,7 +38,7 @@ export default function Projects() {
   );
   const detail = useResource(
     async () =>
-      id
+      id && !reviewOpen
         ? {
             ...(await rpc(query ? "project_papers_v2" : "project_papers", {
               p_id: id,
@@ -48,7 +48,7 @@ export default function Projects() {
             suggestions: await rpc("project_recommendations", { p_id: id }),
           }
         : null,
-    [id, page, query, researchOpen],
+    [id, page, query, researchOpen, reviewOpen],
   );
   const project = r.data?.projects.find((x) => x.id === id),
     owner = project?.user_id === user.id;
