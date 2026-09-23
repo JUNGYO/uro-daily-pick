@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { rpc } from "../lib/workspace";
 import {
@@ -7,7 +7,6 @@ import {
   saveReview,
   reviewRequest,
   uid,
-  importCatalogPage,
   downloadBlob,
   KIND_LABELS,
   VALUE_FIELDS,
@@ -126,10 +125,12 @@ function Flow({ counts = {} }) {
   );
 }
 
-export default function ReviewWorkspace({ project, onClose }) {
+export default function ReviewWorkspace({ project, onClose, onDirtyChange }) {
   const { user } = useAuth();
+  const [params, setParams] = useSearchParams();
+  const tab = tabs.some(([id]) => id === params.get("stage")) ? params.get("stage") : "protocol";
+  const focusedReport = params.get("report") || "";
   const [workspace, setWorkspace] = useState(null),
-    [tab, setTab] = useState("protocol"),
     [listState, setList] = useState({ items: [], total: 0 }),
     [page, setPage] = useState(0),
     [query, setQuery] = useState(""),
@@ -141,6 +142,10 @@ export default function ReviewWorkspace({ project, onClose }) {
     [editing, setEditing] = useState(null),
     [dirty, setDirty] = useState(false),
     [run, setRun] = useState(null);
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+    return () => onDirtyChange?.(false);
+  }, [dirty, onDirtyChange]);
   const alive = useRef(true),
     controller = useRef(null);
   const canEdit = workspace?.can_edit && !user.offline;
@@ -173,12 +178,13 @@ export default function ReviewWorkspace({ project, onClose }) {
     assessments: "assessments",
     analysis: "runs",
   }[tab];
-  const listKey = JSON.stringify([project.id, section, page, query, filter, revision]);
+  const listQuery = tab === "reports" && focusedReport ? focusedReport : query;
+  const listKey = JSON.stringify([project.id, section, page, listQuery, filter, revision]);
   const list = listState.key === listKey ? listState : { items: [], total: 0 };
   useEffect(() => {
     let live = true;
     if (section)
-      reviewList(project.id, section, query, filter, page)
+      reviewList(project.id, section, listQuery, filter, page)
         .then((x) => {
           if (live) setList({ ...x, key: listKey });
         })
@@ -188,7 +194,7 @@ export default function ReviewWorkspace({ project, onClose }) {
     return () => {
       live = false;
     };
-  }, [project.id, section, page, query, filter, revision, listKey]);
+  }, [project.id, section, page, listQuery, filter, revision, listKey]);
   useEffect(() => {
     if (!dirty) return;
     const handler = (e) => {
@@ -246,7 +252,10 @@ export default function ReviewWorkspace({ project, onClose }) {
   }
   function changeTab(next) {
     if (dirty && !window.confirm("저장하지 않은 입력을 닫고 이동할까요?")) return;
-    setTab(next);
+    const url = new URLSearchParams(params);
+    url.set("stage", next);
+    url.delete("report");
+    setParams(url);
     setPage(0);
     setQuery("");
     setFilter("");
@@ -286,14 +295,6 @@ export default function ReviewWorkspace({ project, onClose }) {
             {project.name} · {canEdit ? "편집 가능" : "읽기 전용"}
           </p>
         </div>
-        <button
-          className="btn-secondary"
-          onClick={() => {
-            if (!dirty || window.confirm("저장하지 않은 입력을 닫을까요?")) onClose();
-          }}
-        >
-          프로젝트로 돌아가기
-        </button>
       </div>
       <nav className="review-tabs" aria-label="연구 단계">
         {tabs.map(([id, label]) => (
@@ -342,7 +343,24 @@ export default function ReviewWorkspace({ project, onClose }) {
           searches={list.items}
         />
       )}
-      {section && tab !== "sources" && tab !== "analysis" && (
+      {focusedReport && tab === "reports" && (
+        <p className="project-document-state">
+          선택한 문헌의 선별 기록{" "}
+          <button
+            className="btn-secondary"
+            onClick={() => {
+              const next = new URLSearchParams(params);
+              next.delete("report");
+              setParams(next);
+              setQuery("");
+              setPage(0);
+            }}
+          >
+            전체 문헌 보기
+          </button>
+        </p>
+      )}
+      {section && tab !== "sources" && tab !== "analysis" && !focusedReport && (
         <form
           className="reader-search"
           onSubmit={(e) => {
@@ -374,6 +392,11 @@ export default function ReviewWorkspace({ project, onClose }) {
                 key={v}
                 className={filter === v ? "btn-primary" : "btn-secondary"}
                 onClick={() => {
+                  if (focusedReport) {
+                    const next = new URLSearchParams(params);
+                    next.delete("report");
+                    setParams(next);
+                  }
                   setFilter(v);
                   setPage(0);
                   setEditing(null);
@@ -391,14 +414,14 @@ export default function ReviewWorkspace({ project, onClose }) {
                 {decisions[r.ft_decision]}
                 {r.duplicate_of ? " · 중복" : ""}
               </p>
-              <ReportLinks report={r} />
+              <ReportLinks report={r} project={project} />
               {r.bibliography.abstract && (
                 <details>
                   <summary>초록</summary>
                   <p>{r.bibliography.abstract}</p>
                 </details>
               )}
-              {editing?.id === r.id ? (
+              {editing?.id === r.id || (!editing && focusedReport === r.id) ? (
                 <Screening
                   project={project}
                   report={r}
@@ -886,39 +909,22 @@ function Sources({ project, user, canEdit, action, searches }) {
         </fieldset>
       </section>
       <section className="reader-card">
-        <h3>현재 프로젝트 문헌</h3>
-        <p>기존 프로젝트 문헌을 페이지별로 가져오며, 이미 등록한 식별자는 중복 보고서로 추가하지 않습니다.</p>
-        <button
-          className="btn-secondary"
-          disabled={!canEdit}
-          onClick={() =>
-            action(async () => {
-              let page = 0;
-              while (true) {
-                const result = await rpc("project_papers", { p_id: project.id, p_page: page });
-                if (!result.items.length) break;
-                await importCatalogPage(project.id, result.items, {
-                  source: "Project library",
-                  query: "Project " + project.id,
-                  limits: { page },
-                  total: result.total,
-                });
-                page++;
-                if (page * 20 >= result.total) break;
-                if (page > 2500)
-                  throw new Error("이번 가져오기 범위를 초과했습니다. 검색 결과를 나누어 가져오세요.");
-              }
-            })
-          }
-        >
-          프로젝트 문헌 가져오기
-        </button>
+        <h3>서비스에서 문헌 찾기</h3>
+        <p>탐색·서재에서 프로젝트에 추가한 문헌은 다시 가져올 필요 없이 문헌 선별에 표시됩니다.</p>
+        <div className="reader-actions">
+          <Link to={`/discover?project=${project.id}`}>문헌 탐색</Link>
+          <Link to={`/library?project=${project.id}`}>내 서재</Link>
+        </div>
       </section>
       <h3>검색 기록</h3>
       {searches.map((s) => (
         <article className="reader-card" key={s.id}>
-          <h4>{s.source}</h4>
-          <p>{s.query || "검색식 미기록"}</p>
+          <h4>{s.limits?.kind === "project_library" ? "프로젝트에 보관한 문헌" : s.source}</h4>
+          <p>
+            {s.limits?.kind === "project_library"
+              ? "프로젝트 추가 기록입니다. 최초 검색식·검색일은 기록되지 않았습니다."
+              : s.query || "검색식 미기록"}
+          </p>
           <p>
             {new Date(s.searched_at).toLocaleString("ko-KR")} ·{" "}
             {s.status === "complete" ? "수신 완료" : s.status === "failed" ? "실패" : "일부 수신"} · 자료원
@@ -930,12 +936,30 @@ function Sources({ project, user, canEdit, action, searches }) {
   );
 }
 
-function ReportLinks({ report }) {
+function ReportLinks({ report, project }) {
   const b = report.bibliography;
   return (
     <div className="reader-actions">
-      {b.pmid && <Link to={`/papers/${encodeURIComponent(b.pmid)}`}>문헌 상세</Link>}
-      {b.pmid && report.local_source && <Link to={`/fulltext/${encodeURIComponent(b.pmid)}`}>원문 열기</Link>}
+      {report.paper_id && b.pmid && (
+        <Link
+          to={`/papers/${encodeURIComponent(b.pmid)}`}
+          state={{
+            returnTo: `/projects?project=${project.id}&view=review&stage=reports&report=${report.id}`,
+          }}
+        >
+          문헌 상세·내 메모
+        </Link>
+      )}
+      {b.pmid && report.local_source && (
+        <Link
+          to={`/fulltext/${encodeURIComponent(b.pmid)}`}
+          state={{
+            returnTo: `/projects?project=${project.id}&view=review&stage=reports&report=${report.id}`,
+          }}
+        >
+          원문 열기
+        </Link>
+      )}
       {b.doi && (
         <a href={`https://doi.org/${encodeURIComponent(b.doi)}`} target="_blank" rel="noreferrer">
           출판사 원문
@@ -1186,7 +1210,7 @@ function ObservationForm({ observation: o, project, disabled, dirty, save }) {
             dirty();
           }}
         />
-        {report && <ReportLinks report={report} />}
+        {report && <ReportLinks report={report} project={project} />}
         <label>
           자료 유형
           <select value={kind} onChange={(e) => setKind(e.target.value)}>

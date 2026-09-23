@@ -62,13 +62,18 @@ export default function Library() {
   return (
     <ReaderPage title="내 서재" description="저장한 문헌과 메모를 다시 열고, 연구에 활용하세요.">
       <div className="reader-actions">
-        <Link className="btn-secondary" to="/projects">
+        <Link
+          className="btn-secondary"
+          to={params.get("project") ? `/projects?project=${params.get("project")}` : "/projects"}
+        >
           프로젝트·공동 서재
         </Link>
         <Link className="btn-secondary" to="/insights">
           읽기 통계
         </Link>
-        <Link to="/discover">문헌 찾기</Link>
+        <Link to={params.get("project") ? `/discover?project=${params.get("project")}` : "/discover"}>
+          문헌 찾기
+        </Link>
         <button
           className="btn-secondary"
           onClick={async () => {
@@ -97,7 +102,9 @@ export default function Library() {
             key={id}
             className={id === tab ? "btn-primary" : "btn-secondary"}
             aria-pressed={id === tab}
-            onClick={() => setParams({ tab: id })}
+            onClick={() =>
+              setParams({ ...(params.get("project") ? { project: params.get("project") } : {}), tab: id })
+            }
           >
             {label}
           </button>
@@ -109,7 +116,11 @@ export default function Library() {
           onSubmit={(event) => {
             event.preventDefault();
             const q = new FormData(event.currentTarget).get("q").trim();
-            setParams({ tab, ...(q ? { q } : {}) });
+            setParams({
+              ...(params.get("project") ? { project: params.get("project") } : {}),
+              tab,
+              ...(q ? { q } : {}),
+            });
           }}
         >
           <label className="query">
@@ -124,7 +135,13 @@ export default function Library() {
           </label>
           <button className="btn-primary">검색</button>
           {query && (
-            <button type="button" className="btn-secondary" onClick={() => setParams({ tab })}>
+            <button
+              type="button"
+              className="btn-secondary"
+              onClick={() =>
+                setParams({ ...(params.get("project") ? { project: params.get("project") } : {}), tab })
+              }
+            >
               검색 지우기
             </button>
           )}
@@ -142,7 +159,9 @@ export default function Library() {
             <p>저장한 검색에 새로 등록된 문헌이 있으면 이곳에서 알려드립니다. 이메일 발송과 별개입니다.</p>
             {!r.data?.length && (
               <div className="reader-empty">
-                <Link to="/discover">문헌 탐색에서 검색을 저장하세요.</Link>
+                <Link to={params.get("project") ? `/discover?project=${params.get("project")}` : "/discover"}>
+                  문헌 탐색에서 검색을 저장하세요.
+                </Link>
               </div>
             )}
             {r.data?.map((s) => (
@@ -200,62 +219,71 @@ export default function Library() {
                       ? "아직 작성한 메모나 태그가 없습니다"
                       : "아직 보관된 문헌이 없습니다"}
                 </h2>
-                <Link className="btn-primary" to="/discover">
+                <Link
+                  className="btn-primary"
+                  to={params.get("project") ? `/discover?project=${params.get("project")}` : "/discover"}
+                >
                   문헌 찾아 저장하기
                 </Link>
               </div>
             )}
-            {tab !== "offline" && (
-              <ReviewTransfer
-                key={`${tab}:${page}:${query}`}
-                papers={(r.data || []).filter((x) => x.paper).map((x) => x.paper)}
-                provenance={{
-                  source: "Uro Daily Pick 내 서재",
-                  query,
-                  total: r.data?.total,
-                  limits: { kind: tab, page },
-                }}
-              />
-            )}
-            {r.data
-              ?.filter((s) => s.paper)
-              .map((s) => (
-                <PaperCard
-                  key={s.paper.id}
-                  paper={{
-                    ...s.paper,
-                    summary_ready: s.paper.summary_ready ?? hasFulltextSummary(s.paper),
-                    insight:
-                      s.paper.insight ??
-                      (hasFulltextSummary(s.paper) ? s.paper.summary_ko.split("\n")[1] : ""),
-                  }}
-                  compare={selected.includes(s.paper.pmid)}
-                  onCompare={(id) => setSelected((p) => selectComparison(p, id))}
-                  extra={
-                    <>
-                      {s.note && <p className="reader-muted">메모 · {s.note.slice(0, 180)}</p>}
-                      {s.tags?.length > 0 && <p>{s.tags.join(" · ")}</p>}
-                      {tab === "offline" && (
-                        <button
-                          className="btn-secondary"
-                          onClick={() => {
-                            removeCached(user.id, s.paper.pmid);
-                            r.reload();
-                          }}
-                        >
-                          이 기기 보관 해제
-                        </button>
-                      )}
-                    </>
-                  }
-                />
-              ))}
+            <ReviewTransfer
+              key={`${tab}:${page}:${query}`}
+              papers={(tab === "offline" ? [] : r.data || []).filter((x) => x.paper).map((x) => x.paper)}
+              provenance={{
+                source: "Uro Daily Pick 내 서재",
+                query,
+                total: r.data?.total,
+                limits: { kind: tab, page },
+              }}
+            >
+              {r.data
+                ?.filter((s) => s.paper)
+                .map((s) => (
+                  <PaperCard
+                    key={s.paper.id}
+                    paper={{
+                      ...s.paper,
+                      summary_ready: s.paper.summary_ready ?? hasFulltextSummary(s.paper),
+                      insight:
+                        s.paper.insight ??
+                        (hasFulltextSummary(s.paper) ? s.paper.summary_ko.split("\n")[1] : ""),
+                    }}
+                    compare={selected.includes(s.paper.pmid)}
+                    onCompare={(id) => setSelected((p) => selectComparison(p, id))}
+                    extra={
+                      <>
+                        {s.note && <p className="reader-muted">메모 · {s.note.slice(0, 180)}</p>}
+                        {s.tags?.length > 0 && <p>{s.tags.join(" · ")}</p>}
+                        {tab === "offline" && (
+                          <button
+                            className="btn-secondary"
+                            onClick={() => {
+                              removeCached(user.id, s.paper.pmid);
+                              r.reload();
+                            }}
+                          >
+                            이 기기 보관 해제
+                          </button>
+                        )}
+                      </>
+                    }
+                  />
+                ))}
+            </ReviewTransfer>
             {tab !== "offline" && (
               <div className="reader-actions">
                 <button
                   className="btn-secondary"
                   disabled={!page}
-                  onClick={() => setParams({ tab, ...(query ? { q: query } : {}), page: page - 1 })}
+                  onClick={() =>
+                    setParams({
+                      ...(params.get("project") ? { project: params.get("project") } : {}),
+                      tab,
+                      ...(query ? { q: query } : {}),
+                      page: page - 1,
+                    })
+                  }
                 >
                   이전 페이지
                 </button>
@@ -266,7 +294,14 @@ export default function Library() {
                       ? (page + 1) * 20 >= r.data.total
                       : (r.data?.length || 0) < 20
                   }
-                  onClick={() => setParams({ tab, ...(query ? { q: query } : {}), page: page + 1 })}
+                  onClick={() =>
+                    setParams({
+                      ...(params.get("project") ? { project: params.get("project") } : {}),
+                      tab,
+                      ...(query ? { q: query } : {}),
+                      page: page + 1,
+                    })
+                  }
                 >
                   다음 페이지
                 </button>

@@ -52,6 +52,7 @@ test("project search finds old shared notes and tags without altering the origin
   await submitSearch(page, "special-cohort");
   await expect(titles(page)).toHaveCount(1);
   await expect(page.getByRole("link", {name: "Research study 01", exact: true})).toBeVisible();
+  await page.locator("article details summary").click();
   await page.locator('textarea[name="note"]').fill("Edited shared project rationale");
   await page.getByRole("button", {name: "메모 저장", exact: true}).click();
   await submitSearch(page, "Edited shared");
@@ -61,7 +62,7 @@ test("project search finds old shared notes and tags without altering the origin
   await page.getByRole("button", {name: "다음 페이지", exact: true}).click();
   await expect(titles(page)).toHaveCount(5);
   expect(new URL(page.url()).searchParams.get("q")).toBe("team");
-  await expect(page.getByRole("button", {name: "연구 정리", exact: true})).toBeVisible();
+  await expect(page.getByRole("link", {name: "연구 정리", exact: true})).toBeVisible();
 });
 
 const workspace = (page) => page.getByRole("region", {name: "연구 설계·집필 자료"});
@@ -88,7 +89,7 @@ test("workspace persists edits, preserves manual cells through extraction and ex
   await panel.getByRole("button", {name: "질문·항목 저장", exact: true}).click();
   await expect(panel.getByRole("button", {name: "질문·항목 저장", exact: true})).toBeDisabled();
   await panel.getByRole("button", {name: "프로젝트로 돌아가기", exact: true}).click();
-  await page.getByRole("button", {name: "연구 정리", exact: true}).click();
+  await page.getByRole("link", {name: "연구 정리", exact: true}).click();
   await expect(panel.getByRole("textbox", {name: "연구 질문", exact: true})).toHaveValue("How should we design the next comparative study?");
   await expect(panel.getByLabel("항목 이름 3", {exact: true})).toHaveValue("Follow-up");
   await panel.getByRole("button", {name: "선행연구 표", exact: true}).click();
@@ -137,7 +138,7 @@ test("workspace persists edits, preserves manual cells through extraction and ex
   await panel.evaluate((element) => element.scrollIntoView({block: "start"}));
   await page.screenshot({path: testInfo.outputPath("research-desktop-exports.png"), fullPage: true});
   await panel.getByRole("button", {name: "프로젝트로 돌아가기", exact: true}).click();
-  await page.getByRole("button", {name: "연구 정리", exact: true}).click();
+  await page.getByRole("link", {name: "연구 정리", exact: true}).click();
   await panel.getByRole("button", {name: "서론·고찰 논점", exact: true}).click();
   await expect(panel.locator(".research-topic")).toContainText("Interpretation of the retained cohort evidence");
   await panel.getByRole("button", {name: "연구 자료 내보내기", exact: true}).click();
@@ -161,7 +162,7 @@ test("closing research refreshes a previously displayed project note after a res
     await page.goto("/uro-daily-pick/projects?scenario=research-documents&project=1");
     const card = page.locator("article.reader-card").filter({has: page.getByRole("link", {name: "Research study 25", exact: true})});
     await expect(card.locator('textarea[name="note"]')).toHaveValue("Team entry 25");
-    await page.getByRole("button", {name: "연구 정리", exact: true}).click();
+    await page.getByRole("link", {name: "연구 정리", exact: true}).click();
     await workspace(page).getByRole("button", {name: "선행연구 표", exact: true}).click();
     const row = researchRow(page, "Research study 25");
     await row.locator("td").last().locator("textarea").fill("Updated research design rationale");
@@ -169,6 +170,7 @@ test("closing research refreshes a previously displayed project note after a res
     await expect(row.getByRole("button", {name: "문헌 수정 저장", exact: true})).toBeDisabled();
     if (closeWith === "browser back") await page.goBack();
     else await workspace(page).getByRole("button", {name: "프로젝트로 돌아가기", exact: true}).click();
+    await card.locator("details summary").click();
     await expect(card.locator('textarea[name="note"]')).toBeVisible();
     await expect(card.locator('textarea[name="note"]')).toHaveValue("Updated research design rationale");
   }

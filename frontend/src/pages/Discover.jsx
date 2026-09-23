@@ -302,7 +302,8 @@ export default function Discover() {
     [formRevision, setFormRevision] = useState(0),
     [message, setMessage] = useState(""),
     [busy, setBusy] = useState(false);
-  const r = useResource(() => rpc("search_papers_v2", searchArgsV2(params)), [params.toString(), user.id]);
+  const searchKey = new URLSearchParams([...params].filter(([key]) => key !== "project")).toString();
+  const r = useResource(() => rpc("search_papers_v2", searchArgsV2(params)), [searchKey, user.id]);
   async function saveSearch() {
     setBusy(true);
     try {
@@ -347,7 +348,7 @@ export default function Discover() {
         clear={() => {
           setMessage("");
           setFormRevision((revision) => revision + 1);
-          setParams({});
+          setParams(params.get("project") ? { project: params.get("project") } : {});
         }}
       />
       {expandQuery(params.get("q") || "") !== params.get("q") && params.get("q") && (
@@ -384,7 +385,7 @@ export default function Discover() {
               </div>
             )}
             <ReviewTransfer
-              key={params.toString()}
+              key={new URLSearchParams([...params].filter(([k]) => k !== "project")).toString()}
               papers={r.data.items}
               provenance={{
                 source: "Uro Daily Pick 문헌 탐색",
@@ -398,15 +399,16 @@ export default function Discover() {
                   coverage_note: "서비스 등록 문헌 중 선택한 페이지 · 전체 문헌 검색 완료가 아님",
                 },
               }}
-            />
-            {r.data.items.map((p) => (
-              <PaperCard
-                key={p.id}
-                paper={p}
-                compare={selected.includes(p.pmid)}
-                onCompare={(id) => setSelected((prev) => selectComparison(prev, id))}
-              />
-            ))}
+            >
+              {r.data.items.map((p) => (
+                <PaperCard
+                  key={p.id}
+                  paper={p}
+                  compare={selected.includes(p.pmid)}
+                  onCompare={(id) => setSelected((prev) => selectComparison(prev, id))}
+                />
+              ))}
+            </ReviewTransfer>
             <div className="reader-actions">
               <button
                 className="btn-secondary"

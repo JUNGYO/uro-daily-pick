@@ -1,0 +1,38 @@
+import {test, expect} from '../../frontend/node_modules/@playwright/test/index.mjs';
+import AxeBuilder from '../../frontend/node_modules/@axe-core/playwright/dist/index.mjs';
+test.beforeEach(async({page})=>{await page.route(/https?:\/\//,route=>new URL(route.request().url()).hostname==='127.0.0.1'?route.continue():route.abort());});
+for(const width of [1440,830,390,320])test(`connected discovery and project controls fit ${width}px`,async({page})=>{
+ await page.setViewportSize({width,height:1000});
+ await page.goto('/uro-daily-pick/discover?scenario=review&q=prostate');
+ await page.getByRole('button',{name:'프로젝트에 추가',exact:true}).click();
+ const cards=page.locator('article.reader-card');
+ const count=await cards.count();expect(count).toBeGreaterThan(0);
+ await cards.first().getByRole('checkbox',{name:/프로젝트에 추가/}).check();
+ await page.getByLabel('대상 프로젝트').selectOption('1');
+ await expect(cards.first().getByRole('checkbox',{name:/프로젝트에 추가/})).toBeChecked();
+ await expect(page.getByRole('button',{name:'선택 1편 추가',exact:true})).toBeEnabled();
+ await cards.first().getByRole('button',{name:'서재에 저장',exact:true}).click();
+ await expect(cards.first().getByRole('button',{name:'서재에 저장됨',exact:true})).toHaveAttribute('aria-pressed','true');
+ await page.getByRole('button',{name:'선택 1편 추가',exact:true}).click();
+ await expect(page.getByRole('link',{name:'문헌 선별로 이어가기'})).toBeVisible();
+ await expect(cards).toHaveCount(count);
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
+ await page.screenshot({path:`test-results/connected-discovery-${width}.png`});
+ const a11y=await new AxeBuilder({page}).include('main').analyze();expect(a11y.violations.filter(v=>['critical','serious'].includes(v.impact))).toEqual([]);
+ await page.getByRole('link',{name:'문헌 선별로 이어가기'}).click();
+ await expect(page.getByRole('button',{name:'문헌 선별',exact:true})).toHaveAttribute('aria-current','step');
+ await expect(page.getByRole('navigation',{name:'프로젝트 작업'})).toBeVisible();
+ await page.getByRole('link',{name:'문헌 목록',exact:true}).click();
+ await expect(page.getByRole('region',{name:'프로젝트 진행 상태'})).toBeVisible();
+ await page.screenshot({path:`test-results/connected-project-${width}.png`});
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1)).toBe(true);
+});
+test('a paper returns from detail to its exact project screening record',async({page})=>{
+ const report='10000000-0000-0000-0000-000000000001';
+ await page.goto(`/uro-daily-pick/projects?scenario=review&project=1&view=review&stage=reports&report=${report}`);
+ await expect(page.getByRole('button',{name:'선별·출처 저장',exact:true})).toBeVisible();
+ await page.getByRole('link',{name:'문헌 상세·내 메모',exact:true}).click();
+ await page.getByRole('link',{name:'← 목록으로',exact:true}).click();
+ expect(new URL(page.url()).searchParams.get('report')).toBe(report);
+ await expect(page.getByRole('button',{name:'선별·출처 저장',exact:true})).toBeVisible();
+});
