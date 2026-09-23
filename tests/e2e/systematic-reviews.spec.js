@@ -57,6 +57,21 @@ test("existing project library imports with supported search provenance",async({
   expect(calls.some(x=>x.name==='review_import_records'&&x.args.p_items.length>0)).toBe(true);
 });
 
+test("switching populated review stages never renders the previous record type",async({page})=>{
+  await open(page);
+  await page.getByRole("button",{name:"검색·가져오기",exact:true}).click();
+  await expect(page.getByRole("heading",{name:"PubMed",exact:true})).toBeVisible();
+  await page.getByRole("button",{name:"분석·내보내기",exact:true}).click();
+  await expect(page.getByRole("checkbox",{name:/Trial 1 · Mortality/})).toBeVisible();
+  await page.getByRole("button",{name:"문헌 선별",exact:true}).click();
+  await expect(page.getByRole("heading",{name:"Trial 1 on treatment outcomes",exact:true})).toBeVisible();
+  await page.getByRole("button",{name:"데이터 추출",exact:true}).click();
+  await expect(page.getByRole("button",{name:"수치·근거 열기",exact:true}).first()).toBeVisible();
+  await page.getByRole("button",{name:"검색·가져오기",exact:true}).click();
+  await expect(page.getByRole("heading",{name:"PubMed",exact:true})).toBeVisible();
+  await expect(page.getByText("화면을 불러오지 못했습니다",{exact:true})).toHaveCount(0);
+});
+
 test("project reader cannot submit protocols or numerical analysis",async({page})=>{
   await open(page,"review-reader");await expect(page.getByRole("button",{name:"연구계획 저장"})).toBeDisabled();
   await page.getByRole("button",{name:"분석·내보내기",exact:true}).click();
