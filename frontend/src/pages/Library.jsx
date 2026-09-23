@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
+import ReviewTransfer from "../components/ReviewTransfer";
 import { supabase } from "../lib/supabase";
 import { checked } from "../lib/data";
 import { useAuth } from "../lib/auth";
@@ -203,6 +204,18 @@ export default function Library() {
                   문헌 찾아 저장하기
                 </Link>
               </div>
+            )}
+            {tab !== "offline" && (
+              <ReviewTransfer
+                key={`${tab}:${page}:${query}`}
+                papers={(r.data || []).filter((x) => x.paper).map((x) => x.paper)}
+                provenance={{
+                  source: "Uro Daily Pick 내 서재",
+                  query,
+                  total: r.data?.total,
+                  limits: { kind: tab, page },
+                }}
+              />
             )}
             {r.data
               ?.filter((s) => s.paper)

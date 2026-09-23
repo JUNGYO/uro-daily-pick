@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:db": "node ../tests/test_migrations.mjs && node ../tests/test_reader_workspace.mjs && node ../tests/test_research_documents.mjs && node ../tests/test_reading_network.mjs && node ../tests/test_journal_coverage.mjs && node ../tests/test_local_catalog_sync.mjs && node ../tests/test_catalog_sync_health.mjs && node ../tests/test_catalog_sync_load.mjs && node ../tests/test_classification_queue.mjs && node ../tests/test_admin_catalog_metrics.mjs && node ../tests/test_admin_analytics_metrics.mjs && node ../tests/test_distinct_daily_recommendations.mjs && node ../tests/test_admin_journal_fulltext.mjs && node ../tests/test_admin_integrity_queue.mjs && node ../tests/test_batched_derived_publication.mjs",
+    "test:db": "node ../tests/test_migrations.mjs && node ../tests/test_reader_workspace.mjs && node ../tests/test_research_documents.mjs && node ../tests/test_reading_network.mjs && node ../tests/test_journal_coverage.mjs && node ../tests/test_local_catalog_sync.mjs && node ../tests/test_catalog_sync_health.mjs && node ../tests/test_catalog_sync_load.mjs && node ../tests/test_classification_queue.mjs && node ../tests/test_admin_catalog_metrics.mjs && node ../tests/test_admin_analytics_metrics.mjs && node ../tests/test_distinct_daily_recommendations.mjs && node ../tests/test_admin_journal_fulltext.mjs && node ../tests/test_admin_integrity_queue.mjs && node ../tests/test_batched_derived_publication.mjs && node ../tests/test_systematic_reviews.mjs",
     "check": "npm test && npm run test:db && npm run build",
     "test:e2e": "playwright test",
     "format": "prettier --write \"src/**/*.{js,jsx}\" \"*.js\"",

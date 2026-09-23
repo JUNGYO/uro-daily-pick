@@ -1,3 +1,4 @@
+import { reviewRpc } from "./review_api";
 const scenario =
   new URLSearchParams(location.search).get("scenario") || "reader";
 const today = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
@@ -722,6 +723,7 @@ export const supabase = {
         insight: ready(p) ? p.summary_ko.split("\n")[1] : "",
         read: state(p.id).reading_state === "read",
       });
+      if (name.startsWith("review_")) return reviewRpc(name, args, scenario === "review-reader");
       if (scenario === "error")
         return { error: { message: "Simulated API outage" } };
       if (/^(research_|save_research_|add_research_|delete_research_|request_research_|record_research_)/.test(name)) {

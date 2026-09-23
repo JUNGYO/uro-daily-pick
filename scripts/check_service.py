@@ -30,6 +30,7 @@ def main():
                     "/rpc/sync_institution_catalog", "/rpc/report_institution_catalog", "/rpc/catalog_sync_health",
                     "/rpc/classification_candidates", "/rpc/apply_paper_classifications",
                     "/rpc/admin_worker_status", "/rpc/bootstrap_admin_catalog_metrics", "/rpc/admin_journal_fulltext_counts", "/rpc/admin_integrity_queue", "/rpc/sync_institution_events"]
+        required.extend('/rpc/'+name for name in ('review_workspace','review_list','review_save_protocol','review_save_search','review_import_records','review_save_report','review_save_study','review_save_observation','review_save_assessment','review_start_analysis','review_analysis','claim_review_analysis','finish_review_analysis'))
         missing = [path for path in required if path not in paths]
         if missing:
             raise SystemExit("Missing database contracts: " + ", ".join(missing))

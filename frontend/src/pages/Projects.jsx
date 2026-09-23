@@ -13,13 +13,15 @@ import {
   selectComparison,
 } from "../components/ReaderUI";
 const ResearchWorkspace = lazy(() => import("../components/ResearchWorkspace"));
+const ReviewWorkspace = lazy(() => import("../components/ReviewWorkspace"));
 export default function Projects() {
   const { user } = useAuth(),
     [params, setParams] = useSearchParams(),
     id = Number(params.get("project")) || null,
     page = Number(params.get("page")) || 0,
     query = params.get("q") || "",
-    researchOpen = params.get("view") === "research";
+    researchOpen = params.get("view") === "research",
+    reviewOpen = params.get("view") === "review";
   const [busy, setBusy] = useState(false),
     [message, setMessage] = useState(""),
     [selected, setSelected] = useState([]),
@@ -63,87 +65,93 @@ export default function Projects() {
   }
   return (
     <ReaderPage
-      title="프로젝트·공동 서재"
-      description="프로젝트별 문헌·메모·관심 주제를 관리합니다. 공유는 초대를 수락한 계정에만 적용됩니다."
+      title={reviewOpen && project ? project.name : "프로젝트·공동 서재"}
+      description={
+        reviewOpen
+          ? "문헌 선별과 원문 수치를 연결하고, 고정한 입력으로 분석합니다."
+          : "프로젝트별 문헌·메모·관심 주제를 관리합니다. 공유는 초대를 수락한 계정에만 적용됩니다."
+      }
     >
       <Link to="/library">← 내 서재</Link>
-      <form
-        className="reader-search"
-        onSubmit={(e) => {
-          e.preventDefault();
-          const name = new FormData(e.currentTarget).get("name").trim();
-          run(async () => {
-            await checked(supabase.from("collections").insert({ user_id: user.id, name }));
-            r.reload();
-          });
-        }}
-      >
-        <label className="query">
-          새 프로젝트 이름
-          <input name="name" required maxLength={80} />
-        </label>
-        <button className="btn-primary" disabled={busy}>
-          프로젝트 만들기
-        </button>
-      </form>
-      <p role="status">{message}</p>
-      <Resource resource={r}>
-        {r.data?.invitations.map((i) => (
-          <div className="reader-notice" key={i.id}>
-            <p>
-              공동 서재 초대 · {i.name} · {i.role === "editor" ? "편집 가능" : "읽기 전용"}
-            </p>
-            <div className="reader-actions">
-              <button
-                className="btn-primary"
-                disabled={busy}
-                onClick={() =>
-                  run(async () => {
-                    await rpc("project_invitations", { p_accept: i.id });
-                    r.reload();
-                  })
-                }
-              >
-                수락
-              </button>
-              <button
-                className="btn-secondary"
-                disabled={busy}
-                onClick={() =>
-                  run(async () => {
-                    await rpc("project_invitations", { p_decline: i.id });
-                    r.reload();
-                  })
-                }
-              >
-                거절
-              </button>
+      <div hidden={reviewOpen}>
+        <form
+          className="reader-search"
+          onSubmit={(e) => {
+            e.preventDefault();
+            const name = new FormData(e.currentTarget).get("name").trim();
+            run(async () => {
+              await checked(supabase.from("collections").insert({ user_id: user.id, name }));
+              r.reload();
+            });
+          }}
+        >
+          <label className="query">
+            새 프로젝트 이름
+            <input name="name" required maxLength={80} />
+          </label>
+          <button className="btn-primary" disabled={busy}>
+            프로젝트 만들기
+          </button>
+        </form>
+        <p role="status">{message}</p>
+        <Resource resource={r}>
+          {r.data?.invitations.map((i) => (
+            <div className="reader-notice" key={i.id}>
+              <p>
+                공동 서재 초대 · {i.name} · {i.role === "editor" ? "편집 가능" : "읽기 전용"}
+              </p>
+              <div className="reader-actions">
+                <button
+                  className="btn-primary"
+                  disabled={busy}
+                  onClick={() =>
+                    run(async () => {
+                      await rpc("project_invitations", { p_accept: i.id });
+                      r.reload();
+                    })
+                  }
+                >
+                  수락
+                </button>
+                <button
+                  className="btn-secondary"
+                  disabled={busy}
+                  onClick={() =>
+                    run(async () => {
+                      await rpc("project_invitations", { p_decline: i.id });
+                      r.reload();
+                    })
+                  }
+                >
+                  거절
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
-        <div className="reader-actions">
-          {r.data?.projects.map((c) => (
-            <button
-              className={c.id === id ? "btn-primary" : "btn-secondary"}
-              aria-pressed={c.id === id}
-              key={c.id}
-              onClick={() => {
-                setParams({ project: c.id });
-                setMembers(null);
-                setConfirm(false);
-              }}
-            >
-              {c.name}
-              {c.user_id !== user.id ? " · 공유됨" : ""}
-            </button>
           ))}
-        </div>
-      </Resource>
+          <div className="reader-actions">
+            {r.data?.projects.map((c) => (
+              <button
+                className={c.id === id ? "btn-primary" : "btn-secondary"}
+                aria-pressed={c.id === id}
+                key={c.id}
+                onClick={() => {
+                  setParams({ project: c.id });
+                  setMembers(null);
+                  setConfirm(false);
+                }}
+              >
+                {c.name}
+                {c.user_id !== user.id ? " · 공유됨" : ""}
+              </button>
+            ))}
+          </div>
+        </Resource>
+      </div>
       {project && (
         <>
-          <h2>{project.name}</h2>
+          {!reviewOpen && <h2>{project.name}</h2>}
           <div className="reader-actions">
-            {!researchOpen && (
+            {!researchOpen && !reviewOpen && (
               <button
                 className={researchOpen ? "btn-primary" : "btn-secondary"}
                 aria-expanded={researchOpen}
@@ -168,7 +176,12 @@ export default function Projects() {
             >
               프로젝트 주소 복사
             </button>
-            {owner && !researchOpen && (
+            {!researchOpen && !reviewOpen && (
+              <button className="btn-secondary" onClick={() => setParams({ project: id, view: "review" })}>
+                체계적고찰·메타분석
+              </button>
+            )}
+            {owner && !researchOpen && !reviewOpen && (
               <button
                 className="btn-secondary"
                 disabled={busy}
@@ -191,7 +204,16 @@ export default function Projects() {
               />
             </Suspense>
           )}
-          <div hidden={researchOpen}>
+          {reviewOpen && (
+            <Suspense fallback={<p role="status">연구 프로젝트를 불러오는 중입니다.</p>}>
+              <ReviewWorkspace
+                key={project.id}
+                project={project}
+                onClose={() => setParams({ project: id })}
+              />
+            </Suspense>
+          )}
+          <div hidden={researchOpen || reviewOpen}>
             {owner && (
               <form
                 key={id}
