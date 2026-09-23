@@ -130,7 +130,7 @@ export default function ReviewWorkspace({ project, onClose }) {
   const { user } = useAuth();
   const [workspace, setWorkspace] = useState(null),
     [tab, setTab] = useState("protocol"),
-    [list, setList] = useState({ items: [], total: 0 }),
+    [listState, setList] = useState({ items: [], total: 0 }),
     [page, setPage] = useState(0),
     [query, setQuery] = useState(""),
     [filter, setFilter] = useState(""),
@@ -173,13 +173,14 @@ export default function ReviewWorkspace({ project, onClose }) {
     assessments: "assessments",
     analysis: "runs",
   }[tab];
+  const listKey = JSON.stringify([project.id, section, page, query, filter, revision]);
+  const list = listState.key === listKey ? listState : { items: [], total: 0 };
   useEffect(() => {
     let live = true;
-    setList({ items: [], total: 0 });
     if (section)
       reviewList(project.id, section, query, filter, page)
         .then((x) => {
-          if (live) setList(x);
+          if (live) setList({ ...x, key: listKey });
         })
         .catch((e) => {
           if (live) setError(e.message);
@@ -187,7 +188,7 @@ export default function ReviewWorkspace({ project, onClose }) {
     return () => {
       live = false;
     };
-  }, [project.id, section, page, query, filter, revision]);
+  }, [project.id, section, page, query, filter, revision, listKey]);
   useEffect(() => {
     if (!dirty) return;
     const handler = (e) => {
