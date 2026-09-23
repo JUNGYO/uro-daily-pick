@@ -98,8 +98,8 @@ export default function Projects() {
           </select>
         </label>
         <div className="reader-actions">
-          <Link to={scopedLink("/discover", id)}>문헌 탐색</Link>
-          <Link to={scopedLink("/library", id)}>내 서재</Link>
+          <Link to={scopedLink("/discover", id)}>문헌 추가</Link>
+          <Link to={scopedLink("/library", id)}>서재에서 선택</Link>
         </div>
       </div>
       {r.error && <p role="alert">{r.error}</p>}
