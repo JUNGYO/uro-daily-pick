@@ -33,6 +33,18 @@ class StorageCapacityReached(Exception):
     pass
 
 
+class IncompletePubMedResponse(ValueError):
+    """Only requested, unique, validated articles accompanied by missing IDs.
+
+    Discovery remains strict. Maintenance may retry the missing identifiers
+    while preserving the independently validated records in this response.
+    """
+    def __init__(self, papers, missing):
+        super().__init__("PubMed metadata does not match requested identifiers (missing records)")
+        self.papers = papers
+        self.missing = missing
+
+
 def ensure_catalog_capacity():
     status = get_json(f"{SUPABASE_URL}/rest/v1/rpc/catalog_storage_status",
                       headers=supabase_headers(SUPABASE_KEY), params={})
@@ -114,8 +126,11 @@ def fetch_details(pmids):
     if any(not p["title"].strip() for p in papers):
         raise ValueError("PubMed metadata is missing a required title")
     received = [p["pmid"] for p in papers]
-    if len(received) != len(set(received)) or set(received) != set(pmids):
+    if len(received) != len(set(received)) or set(received) - set(pmids):
         raise ValueError("PubMed metadata does not match requested identifiers")
+    missing = [pmid for pmid in pmids if pmid not in set(received)]
+    if missing:
+        raise IncompletePubMedResponse(papers, missing)
     return papers
 
 
