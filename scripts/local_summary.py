@@ -280,6 +280,8 @@ def generate_summary(paper, document, deadline=None, cache_path=None):
             'Include research_details with intervention, comparator, follow_up, outcome, limitations; use Not reported if absent. '
             'Map summary_1..summary_3, all structured and research_details fields, and qa_1..qa_N to exact integer source IDs from the bracketed labels. '
             'Return source IDs as JSON integers, never strings. '
+            'Put citation IDs only in evidence arrays, never inside summary, detail, question or answer text. '
+            'Do not append bracketed source labels such as [5, 10] to sentences; they are not study measurements. '
             'Every factual claim requires 1..8 relevant IDs; [] is allowed only for Not reported in optional details. '
             'Cite the passage containing each reported value and its study context, not merely a nearby heading. '
             'Provide 1..3 useful Korean Q&A pairs. Only include qa evidence keys for actual Q&A pairs. '
@@ -318,6 +320,9 @@ def generate_summary(paper, document, deadline=None, cache_path=None):
             'the cited passage must support the same study, outcome, time point and comparison. Never calculate values. '
             'Do not replace a reported result with a generic sentence just to avoid validation. '
             'Summary lines and Q&A must be Korean, with established medical abbreviations kept. '
+            'Put citation IDs only in sources arrays, never in the text, q or a strings. '
+            'If a failed statement contains inline source labels such as [5, 10], remove those labels from the prose '
+            'and keep the correct citations in sources. Preserve actual clinical values, intervals and study identifiers. '
             'Each summary must be one sentence with supporting source IDs. '
             'Use Not reported and [] only for optional fields genuinely absent from the original; do not invent facts. '
             'Return exactly the requested keys, with corrected text (or q and a for Q&A) and sources as JSON integer IDs from the supplied bracketed labels.',

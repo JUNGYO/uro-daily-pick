@@ -17,11 +17,16 @@ _NUMBER_WORDS = ('zero','one','two','three','four','five','six','seven','eight',
 _ORDINAL_WORDS = ('first','second','third','fourth','fifth','sixth','seventh','eighth','ninth','tenth',
                   'eleventh','twelfth','thirteenth','fourteenth','fifteenth','sixteenth','seventeenth',
                   'eighteenth','nineteenth','twentieth')
+_ORDINAL_PATTERN = re.compile(r'(?<![\w-])(?:' + '|'.join(
+    f'(?P<n{i}>{word})' for i, word in enumerate(_ORDINAL_WORDS, start=1)) + r')\b', re.I)
+_CARDINAL_PATTERN = re.compile(r'\b(?:' + '|'.join(
+    f'(?P<n{i}>{word})' for i, word in enumerate(_NUMBER_WORDS)) + r')\b', re.I)
 _PROSE_GROUP = re.compile(r'(\b(?:a[ ]+)?total[ ]+of[ ]+)([0-9]{1,3}(?:[ ]+[0-9]{3})+)(?![0-9]|[ ]+[0-9])', re.I)
 _DECADE = re.compile(r'\b(?:first|a|one|past|last)[ ]+decade\b', re.I)
 _PARTIAL_DECADE_PREFIX = re.compile(r'\b(?:half|quarters?|thirds?|tenths?|fraction|part)(?:[ ]+of)?(?:[ ]+the)?[ ]+$', re.I)
 _TERTIARY_CARE = re.compile(r'\btertiary(?=[ -]+(?:care\b|referral[ -]+cent(?:er|re)s?\b))', re.I)
-_NUMBERED_LABEL = re.compile(r'(?<!\w)(?:GPT|gpt|PD(?:-L)?|IL)$')
+_NUMBERED_LABEL = re.compile(r'(?<!\w)(?:GPT|PD(?:-L)?|IL|radium|iridium|COVID|miR)$', re.I)
+_ORDINAL_RANGE_START = re.compile(r'(?<!\w)\d+(?:st|nd|rd|th)$', re.I)
 
 
 def numeric_values(text, *, source=False):
@@ -41,10 +46,10 @@ def numeric_values(text, *, source=False):
         text = _DECADE.sub(lambda match: match[0] if _PARTIAL_DECADE_PREFIX.search(before_decades[:match.start()])
                            else match[0] + ' (10)', text)
         text = _TERTIARY_CARE.sub('3', text)
-        for number, word in enumerate(_ORDINAL_WORDS, start=1):
-            text = re.sub(r'(?<![\w-])'+word+r'\b', str(number), text, flags=re.I)
-        for number, word in enumerate(_NUMBER_WORDS):
-            text = re.sub(r'\b'+word+r'\b', str(number), text, flags=re.I)
+        # Two bounded passes preserve the exact old word/boundary rules. The
+        # prior 41 full-text substitutions repeated on every evidence check.
+        text = _ORDINAL_PATTERN.sub(lambda match: match.lastgroup[1:], text)
+        text = _CARDINAL_PATTERN.sub(lambda match: match.lastgroup[1:], text)
     if _SCIENTIFIC.search(text):
         if not source:
             raise ValueError('Unsupported scientific notation in numeric claim')
@@ -57,8 +62,18 @@ def numeric_values(text, *, source=False):
         # an arbitrary word/uppercase token followed by a minus as an identifier.
         if sign in ('-', '\u2212') and _NUMBERED_LABEL.search(text[:match.start()]):
             sign = ''
+        if sign in ('-', '\u2212'):
+            prefix, suffix = text[:match.start()], text[match.end():]
+            if (re.search(r'(?<!\w)beta$', prefix, re.I) and number == '3'
+                    and re.match(r'\s+(?:adrenergic\s+)?(?:agonists?|adrenoceptors?|receptors?)(?![A-Za-z0-9])', suffix, re.I)):
+                sign = ''
+            elif re.search(r'(?<!\w)EQ$', prefix) and re.match(r'D(?![A-Za-z0-9])', suffix):
+                sign = ''
         # An ASCII hyphen directly between numbers denotes a range, not unary minus.
         if sign == '-' and match.start() and text[match.start()-1].isdecimal():
+            sign = ''
+        if (sign == '-' and _ORDINAL_RANGE_START.search(text[:match.start()])
+                and re.match(r'(?:st|nd|rd|th)\b', text[match.end():], re.I)):
             sign = ''
         integer, dot, fraction = number.partition('.')
         separators = set(integer).intersection(_GROUP_SEPARATORS)

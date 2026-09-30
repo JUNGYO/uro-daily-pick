@@ -130,6 +130,37 @@ class NumericEvidenceTests(unittest.TestCase):
                 self.assertEqual(numeric_values(value), {Decimal(-4)})
         self.assertEqual(numeric_values('17-20'), {Decimal(17), Decimal(20)})
 
+    def test_clinical_identifier_spelling_and_ordinal_ranges_are_not_negative_values(self):
+        for label, expected in [('radium-223', {223}), ('Radium\u2212223', {223}),
+                                ('Iridium-192', {192}), ('COVID-19', {19}),
+                                ('miR-129-5p', {129, 5}), ('beta-3 agonist', {3}),
+                                ('Beta-3 agonist', {3}), ('EQ-5D', {5}),
+                                ('2nd-4th degree', {2, 4})]:
+            with self.subTest(label=label):
+                self.assertEqual(numeric_values(label), {Decimal(n) for n in expected})
+        for label in ('-223', 'change-223', 'radium -223', 'anti-radiumx-223',
+                      '2nd-4', 'HR-4', 'EAPC -38.3', 'difference -2.0',
+                      'beta-3', 'beta-3.0 coefficient', 'EQ-5 change'):
+            with self.subTest(label=label):
+                self.assertTrue(any(n < 0 for n in numeric_values(label)))
+
+    def test_clinical_identifier_normalization_preserves_required_numeric_evidence(self):
+        for source, claim in [('radium\u2010223', 'radium-223'), ('Iridium 192', 'Iridium-192'),
+                              ('COVID\u201119', 'COVID-19'), ('beta3 agonist', 'beta-3 agonist'),
+                              ('miR\u2011129\u20115p', 'miR-129-5p'), ('EQ5D', 'EQ-5D'),
+                              ('2nd to 4th degree', '2nd-4th degree')]:
+            with self.subTest(source=source, claim=claim):
+                body='Synthetic identifier '+source+' was evaluated.'
+                raw=draft(body,claim)
+                validate_evidence(raw,validate_summary(json.dumps(raw)),body)
+        for source, claim in [('radium 223', 'radium-224'), ('COVID19','COVID-20'),
+                              ('beta3','beta-4'),('EQ5D','EQ-6D'),('miR129','miR-130'),
+                              ('measured -223','radium-223'),('radium223','-223')]:
+            with self.subTest(source=source, claim=claim):
+                body='Synthetic observation: '+source
+                with self.assertRaisesRegex(ValueError,'Number absent'):
+                    validate_evidence(draft(body,claim),validate_summary(json.dumps(draft(body,claim))),body)
+
     def test_identifier_format_equivalence_does_not_erase_versions_or_numeric_signs(self):
         for source, claim in [('GPT4o', 'GPT-4o'), ('GPT\u20114o', 'GPT-4o'),
                               ('GPT-4o', 'gpt-4o'), ('PD1', 'PD-1'), ('IL\u20116', 'IL-6')]:
