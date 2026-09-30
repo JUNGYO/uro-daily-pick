@@ -105,8 +105,8 @@ def run_summary_queue(directory, deadline, service, db, papers, *, dependencies=
                       concurrency=1, refresh=None, refresh_seconds=60):
     """Infer on at most two threads; only the caller owns DB, final files and cloud writes.
 
-    Default to one: the existing server benchmark serialized concurrent requests.
-    Increase only after measuring server-side throughput, not merely client overlap.
+    Standalone callers default to one. Deployments select two only after measuring
+    server-side throughput, not merely client overlap.
     """
     if type(concurrency) is not int or not 1 <= concurrency <= 2:
         raise ValueError("Summary concurrency must be one or two")
