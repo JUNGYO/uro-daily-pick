@@ -260,6 +260,66 @@ class DurableCollectionTests(unittest.TestCase):
             result = self.run_queue([f.paper(n) for n in range(1, 51)])
         self.assertEqual(result["completed"], 50)
 
+    def test_new_repository_recovers_manuscript_despite_old_oa_and_browser_cooldowns(self):
+        f = self.f
+        f.deps['fetch_oa'] = lambda *a, **k: (_ for _ in ()).throw(FulltextUnavailable())
+        paper = f.paper(1, '10.1016/test')
+        self.run_queue([paper])
+        browser_retry = f.db.execute("SELECT next_probe FROM collection_source_probes WHERE provider='browser'").fetchone()[0]
+        calls = []
+        def cloud(item, pmcid, **kwargs):
+            calls.append((item['pmid'], pmcid))
+            return f.xml, 'https://pmc-oa-opendata.s3.amazonaws.com/PMC1.2/PMC1.2.xml', {'license': 'TDM', 'version': 2}
+        f.deps.update(fetch_oa=f.forbid_network, fetch_pmc_cloud=cloud,
+            discover_oa_batch=lambda pmids, **kwargs: {'1': {'status': 'unavailable', 'reason': 'not_open_access', 'pmcid': 'PMC1'}})
+        self.assertEqual(self.run_queue([paper])['completed'], 1)
+        self.assertEqual(calls, [('1', 'PMC1')])
+        self.assertEqual(f.db.execute("SELECT next_probe FROM collection_source_probes WHERE provider='browser'").fetchone()[0], browser_retry)
+        saved = json.loads((f.directory/'documents/1.json').read_text())
+        self.assertEqual(saved['document']['repository']['version'], 2)
+
+    def test_rejected_body_is_not_redownloaded_every_fifteen_minutes(self):
+        f, calls = self.f, []
+        def fetch(pmid, **kwargs):
+            calls.append(pmid)
+            return b'<article><body><p>A short correction.</p></body></article>', 'https://oa.example.test/1'
+        f.deps['fetch_oa'] = fetch
+        paper = f.paper(1, '10.1016/test')
+        self.run_queue([paper])
+        self.now[0] += 901
+        self.run_queue([paper])
+        self.assertEqual(calls, ['1'])
+        self.assertFalse((f.directory/'documents/1.json').exists())
+        self.assertEqual(f.db.execute("SELECT status FROM collection_source_probes WHERE provider='oa'").fetchone()[0], 'invalid_body')
+
+    def test_persisted_publisher_pause_skips_host_backlog_but_keeps_it_durable(self):
+        f, calls = self.f, []
+        f.deps['fetch_oa'] = lambda *a, **k: (_ for _ in ()).throw(FulltextUnavailable())
+        class Browser:
+            def __init__(self, *args): pass
+            def read(self, paper, **kwargs):
+                calls.append(paper['pmid'])
+                return {'status': 'access_required', 'reason': 'publisher_paused'}
+            def close(self): pass
+        f.deps['Browser'] = Browser
+        result = self.run_queue([f.paper(n) for n in range(1, 21)])
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(self.telemetry['browser_attempts'], 1)
+        self.assertEqual(result['deferred'], 19)
+        self.assertEqual(f.db.execute('SELECT count(*) FROM collection_browser_pending').fetchone()[0], 19)
+
+    def test_next_batch_fills_free_slot_while_previous_batch_last_request_is_slow(self):
+        f = self.f
+        later_started = threading.Event()
+        waited = []
+        def fetch(pmid, **kwargs):
+            if pmid == '50': waited.append(later_started.wait(3))
+            if pmid == '51': later_started.set()
+            return f.xml, 'https://oa.example.test/' + pmid
+        f.deps['fetch_oa'] = fetch
+        self.assertEqual(self.run_queue([f.paper(n) for n in range(1, 52)])['completed'], 51)
+        self.assertEqual(waited, [True])
+
 
 if __name__ == "__main__":
     unittest.main()

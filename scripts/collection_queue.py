@@ -99,6 +99,10 @@ class SourceGate:
             self.blocked.add(key)
             self.blocked_until[key] = max(self.blocked_until.get(key, 0), self.clock() + retry_seconds)
 
+    def is_blocked(self, url):
+        with self.lock:
+            return source_key(url) in self.blocked
+
     def __call__(self, url, deadline):
         key = source_key(url)
         while True:
@@ -127,7 +131,9 @@ def _dependencies(overrides):
                  elsevier_enabled=bool(os.environ.get("ELSEVIER_API_KEY")))
     if worker.fetch_oa is fulltext.fetch_oa and (not overrides or "fetch_oa" not in overrides):
         from oa_discovery import discover_oa_batch, fetch_discovered_oa
-        deps.update(discover_oa_batch=discover_oa_batch, fetch_discovered_oa=fetch_discovered_oa)
+        from pmc_cloud import fetch_pmc_cloud
+        deps.update(discover_oa_batch=discover_oa_batch, fetch_discovered_oa=fetch_discovered_oa,
+                    fetch_pmc_cloud=fetch_pmc_cloud)
     deps.update(overrides or {})
     return deps
 
@@ -180,7 +186,7 @@ class _SharedBrowser:
                 self.browser.close()
                 self.browser = None
                 return {"status": "retryable_error", "reason": "browser_response_unavailable"}
-            if result.get("status") == "challenge" or result.get("reason") in {"http_403", "http_429"}:
+            if result.get("status") == "challenge" or result.get("reason") in {"http_403", "http_429", "publisher_paused"}:
                 actual = result.get("url") or source
                 self.gate.block(actual)
                 self.gate.block(source)
@@ -236,6 +242,8 @@ def _acquire_api(paper, cache, deadline, deps, gate, probes=None):
                 return result({"document": document, "persist": kind == "archive"})
         api_deadline = min(deadline, deps["clock"]() + 120)
         providers = [("oa", deps["fetch_oa"])]
+        if deps.get("fetch_pmc_cloud"):
+            providers.append(("pmc_cloud", deps["fetch_pmc_cloud"]))
         if deps["elsevier_enabled"]:
             providers.append(("elsevier", deps["fetch_elsevier"]))
         for name, provider in providers:
@@ -244,18 +252,35 @@ def _acquire_api(paper, cache, deadline, deps, gate, probes=None):
                 stats["cached_no_copy" if prior.get("status") in {"unavailable", "not_indexed"} else "cached_retry"] += 1
                 continue
             try:
+                if name == "pmc_cloud" and not prior.get("pmcid"):
+                    # Discovery was unavailable or no repository ID was returned;
+                    # never invent a PMCID or query one paper at a time.
+                    continue
                 stats["provider_probes"] += 1
+                provenance = None
                 if name == "oa" and prior.get("pmcid") and deps.get("fetch_discovered_oa"):
                     stats["cached_location"] += 1
                     content, url = deps["fetch_discovered_oa"](str(paper["pmid"]),
                         {str(paper["pmid"]): {"status": "available", "pmcid": prior["pmcid"],
                             "source_url": "https://www.ebi.ac.uk/europepmc/webservices/rest/" + prior["pmcid"] + "/fullTextXML"}},
                         deadline=api_deadline, request_gate=gate)
+                elif name == "pmc_cloud":
+                    content, url, provenance = provider(paper, prior["pmcid"], deadline=api_deadline, request_gate=gate)
                 else:
                     content, url = provider(str(paper["pmid"]), deadline=api_deadline, request_gate=gate)
-                document = deps["parse_document"](content)
-                if len(document["content_text"]) < 2000 or len(document["sections"]) < 2:
-                    raise ValueError("Incomplete OA body")
+                try:
+                    document = deps["parse_document"](content)
+                    if len(document["content_text"]) < 2000 or len(document["sections"]) < 2:
+                        raise ValueError("Incomplete OA body")
+                except ValueError:
+                    # The same source bytes cannot become a full article after
+                    # 15 minutes. Retain strict validation, but retry weekly.
+                    stats["provider_errors"] += 1
+                    stats["api_parse_errors"] += 1
+                    update(name, "invalid_body", 7 * 86400)
+                    continue
+                if provenance:
+                    document = {**document, "repository": provenance, "license": provenance["license"]}
                 update(name, "downloaded", 0)
                 return result({"document": {**document, "source_url": url}, "raw": content, "suffix": ".xml", "persist": True})
             except deps["unavailable"]:
@@ -336,23 +361,26 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
     papers = list(papers)
     probes, pending_ids = _prepare_probe_state(db, papers)
     enabled = ("oa", "elsevier") if deps["elsevier_enabled"] else ("oa",)
+    if deps.get("fetch_pmc_cloud"):
+        enabled += ("pmc_cloud",)
     prior_retries = dict(db.execute("SELECT pmid,next_retry FROM collection_attempts"))
-    receipt_retries = {row[0] for row in db.execute(
-        "SELECT pmid FROM collection_retry_metadata WHERE reason='registration_failed'")
-        if prior_retries.get(row[0], 0) <= deps["wall_clock"]()}
+    receipt_pending = {row[0] for row in db.execute(
+        "SELECT pmid FROM collection_retry_metadata WHERE reason='registration_failed'")}
+    receipt_retries = {pmid for pmid in receipt_pending if prior_retries.get(pmid, 0) <= deps["wall_clock"]()}
     def urgent(paper):
         pmid = str(paper.get("pmid"))
-        oa = probes.get(pmid, {}).get("oa", {})
-        return pmid in receipt_retries or (oa.get("status") == "available"
-                                            and oa.get("next_probe", 0) <= deps["wall_clock"]())
+        return pmid in receipt_retries or any(row.get("status") == "available"
+            and row.get("next_probe", 0) <= deps["wall_clock"]()
+            for name, row in probes.get(pmid, {}).items() if name in enabled)
     by_pmid = {str(paper.get("pmid")): paper for paper in papers}
     # The latest-first catalog remains the tie-breaker; an hourly restart cannot
     # put thousands of already-probed misses ahead of untouched older originals.
     papers.sort(key=lambda paper: (
         str(paper.get("pmid")) not in receipt_retries,
-        not (probes.get(str(paper.get("pmid")), {}).get("oa", {}).get("status") == "available"
-             and probes[str(paper.get("pmid"))]["oa"]["next_probe"] <= deps["wall_clock"]()),
+        not urgent(paper),
+        "pmc_cloud" in probes.get(str(paper.get("pmid")), {}) if deps.get("fetch_pmc_cloud") else False,
         bool(probes.get(str(paper.get("pmid")))),
+        0 if deps.get("fetch_pmc_cloud") and "pmc_cloud" not in probes.get(str(paper.get("pmid")), {}) else
         min((row["checked_at"] for row in probes.get(str(paper.get("pmid")), {}).values()), default=0)))
     gate = SourceGate(deps["clock"], deps["sleep"])
     browser = _SharedBrowser(directory, node, deadline, deps, gate)
@@ -402,8 +430,11 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
         if not deps.get("discover_oa_batch") or deps["clock"]() >= deadline:
             return
         candidates = [paper for paper, has_cache in prepared if not has_cache
-            and not probes.get(str(paper["pmid"]), {}).get("oa", {}).get("pmcid")
-            and _providers_due(probes.get(str(paper["pmid"]), {}), ("oa",), deps["wall_clock"]())]
+            and ((not probes.get(str(paper["pmid"]), {}).get("oa", {}).get("pmcid")
+                  and _providers_due(probes.get(str(paper["pmid"]), {}), ("oa",), deps["wall_clock"]()))
+                 or (deps.get("fetch_pmc_cloud")
+                     and not probes.get(str(paper["pmid"]), {}).get("pmc_cloud", {}).get("pmcid")
+                     and _providers_due(probes.get(str(paper["pmid"]), {}), ("pmc_cloud",), deps["wall_clock"]())))]
         if not candidates:
             return
         stats["discovery_batches"] += 1
@@ -415,8 +446,10 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
             stats["source_paused"] += 1
             now = deps["wall_clock"]()
             for paper in candidates:
-                record_probes(paper, [{"provider": "oa", "status": "source_paused",
-                    "next_probe": now + error.retry_after, "checked_at": now}])
+                record_probes(paper, [{"provider": provider, "status": "source_paused",
+                    "next_probe": now + error.retry_after, "checked_at": now}
+                    for provider in ("oa", "pmc_cloud") if provider in enabled
+                    and _providers_due(probes.get(str(paper["pmid"]), {}), (provider,), now)])
             db.commit()
             return
         except (HTTPError, URLError, TimeoutError, ValueError, OSError, IncompleteRead) as error:
@@ -429,8 +462,10 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
                 stats["source_paused"] += 1
             now = deps["wall_clock"]()
             for paper in candidates:
-                record_probes(paper, [{"provider": "oa", "status": "access_required" if code == 403 else "retryable_error",
-                    "next_probe": now + (86400 if code == 403 else 3600 if code == 429 else 900), "checked_at": now}])
+                record_probes(paper, [{"provider": provider, "status": "access_required" if code == 403 else "retryable_error",
+                    "next_probe": now + (86400 if code == 403 else 3600 if code == 429 else 900), "checked_at": now}
+                    for provider in ("oa", "pmc_cloud") if provider in enabled
+                    and _providers_due(probes.get(str(paper["pmid"]), {}), (provider,), now)])
             db.commit()
             return
         now = deps["wall_clock"]()
@@ -438,9 +473,16 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
             location = locations[str(paper["pmid"])]
             available = location["status"] == "available"
             not_indexed = location.get("reason") == "not_indexed"
-            record_probes(paper, [{"provider": "oa", "status": "available" if available else "not_indexed" if not_indexed else "unavailable",
+            updates = []
+            if _providers_due(probes.get(str(paper["pmid"]), {}), ("oa",), now):
+                updates.append({"provider": "oa", "status": "available" if available else "not_indexed" if not_indexed else "unavailable",
                 "next_probe": now if available else now + (86400 if not_indexed else 7 * 86400), "checked_at": now,
-                "pmcid": location.get("pmcid") if available else None}])
+                "pmcid": location.get("pmcid") if available else None})
+            if deps.get("fetch_pmc_cloud") and _providers_due(probes.get(str(paper["pmid"]), {}), ("pmc_cloud",), now):
+                updates.append({"provider": "pmc_cloud", "status": "available" if location.get("pmcid") else "unavailable",
+                    "next_probe": now if location.get("pmcid") else now + (86400 if not_indexed else 7 * 86400),
+                    "checked_at": now, "pmcid": location.get("pmcid")})
+            record_probes(paper, updates)
         db.commit()
 
     def finish(paper, outcome, *, browser_attempt=False):
@@ -502,7 +544,7 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
                     browser_backlog.clear()
                     counts["deferred"] += len(prepared)
                     prepared.clear()
-                fill_batch = not prepared and not pending
+                fill_batch = not prepared
                 while fill_batch and not exhausted and len(prepared) < 50:
                     if deps["clock"]() >= deadline:
                         exhausted = True
@@ -521,7 +563,8 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
                     seen.add(pmid)
                     if pmid in browser_enqueued:
                         continue
-                    if prior_retries.get(pmid, 0) > deps["wall_clock"]():
+                    if prior_retries.get(pmid, 0) > deps["wall_clock"]() and (pmid in receipt_pending or not _providers_due(
+                            probes.get(pmid, {}), enabled, deps["wall_clock"]())):
                         counts["deferred"] += 1
                         continue
                     has_cache = any(path.exists() for path in (
@@ -533,7 +576,7 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
                         exhausted = True
                         break
                     prepared.append((paper, has_cache))
-                if prepared and not pending:
+                if fill_batch and prepared:
                     discover(prepared)
                 while prepared and len(pending) < max(1, min(3, max_workers)) and deps["clock"]() < deadline:
                     paper, _ = prepared.popleft()
@@ -545,6 +588,12 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
                     stats["api_candidates"] += 1
                     pending[pool.submit(_acquire_api, paper, cache, deadline, deps, gate,
                                         probes.get(str(paper["pmid"]), {}))] = paper
+                # A host-wide pause applies to the entire queued host. Do not
+                # spend one executor turn / browser IPC round-trip per paper.
+                while browser_backlog and not browser_pending and deps["clock"]() < deadline and gate.is_blocked(_browser_source(browser_backlog[0])):
+                    browser_backlog.popleft()
+                    counts["deferred"] += 1
+                    stats["source_paused"] += 1
                 if browser_backlog and not browser_pending and deps["clock"]() < deadline:
                     paper = browser_backlog.popleft()
                     stats["browser_attempts"] += 1
