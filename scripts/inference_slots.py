@@ -1,13 +1,15 @@
-"""Process-safe two-request admission for the existing literature inference service.
+"""Process-safe bounded admission for the existing literature inference service.
 
 The historical byte-zero lock remains the exclusive research/old-worker lock.
-Summaries share it, with two additional exclusive slot locks. A waiting exclusive
+Summaries share it, with four additional exclusive slot locks. A waiting exclusive
 client owns the admission gate so a stream of summaries cannot starve it.
 """
 from contextlib import contextmanager, ExitStack
 import os
 from pathlib import Path
 import time
+
+MAX_SUMMARY_CONCURRENCY = 4
 
 
 if os.name == "nt":
@@ -76,7 +78,8 @@ def inference_access(directory, deadline, remaining, *, shared=False):
         gate = stack.enter_context(_open(root, "literature-inference-admission.lock"))
         common = stack.enter_context(_open(root, "literature-inference.lock"))
         if shared:
-            slots = [stack.enter_context(_open(root, f"literature-inference-slot-{i}.lock")) for i in range(2)]
+            slots = [stack.enter_context(_open(root, f"literature-inference-slot-{i}.lock"))
+                     for i in range(MAX_SUMMARY_CONCURRENCY)]
             selected = None
             while selected is None:
                 remaining(deadline)

@@ -33,7 +33,7 @@ class SummaryBudgetExpired(Exception):
 
 @contextmanager
 def literature_inference_scope(directory):
-    """Admit at most two summary requests, releasing access between model calls."""
+    """Use bounded summary admission, releasing access between model calls."""
     token = _INFERENCE_DIRECTORY.set(Path(directory))
     try:
         yield

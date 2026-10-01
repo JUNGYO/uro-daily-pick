@@ -6,6 +6,7 @@ from pathlib import Path
 import re
 import time
 import uuid
+from inference_slots import MAX_SUMMARY_CONCURRENCY
 
 PUBLICATION_RESERVE_SECONDS = 15
 MINIMUM_INFERENCE_SECONDS = 3
@@ -103,13 +104,13 @@ def _original(directory, paper, deps):
 
 def run_summary_queue(directory, deadline, service, db, papers, *, dependencies=None, per_paper_seconds=420,
                       concurrency=1, refresh=None, refresh_seconds=60):
-    """Infer on at most two threads; only the caller owns DB, final files and cloud writes.
+    """Infer on at most four threads; only the caller owns DB, final files and cloud writes.
 
-    Standalone callers default to one. Deployments select two only after measuring
+    Standalone callers default to one. Deployments select capacity only after measuring
     server-side throughput, not merely client overlap.
     """
-    if type(concurrency) is not int or not 1 <= concurrency <= 2:
-        raise ValueError("Summary concurrency must be one or two")
+    if type(concurrency) is not int or not 1 <= concurrency <= MAX_SUMMARY_CONCURRENCY:
+        raise ValueError(f"Summary concurrency must be between one and {MAX_SUMMARY_CONCURRENCY}")
     deps = _dependencies(dependencies)
     directory = Path(directory)
     spool = directory / "documents"
