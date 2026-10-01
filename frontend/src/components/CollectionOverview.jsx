@@ -111,8 +111,8 @@ export default function CollectionOverview({ catalog }) {
             로컬 원문 {count(local.local_originals)}편 · 로컬 본문 요약 {count(local.local_summaries)}편
           </p>
           <p className="text-xs text-text3 mt-2">
-            로컬은 저장 완료 수, 서비스 반영은 등록 완료 수입니다. 원문 파일은 로컬에 보관하며 확보 정보와
-            요약을 별도로 동기화합니다.
+            로컬은 검증된 원문과 보관된 요약(기존 요약 포함)을 집계합니다. 서비스 수치는 등록 시점 기준으로,
+            집계 시각에 따라 잠시 차이가 날 수 있습니다. 원문 확보 정보와 요약을 별도로 동기화합니다.
           </p>
           <p className="text-xs text-text2 mt-2">
             서비스 반영 대기: 원문 확보 정보 {count(local.pending_originals)}편 · 본문 요약{" "}
@@ -125,7 +125,7 @@ export default function CollectionOverview({ catalog }) {
                     ? "동기화 상태 확인 필요"
                     : pendingCounts.some((n) => n > 0)
                       ? "미반영 자료를 주기적으로 동기화 중"
-                      : "동기화 완료",
+                      : "전송 대기 없음",
                   syncing: "동기화 중",
                   capacity_blocked: "저장공간 확보 후 동기화 예정",
                   offline: "연결 복구 후 동기화 예정",

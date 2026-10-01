@@ -466,13 +466,24 @@ class LocalCatalog:
                             (str(key), _json(value)))
 
     def stats(self):
+        # Inventory includes earlier published summaries retained in this local
+        # database, not just current-generator checkpoints. Count each PMID once
+        # and require a locally verified original with the same source hash.
+        # This does not promote a legacy summary to current validation readiness.
         result = dict(self.db.execute("""SELECT count(*) local_papers,
             coalesce(sum(version=synced_version),0) synced_papers,
             coalesce(sum(version!=synced_version),0) citation_pending,
             coalesce(sum(json_extract(local_state,'$.local_original')=1),0) local_originals,
-            coalesce(sum(json_extract(local_state,'$.local_summary')=1
+            coalesce(sum((json_extract(local_state,'$.local_summary')=1
               AND json_extract(local_state,'$.summary_source_hash')=json_extract(local_state,'$.acquired_source_hash')
-              AND json_extract(local_state,'$.summarized_at') IS NOT NULL),0) local_summaries
+              AND json_extract(local_state,'$.summarized_at') IS NOT NULL)
+              OR (json_extract(local_state,'$.local_original')=1
+              AND json_extract(remote_state,'$.fulltext_available')=1
+              AND json_extract(remote_state,'$.summary_basis')='fulltext'
+              AND json_extract(remote_state,'$.summary_source_hash')=json_extract(local_state,'$.acquired_source_hash')
+              AND json_extract(remote_state,'$.summarized_at') IS NOT NULL
+              AND length(trim(json_extract(remote_state,'$.summary_model')))>0
+              AND length(trim(json_extract(remote_state,'$.summary_ko')))>0)),0) local_summaries
             FROM catalog_papers""").fetchone())
         for kind in ("original", "summary"):
             name = "pending_originals" if kind == "original" else "pending_summaries"
