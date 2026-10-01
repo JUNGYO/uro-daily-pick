@@ -165,6 +165,36 @@ class LocalCatalogTests(unittest.TestCase):
         self.assertEqual(self.catalog.outbox_batch(), [])
         self.assertEqual(self.catalog.stats()["local_summaries"], 0)
 
+    def test_inventory_includes_source_matched_published_summary_stored_in_local_database(self):
+        for model in ('spark/previous', 'gemini-2.5-pro', 'spark/current.evidence-v1'):
+            with self.subTest(model=model):
+                remote = {**paper(), 'id': 10, **summary()['p_summary'], 'summary_model': model,
+                          'fulltext_available': True, 'summary_basis': 'fulltext', 'summarized_at': '2026-09-01T00:00:00Z'}
+                self.catalog.upsert_papers([remote], synced=True)
+                self.catalog.observe_local_source('1', 'a'*64)
+                self.assertEqual(self.catalog.stats()['local_summaries'], 1)
+                state = json.loads(self.catalog.db.execute("SELECT local_state FROM catalog_papers WHERE pmid='1'").fetchone()[0])
+                self.assertIsNot(state.get('local_summary'), True)
+                self.assertNotIn('summary_model', state)
+                self.assertEqual(self.catalog.outbox_batch(), [])
+        self.catalog.observe_local_summary('1', summary()['p_summary'])
+        self.assertEqual(self.catalog.stats()['local_summaries'], 1, 'Do not double-count current checkpoints and published copies')
+
+    def test_published_summary_inventory_requires_verified_body_and_matching_nonempty_metadata(self):
+        remote = {**paper(), 'id': 10, **summary()['p_summary'], 'fulltext_available': True,
+                  'summary_basis': 'fulltext', 'summarized_at': '2026-09-01T00:00:00Z'}
+        self.catalog.upsert_papers([remote], synced=True)
+        self.assertEqual(self.catalog.stats()['local_summaries'], 0, 'A cloud flag is not a verified local original')
+        self.catalog.observe_local_source('1', 'a'*64)
+        for changed in ({'summary_source_hash':'c'*64}, {'summary_basis':'abstract'}, {'summary_ko':''},
+                        {'summary_model':None}, {'summarized_at':None}, {'fulltext_available':False}):
+            with self.subTest(changed=changed):
+                self.catalog.upsert_papers([{**remote, **changed}], synced=True)
+                self.assertEqual(self.catalog.stats()['local_summaries'], 0)
+        self.catalog.upsert_papers([remote], synced=True)
+        self.catalog.observe_local_source('1', 'c'*64)
+        self.assertEqual(self.catalog.stats()['local_summaries'], 0, 'Old source versions must stay excluded')
+
     def test_outbox_fairness_and_deferred_poison_citation_do_not_block_followers(self):
         self.catalog.upsert_papers([paper(str(n)) for n in range(1, 5)])
         for n in range(1, 5):

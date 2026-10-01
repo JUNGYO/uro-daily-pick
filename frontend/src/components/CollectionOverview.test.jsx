@@ -17,7 +17,7 @@ it("distinguishes stored originals from published receipts and pending periodic 
       }}
     />,
   );
-  expect(screen.getByText(/로컬은 저장 완료 수, 서비스 반영은 등록 완료 수/)).toBeVisible();
+  expect(screen.getByText(/로컬은 검증된 원문과 보관된 요약/)).toBeVisible();
   expect(screen.getByText(/미반영 자료를 주기적으로 동기화 중/)).toBeVisible();
   expect(screen.getByText("02 · 원문 확보 정보 반영")).toBeVisible();
   view.rerender(
@@ -32,7 +32,7 @@ it("distinguishes stored originals from published receipts and pending periodic 
       }}
     />,
   );
-  expect(screen.getByText(/동기화 완료 · 마지막 보고/)).toBeVisible();
+  expect(screen.getByText(/전송 대기 없음 · 마지막 보고/)).toBeVisible();
   view.rerender(
     <CollectionOverview
       catalog={{ local_catalog: localReport({ sync_state: "idle", pending_originals: undefined }) }}
