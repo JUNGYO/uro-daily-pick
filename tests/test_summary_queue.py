@@ -392,9 +392,9 @@ class SummaryQueueTests(unittest.TestCase):
         run_queue.call_args.kwargs["refresh"]()
         self.assertEqual(service.candidates.call_args.kwargs, {"include_summary": True})
 
-    def test_two_inferences_overlap_with_thread_local_scope_and_main_thread_persistence(self):
-        papers = [self.paper(1), self.paper(2)]
-        barrier = threading.Barrier(2)
+    def test_four_inferences_overlap_with_thread_local_scope_and_main_thread_persistence(self):
+        papers = [self.paper(i) for i in range(1, 5)]
+        barrier = threading.Barrier(4)
         scope_value = ContextVar("synthetic_summary_scope", default=None)
         inference_threads = set()
         saved_threads = []
@@ -420,11 +420,11 @@ class SummaryQueueTests(unittest.TestCase):
             worker.save_json(path, value)
 
         self.dependencies.update(generate_summary=generate, literature_inference_scope=scope, save_json=save)
-        counts = self.run_queue(papers, concurrency=2)
-        self.assertEqual(counts["completed"], 2)
-        self.assertEqual(len(inference_threads), 2)
-        self.assertEqual(saved_threads, [self.main_thread, self.main_thread])
-        self.assertEqual(self.db.execute("SELECT count(*) FROM attempts WHERE status='ready'").fetchone()[0], 2)
+        counts = self.run_queue(papers, concurrency=4)
+        self.assertEqual(counts["completed"], 4)
+        self.assertEqual(len(inference_threads), 4)
+        self.assertEqual(saved_threads, [self.main_thread] * 4)
+        self.assertEqual(self.db.execute("SELECT count(*) FROM attempts WHERE status='ready'").fetchone()[0], 4)
         self.assertIsNone(scope_value.get())
         self.assertIn("elapsed", self.output)
 
@@ -674,9 +674,9 @@ class SummaryQueueTests(unittest.TestCase):
         self.assertTrue((self.directory / "documents/1.summary.json").exists())
         self.assertEqual(self.published, [])
 
-    def test_concurrency_cannot_exceed_two(self):
-        with self.assertRaisesRegex(ValueError, "one or two"):
-            self.run_queue([], concurrency=3)
+    def test_concurrency_cannot_exceed_four(self):
+        with self.assertRaisesRegex(ValueError, "between one and 4"):
+            self.run_queue([], concurrency=5)
 
     def test_fully_valid_draft_is_published_before_new_inference_and_saved_as_final(self):
         fresh, draft = self.paper(1, '2026-01-01'), self.paper(2, '2020-01-01')

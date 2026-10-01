@@ -17,7 +17,9 @@ import sys,time
 from pathlib import Path
 from contextlib import contextmanager
 from inference_slots import inference_access
+import inference_slots
 root=Path(sys.argv[1]);mode=sys.argv[2];deadline=time.monotonic()+float(sys.argv[3])
+if mode=='shared_two':inference_slots.MAX_SUMMARY_CONCURRENCY=2
 def remaining(deadline, maximum=600):
     left=deadline-time.monotonic()
     if left<=0:raise TimeoutError()
@@ -38,7 +40,7 @@ def legacy():
             except OSError:time.sleep(.025)
         yield
 try:
-    with legacy() if mode=='legacy' else inference_access(root,deadline,remaining,shared=mode=='shared'):
+    with legacy() if mode=='legacy' else inference_access(root,deadline,remaining,shared=mode in ('shared','shared_two')):
         print('ready',flush=True);sys.stdin.readline()
 except TimeoutError:print('timeout',flush=True)
 '''
@@ -82,15 +84,27 @@ class InferenceSlotsTests(unittest.TestCase):
         child.communicate('\n', timeout=5)
         self.assertEqual(child.returncode, 0)
 
-    def test_two_shared_requests_overlap_but_third_cannot_enter(self):
-        one = self.ready('shared')
-        two = self.ready('shared')
+    def test_four_shared_requests_overlap_but_fifth_cannot_enter(self):
+        active = [self.ready('shared') for _ in range(4)]
         self.blocked('shared')
         self.blocked('exclusive')
-        self.release(one)
-        three = self.ready('shared')
-        self.release(two)
-        self.release(three)
+        self.release(active.pop())
+        active.append(self.ready('shared'))
+        for process in active:
+            self.release(process)
+        self.release(self.ready('exclusive'))
+
+    def test_older_two_slot_clients_share_the_same_four_slot_limit(self):
+        old = self.ready('shared_two')
+        active = [self.ready('shared') for _ in range(3)]
+        self.blocked('shared_two')
+        self.blocked('shared')
+        self.release(old)
+        old = self.ready('shared_two')
+        self.blocked('shared')
+        for process in active:
+            self.release(process)
+        self.release(old)
         self.release(self.ready('exclusive'))
 
     def test_legacy_exclusive_and_new_shared_locks_interoperate_both_directions(self):

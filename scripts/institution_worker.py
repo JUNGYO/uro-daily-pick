@@ -466,10 +466,10 @@ def run(directory, node, seconds, phase="all", requested_pmid=None):
                   f"{counts.get('deferred', 0)} deferred", flush=True)
             return
         if phase == "summarize":
-            from summary_queue import run_summary_queue
+            from summary_queue import run_summary_queue, MAX_SUMMARY_CONCURRENCY
             counts = run_local_cycles(service, deadline, phase,
                 lambda candidates: run_summary_queue(directory, deadline, service, db, candidates,
-                    concurrency=2,
+                    concurrency=MAX_SUMMARY_CONCURRENCY,
                     refresh=None if requested_pmid else lambda: service.candidates(include_summary=True)), requested_pmid)
             print(f"Institution summarize: {counts.get('first_completed', 0)} first summaries stored locally, {counts.get('updated', 0)} refreshed, "
                   f"{counts.get('failed', 0)} failed, {counts.get('yielded', 0)} yielded, {counts.get('deferred', 0)} deferred", flush=True)
