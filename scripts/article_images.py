@@ -10,7 +10,7 @@ import re
 import ssl
 import shutil
 import time
-from urllib.parse import urljoin, urlsplit, quote, unquote
+from urllib.parse import urljoin, urlsplit, quote, unquote, parse_qs
 from urllib.request import Request, build_opener, HTTPSHandler
 import zipfile
 
@@ -213,10 +213,12 @@ def collect_images(directory, pmid, record, browser=None, deadline=None):
                 if deadline and time.monotonic() >= deadline: raise TimeoutError('Article image budget')
                 data = None
                 if is_xml:
+                    from pmc_cloud import document_media
+                    bound_urls = document_media(record['document'], pmid)
                     match = re.search(r'/(PMC\d+)/fullTextXML',source_url)
-                    if not match: raise ValueError('No image package identifier')
+                    if not match and bound_urls is None: raise ValueError('No image package identifier')
                     if cloud_urls is None:
-                        try: cloud_urls = pmc_image_urls(match[1],pmid)
+                        try: cloud_urls = bound_urls if bound_urls is not None else pmc_image_urls(match[1],pmid)
                         except (OSError,ValueError): cloud_urls = []
                     ref = Path(figure['ref']).name
                     for url in cloud_urls:
@@ -224,9 +226,11 @@ def collect_images(directory, pmid, record, browser=None, deadline=None):
                         if name != ref and Path(name).stem != Path(ref).stem: continue
                         try:
                             candidate=fetch_bytes(url,timeout=12)
+                            if bound_urls is not None and hashlib.md5(candidate, usedforsecurity=False).hexdigest() != parse_qs(urlsplit(url).query)['md5'][0]:
+                                raise ValueError('PMC figure checksum mismatch')
                             image_type(candidate);data=candidate;break
                         except (OSError,ValueError): continue
-                    if data is None and not package_attempted:
+                    if data is None and not package_attempted and bound_urls is None:
                         package_attempted = True
                         raw = fetch_bytes(f'https://www.ebi.ac.uk/europepmc/webservices/rest/{match[1]}/supplementaryFiles',MAX_PACKAGE_BYTES,20)
                         package = zipfile.ZipFile(io.BytesIO(raw))

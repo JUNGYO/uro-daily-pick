@@ -118,6 +118,14 @@ def discover_oa_batch(pmids, *, deadline=None, request_gate=None, download=None)
                            "source_url": f"{API_BASE}/{pmcid}/fullTextXML"}
         else:
             found[pmid] = {"status": "unavailable", "reason": "not_open_access"}
+            # Author manuscripts may be distributed by PMC even when this
+            # provider's OA XML endpoint is unavailable. Preserve the identifier,
+            # without claiming OA availability or authorization to another source.
+            pmcid = record.get("pmcid")
+            if pmcid:
+                if not isinstance(pmcid, str) or not _PMCID.fullmatch(pmcid):
+                    raise OADiscoveryError("Invalid repository PMCID")
+                found[pmid]["pmcid"] = pmcid
     _check_deadline(deadline)
     return {pmid: found.get(pmid, {"status": "unavailable", "reason": "not_indexed"})
             for pmid in requested}

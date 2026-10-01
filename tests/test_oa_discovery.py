@@ -34,7 +34,7 @@ class OADiscoveryTests(unittest.TestCase):
         self.assertEqual(list(result), ["1", "2", "3"])
         self.assertEqual(result["1"], {"status": "available", "pmcid": "PMC123",
                                       "source_url": oa.API_BASE + "/PMC123/fullTextXML"})
-        self.assertEqual(result["2"], {"status": "unavailable", "reason": "not_open_access"})
+        self.assertEqual(result["2"], {"status": "unavailable", "reason": "not_open_access", "pmcid": "PMC123"})
         self.assertEqual(result["3"], {"status": "unavailable", "reason": "not_indexed"})
         fetch.assert_called_once()
         parsed = urlsplit(fetch.call_args.args[0])

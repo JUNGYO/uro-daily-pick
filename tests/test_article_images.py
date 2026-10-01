@@ -29,6 +29,19 @@ class ImageCollectionTests(unittest.TestCase):
     def tearDown(self):
         self.temp.cleanup()
 
+    def test_pmc_manuscript_figures_use_only_stored_source_version(self):
+        url = 'https://pmc-oa-opendata.s3.amazonaws.com/PMC456.2/fig1.jpg?md5=' + hashlib.md5(PNG).hexdigest()
+        self.record['document'].update(source_url='https://pmc-oa-opendata.s3.amazonaws.com/PMC456.2/PMC456.2.xml',
+            repository={'provider': 'pmc_cloud', 'pmid': '12345', 'pmcid': 'PMC456', 'version': 2,
+                        'is_manuscript': True, 'media_urls': [url]})
+        (self.docs/'12345.xml').write_bytes(b'<article xmlns:xlink="http://www.w3.org/1999/xlink"><body><fig><label>Figure 1</label><graphic xlink:href="fig1"/></fig></body></article>')
+        with patch.object(images, 'fetch_bytes', return_value=PNG) as fetch, patch.object(images, 'pmc_image_urls') as lookup:
+            result = images.collect_images(self.root, '12345', self.record)
+        self.assertEqual(result['status'], 'complete')
+        self.assertEqual(result['figures'][0]['status'], 'ready')
+        lookup.assert_not_called()
+        fetch.assert_called_once_with(url, timeout=12)
+
     def test_automatic_queue_skips_archived_dates_but_explicit_request_can_read_them(self):
         for pmid in ('1','2'):
             (self.docs/(pmid+'.json')).write_text(json.dumps(self.record),encoding='utf-8')
