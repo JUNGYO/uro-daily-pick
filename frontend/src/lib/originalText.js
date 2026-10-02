@@ -76,7 +76,11 @@ export function readingLayout(text, contentHash, value) {
     )
   )
     return null;
-  const needed = new Set(spans.flatMap((s) => [s.start, s.end]));
+  const rawCitations =
+    value.citation_version === 1 && Array.isArray(value.citations) && value.citations.length <= 10000
+      ? value.citations
+      : [];
+  const needed = new Set([...spans, ...rawCitations].filter(Boolean).flatMap((s) => [s.start, s.end]));
   const offsets = new Map();
   let character = 0,
     index = 0;
@@ -132,12 +136,49 @@ export function readingLayout(text, contentHash, value) {
     blocks.push(block);
     cursor = block.end;
   }
-  return text.slice(cursor).trim() ? null : { ...value, blocks };
+  if (text.slice(cursor).trim()) return null;
+  const references = Array.isArray(value.references)
+    ? value.references
+        .slice(0, 3000)
+        .filter(
+          (r) =>
+            r &&
+            typeof r.id === "string" &&
+            /^[A-Za-z0-9_.:-]{1,200}$/.test(r.id) &&
+            typeof r.text === "string" &&
+            r.text.length > 0 &&
+            r.text.length <= 12000,
+        )
+    : [];
+  let citationEnd = 0;
+  const citations = [];
+  for (const raw of rawCitations) {
+    if (!raw) continue;
+    const cite = convert(raw);
+    if (
+      !Number.isInteger(cite.start) ||
+      !Number.isInteger(cite.end) ||
+      cite.start < citationEnd ||
+      cite.end <= cite.start ||
+      typeof cite.text !== "string" ||
+      text.slice(cite.start, cite.end) !== cite.text ||
+      !Array.isArray(cite.targets) ||
+      cite.targets.length < 1 ||
+      cite.targets.length > 100 ||
+      cite.targets.some((id) => typeof id !== "string" || !/^[A-Za-z0-9_.:-]{1,200}$/.test(id))
+    )
+      continue;
+    citations.push(cite);
+    citationEnd = cite.end;
+  }
+  return { ...value, blocks, citations, references };
 }
 
 export function originalParagraphs(text, blocks = [], layout = null) {
   let start = 0,
-    blockIndex = 0;
+    blockIndex = 0,
+    citationIndex = 0;
+  const citations = layout?.citations || [];
   const located = new Set();
   const ranges =
     layout?.blocks ||
@@ -155,18 +196,44 @@ export function originalParagraphs(text, blocks = [], layout = null) {
       const from = Math.max(cursor, block.start),
         to = Math.min(end, block.end);
       if (from >= to) continue;
-      if (from > cursor) runs.push({ text: text.slice(cursor, from) });
+      if (from > cursor) runs.push({ start: cursor, end: from, text: text.slice(cursor, from) });
       runs.push({
         ...block,
         id: located.has(block.id) ? undefined : block.id,
         locationId: block.id,
+        start: from,
+        end: to,
         text: text.slice(from, to),
       });
       located.add(block.id);
       cursor = to;
     }
-    if (cursor < end) runs.push({ text: text.slice(cursor, end) });
-    return runs;
+    if (cursor < end) runs.push({ start: cursor, end, text: text.slice(cursor, end) });
+    while (citationIndex < citations.length && citations[citationIndex].end <= start) citationIndex++;
+    const inRange = [];
+    for (let i = citationIndex; i < citations.length && citations[i].start < end; i++) {
+      // Do not invent partial markers across cells or paragraph boundaries.
+      if (citations[i].start >= start && citations[i].end <= end) inRange.push(citations[i]);
+    }
+    return runs.flatMap((run) => {
+      const overlapping = inRange.filter((c) => c.start < run.end && c.end > run.start);
+      if (!overlapping.length) return [run];
+      const boundaries = [
+        ...new Set([
+          run.start,
+          run.end,
+          ...overlapping.flatMap((c) => [Math.max(run.start, c.start), Math.min(run.end, c.end)]),
+        ]),
+      ].sort((a, b) => a - b);
+      return boundaries.slice(0, -1).map((from, i) => ({
+        ...run,
+        start: from,
+        end: boundaries[i + 1],
+        id: i === 0 ? run.id : undefined,
+        text: text.slice(from, boundaries[i + 1]),
+        citation: overlapping.find((c) => c.start <= from && c.end >= boundaries[i + 1]),
+      }));
+    });
   };
   return ranges.map((range) => {
     const paragraph = { ...range, figures: [] };

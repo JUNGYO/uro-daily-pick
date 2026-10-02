@@ -124,21 +124,26 @@ class Archive:
         raise ViewerError(503 if found_invalid else 404, "document_unavailable" if found_invalid else "not_found")
 
     def layout(self, root, pmid, doc):
+        # A source-matched sidecar can enrich an older embedded layout without
+        # rewriting any original, summary, or evidence locations.
+        candidates = []
         try:
-            value = doc.get('reading_layout')
-            if value is None:
-                path = root / (pmid + '.layout.json')
-                if path.is_symlink() or path.resolve(strict=True) != path:
-                    return None
-                with path.open('rb') as stream:
-                    raw = stream.read(MAX_FILE_BYTES + 1)
-                if len(raw) > MAX_FILE_BYTES:
-                    return None
-                value = json.loads(raw)
-            return validate_layout(value, doc['content_text'], doc['content_hash'])
+            path = root / (pmid + '.layout.json')
+            if path.exists():
+                if not path.is_symlink() and path.resolve(strict=True) == path:
+                    with path.open('rb') as stream:
+                        raw = stream.read(MAX_FILE_BYTES + 1)
+                    if len(raw) <= MAX_FILE_BYTES:
+                        candidates.append(json.loads(raw))
         except (OSError, ValueError, KeyError, TypeError):
-            # A bad optional layout must never hide or alter the verified original.
-            return None
+            pass
+        candidates.append(doc.get('reading_layout'))
+        for value in sorted(candidates, key=lambda v: bool(isinstance(v, dict) and v.get('citation_version')), reverse=True):
+            try:
+                return validate_layout(value, doc['content_text'], doc['content_hash'])
+            except (OSError, ValueError, KeyError, TypeError):
+                pass
+        return None  # Bad optional structure never hides the verified original.
 
     def figures(self, pmid, content_hash):
         path=self.roots[0]/(pmid+'.images.json')

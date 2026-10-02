@@ -12,7 +12,7 @@ from pathlib import Path
 import re
 import ssl
 import time
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import urlencode, urlsplit, unquote
 from urllib.request import Request, build_opener, HTTPSHandler, HTTPRedirectHandler
 from urllib.error import HTTPError
 
@@ -115,6 +115,140 @@ def _span_attribute(value):
     return number if 1 <= number <= 1000 else 1
 
 
+def _reference_id(value):
+    return isinstance(value, str) and re.fullmatch(r'[A-Za-z0-9_.:-]{1,200}', value)
+
+
+def _xml_citation_targets(node):
+    name = node.tag.rsplit('}', 1)[-1] if isinstance(node.tag, str) else ''
+    if name == 'xref' and node.get('ref-type') == 'bibr':
+        keys = (node.get('rid') or '').split()
+    elif name == 'cross-ref' and re.search(r'(?:bib|ref)', node.get('refid', ''), re.I):
+        keys = (node.get('refid') or '').split()
+    else:
+        return []
+    return list(dict.fromkeys(k for k in keys if _reference_id(k)))[:100]
+
+
+def _html_citation_targets(node):
+    if node.name != 'a':
+        return []
+    href = node.get('href', '')
+    if not isinstance(href, str) or len(href) > 10000:
+        return []
+    try:
+        key = unquote(urlsplit(href).fragment)
+    except ValueError:
+        return []
+    classes = ' '.join(node.get('class', []))
+    explicit = re.search(r'(?:bibLink|bibr|ref-link|reference-link)', classes, re.I)
+    known_id = re.search(r'(?:^|[-_:])(?:bib|ref(?:erence)?s?|cit(?:ation)?)[-_:]*[A-Za-z]*\d[\w.:-]*$|^(?:CR|B|R)\d+$', key, re.I)
+    if _reference_id(key) and (explicit or (href.startswith('#') and known_id)):
+        return [key]
+    return []
+
+
+def _citation_ranges(chunks, text):
+    """Locate publisher-linked markers in the exact existing flattened string."""
+    cursor, parts, spans = 0, [], {}
+    for value, owners in chunks:
+        if not value:
+            continue
+        if parts:
+            cursor += 1
+        start = cursor
+        parts.append(value)
+        cursor += len(value)
+        for owner, targets in owners:
+            key = id(owner)
+            if key not in spans:
+                spans[key] = {'start': start, 'end': cursor, 'targets': targets}
+            else:
+                spans[key]['end'] = cursor
+    if ' '.join(parts) != text:
+        return []  # Never approximate offsets or change the canonical original.
+    result = []
+    for cite in sorted(spans.values(), key=lambda c: (c['start'], -c['end'])):
+        start, end = cite['start'], cite['end']
+        # Absorb surrounding brackets and adjacent native citation links, so
+        # publishers' [1, 2] and superscript 1,2 get a single consistent marker.
+        left, right = text[:start].rstrip(), text[end:].lstrip()
+        if left.endswith('[') and right.startswith(']'):
+            start = len(left) - 1
+            end = len(text) - len(right) + 1
+        cite = {**cite, 'start': start, 'end': end}
+        if result and start < result[-1]['end']:
+            continue
+        if result and re.fullmatch(r'[\s,;\-\u2013\u2014]*', text[result[-1]['end']:start]):
+            prior = result[-1]
+            if len(prior['targets']) + len(cite['targets']) <= 100:
+                prior['end'] = end
+                prior['targets'] = list(dict.fromkeys(prior['targets'] + cite['targets']))
+                continue
+        result.append(cite)
+    for cite in result:
+        # Include brackets around a merged multi-reference group, too.
+        left, right = text[:cite['start']].rstrip(), text[cite['end']:].lstrip()
+        if left.endswith('[') and right.startswith(']'):
+            cite['start'] = len(left) - 1
+            cite['end'] = len(text) - len(right) + 1
+        cite['text'] = text[cite['start']:cite['end']]
+    return result
+
+
+def _xml_citations(node, text):
+    chunks = []
+    def visit(element, owners):
+        targets = _xml_citation_targets(element)
+        if targets:
+            owners = owners + [(element, targets)]
+        if element.text:
+            chunks.append((' '.join(element.text.split()), owners))
+        for child in element:
+            visit(child, owners)
+            if child.tail:
+                chunks.append((' '.join(child.tail.split()), owners))
+    visit(node, [])
+    return _citation_ranges(chunks, text)
+
+
+def _html_citations(node, text):
+    chunks = []
+    for string in node.strings:
+        owners, parent = [], string.parent
+        while parent is not None:
+            targets = _html_citation_targets(parent)
+            if targets:
+                owners.append((parent, targets))
+            if parent is node:
+                break
+            parent = parent.parent
+        chunks.append((str(string).strip(), owners))
+    return _citation_ranges(chunks, text)
+
+
+def _source_references(root, *, xml=False):
+    references = {}
+    if xml:
+        for node in root.iter():
+            name = node.tag.rsplit('}', 1)[-1] if isinstance(node.tag, str) else ''
+            key = node.get('id')
+            if name in ('ref', 'bib-reference') and _reference_id(key):
+                value = ' '.join(' '.join(node.itertext()).split())
+                if value and len(value) <= 12000:
+                    references.setdefault(key, {'id': key, 'text': value})
+    else:
+        keys = {key for node in root.find_all('a', href=True) for key in _html_citation_targets(node)}
+        for key in sorted(keys):
+            node = root.find(id=key)
+            if node is None or node.name == 'a':
+                continue
+            value = node.get_text(' ', strip=True)
+            if value and len(value) <= 12000:
+                references[key] = {'id': key, 'text': value}
+    return list(references.values())[:3000]
+
+
 def _xml_layout_units(element):
     local = lambda node: node.tag.rsplit('}', 1)[-1] if isinstance(node.tag, str) else ''
     flatten = lambda node: ' '.join(' '.join(node.itertext()).split())
@@ -123,6 +257,7 @@ def _xml_layout_units(element):
     name = local(element)
     if name in kind:
         unit = {'kind': kind[name], 'text': flatten(element)}
+        unit['citations'] = _xml_citations(element, unit['text'])
         if name == 'table':
             unit['rows'] = [[{'text': flatten(cell), 'header': local(cell) == 'th',
                              'rowspan': _span_attribute(cell.get('rowspan')),
@@ -138,6 +273,7 @@ def _xml_layout_units(element):
 def _html_layout_unit(node):
     kind = 'table' if node.name == 'table' else 'paragraph'
     unit = {'kind': kind, 'text': node.get_text(' ', strip=True)}
+    unit['citations'] = _html_citations(node, unit['text'])
     if kind == 'table':
         unit['rows'] = [[{'text': cell.get_text(' ', strip=True), 'header': cell.name == 'th',
                          'rowspan': _span_attribute(cell.get('rowspan')),
@@ -150,7 +286,7 @@ def _html_layout_unit(node):
 def parse_document(content):
     if not content or len(content) > MAX_BYTES:
         raise ValueError("Empty or oversized document")
-    sections, section_units, license_text = [], [], None
+    sections, section_units, license_text, references = [], [], None, []
     if content.startswith(b"%PDF-"):
         reader = PdfReader(io.BytesIO(content))
         if reader.is_encrypted:
@@ -176,6 +312,7 @@ def parse_document(content):
             elif body is None and not (local(root)=="article" and any(local(node) in {"h1","h2","h3"} for node in root.iter())):
                 raise ValueError("Article XML contains metadata or abstract only")
             if body is not None:
+                references = _source_references(root, xml=True)
                 for child in body:
                     title = next((" ".join(n.itertext()).strip() for n in child if local(n) in ("title", "section-title")), "Body")
                     text = " ".join(" ".join(child.itertext()).split())
@@ -189,6 +326,7 @@ def parse_document(content):
             soup = BeautifulSoup(content, "html.parser")
             for node in soup.select("script, style, nav, header, footer, form, aside"):
                 node.decompose()
+            references = _source_references(soup)
             body = next((soup.select_one(selector) for selector in
                 ("#body", ".article-section__full", ".article__body", ".c-article-body", ".article-full-text", ".article-body", "article", "main")
                 if soup.select_one(selector) is not None), None)
@@ -222,7 +360,7 @@ def parse_document(content):
         raise ValueError("Extracted document too large")
     if re.search(r"(verify you are human|enable javascript and cookies|checking your browser|access denied)", text[:2000], re.I):
         raise ValueError("Access challenge is not article text")
-    layout = build_layout(text, sections, section_units)
+    layout = build_layout(text, sections, section_units, references=references)
     return {"content_text": text, "sections": sections, "license": license_text, "reading_layout": layout,
             "content_hash": hashlib.sha256(text.encode()).hexdigest(), "source": kind}
 
