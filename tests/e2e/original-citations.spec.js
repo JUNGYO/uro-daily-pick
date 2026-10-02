@@ -29,6 +29,8 @@ for (const width of [1440, 830, 390, 320]) {
     await page.goto("/uro-daily-pick/fulltext/12345670?scenario=admin");
     const reader = page.getByRole("article");
     await expect(reader.locator("sup.original-citation")).toHaveCount(2);
+    await expect(reader.locator(".original-citation-attachment")).toHaveCount(2);
+    expect(await reader.locator(".original-citation-attachment").first().evaluate(el => getComputedStyle(el).whiteSpace)).toBe("nowrap");
     await expect(reader.getByRole("button", { name: "참고문헌 1 보기" })).toHaveText("[1]");
     const multipleButton = reader.getByRole("button", { name: "참고문헌 2, 3 보기" });
     await expect(multipleButton).toHaveText("[2, 3]");

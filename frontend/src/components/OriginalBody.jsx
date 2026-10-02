@@ -165,8 +165,7 @@ function SourceRuns({ runs, activeId, references, opened, onReference }) {
       {content}
     </span>
   );
-  return groups.map((group, index) => {
-    if (!group.citation) return sourceSpan(group.runs[0], index);
+  const citationElement = (group) => {
     const cite = group.citation;
     const label = citationLabel(cite.text);
     const numeric = /^[\d\s,;–—-]+$/.test(label);
@@ -199,5 +198,38 @@ function SourceRuns({ runs, activeId, references, opened, onReference }) {
         )}
       </Wrapper>
     );
-  });
+  };
+  const result = [];
+  for (let index = 0; index < groups.length; index++) {
+    const group = groups[index],
+      next = groups[index + 1];
+    if (group.citation) {
+      result.push(citationElement(group));
+      continue;
+    }
+    const run = group.runs[0];
+    const tail = run.text.match(/\S+\s*$/u)?.[0];
+    // Keep a short word and its reference together, including across source
+    // locator boundaries. Long words/groups may wrap to preserve mobile width.
+    if (
+      tail &&
+      next?.citation &&
+      /^[\d\s,;–—-]+$/.test(citationLabel(next.citation.text)) &&
+      tail.length + citationLabel(next.citation.text).length <= 24
+    ) {
+      const prefix = run.text.slice(0, -tail.length);
+      if (prefix) result.push(sourceSpan(run, index, prefix));
+      result.push(
+        <span
+          key={`attached-${next.citation.start}`}
+          className="original-citation-attachment whitespace-nowrap"
+        >
+          {sourceSpan({ ...run, id: prefix ? undefined : run.id }, index, tail)}
+          {citationElement(next)}
+        </span>,
+      );
+      index++;
+    } else result.push(sourceSpan(run, index));
+  }
+  return result;
 }
