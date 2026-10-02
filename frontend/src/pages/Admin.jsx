@@ -7,6 +7,16 @@ import { useAuth } from "../lib/auth";
 import { Users, FileText, Heart, Clock } from "lucide-react";
 
 const ADMIN_EMAILS = ["crazyslime@gmail.com"];
+const activityDateFormat = new Intl.DateTimeFormat("ko-KR", {
+  timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit",
+  hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+});
+
+function ActivityTime({ value }) {
+  if (value === null) return "기록 없음";
+  if (!value || !Number.isFinite(new Date(value).getTime())) return "확인 불가";
+  return <time dateTime={value}>{activityDateFormat.format(new Date(value))}</time>;
+}
 
 function StatCard({ icon: Icon, label, value, sub, color }) {
   return (
@@ -239,18 +249,19 @@ export default function Admin() {
         </AdminPanel>
 
         {/* User engagement */}
-        <AdminPanel title="User Engagement" rpc="admin_user_engagement" refresh={retry} list>
+        <AdminPanel title="User Engagement" rpc="admin_user_engagement" refresh={retry} pollMs={30000} list>
           {(users) => (
             <>
-              <div className="overflow-x-auto">
-                <table className="w-full text-[0.778rem]">
+              <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="사용자 로그인·읽기 현황 표">
+                <table className="w-full min-w-[660px] text-[0.778rem]">
                   <thead>
                     <tr className="text-text3 text-left border-b border-border">
                       <th className="pb-2 font-medium">User</th>
                       <th className="pb-2 font-medium text-center">Likes</th>
                       <th className="pb-2 font-medium text-center">Skips</th>
                       <th className="pb-2 font-medium text-center">Reads</th>
-                      <th className="pb-2 font-medium text-right">Last Active</th>
+                      <th className="pb-2 font-medium text-right">최근 로그인</th>
+                      <th className="pb-2 font-medium text-right">최근 읽기</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -263,14 +274,20 @@ export default function Admin() {
                         <td className="py-2 text-center text-success font-medium">{u.likes}</td>
                         <td className="py-2 text-center text-text3">{u.dislikes}</td>
                         <td className="py-2 text-center">{u.reads}</td>
-                        <td className="py-2 text-right text-text3">
-                          {u.last_active ? new Date(u.last_active).toLocaleDateString() : "—"}
+                        <td className="py-2 pl-3 text-right text-text3 whitespace-nowrap">
+                          <ActivityTime value={u.last_sign_in_at} />
+                        </td>
+                        <td className="py-2 pl-3 text-right text-text3 whitespace-nowrap">
+                          <ActivityTime value={u.last_read_at === undefined ? u.last_active : u.last_read_at} />
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
+              <p className="text-xs text-text3 mt-3">
+                로그인과 논문 읽기 시각을 구분합니다. 시간은 한국 시간(KST)입니다.
+              </p>
             </>
           )}
         </AdminPanel>
