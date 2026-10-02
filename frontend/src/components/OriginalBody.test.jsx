@@ -1,9 +1,56 @@
 import { render, screen, fireEvent, cleanup } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import OriginalBody from "./OriginalBody";
-import { sourceLocations } from "../lib/originalText";
+import { readingLayout, sourceLocations } from "../lib/originalText";
 
 afterEach(cleanup);
+test("native citations use brackets, retain evidence anchors and open only preserved references", () => {
+  const content = "🧬 N = 195, 95% CI. Clinical assessment. 12 Next sentence. 3 Area mm2.";
+  const start = content.indexOf("12"),
+    end = start + 2,
+    missing = content.indexOf("3 Area");
+  const offset = (n) => [...content.slice(0, n)].length;
+  const layout = readingLayout(content, "source", {
+    version: 1,
+    content_hash: "source",
+    citation_version: 1,
+    blocks: [{ kind: "paragraph", start: 0, end: [...content].length }],
+    citations: [
+      { start: offset(start), end: offset(end), text: "12", targets: ["R12"] },
+      { start: offset(missing), end: offset(missing + 1), text: "3", targets: ["R3"] },
+    ],
+    references: [{ id: "R12", text: "12. Alpha. Clinical study. 2020. <script>literal source</script>" }],
+  });
+  const cut = start + 1;
+  const blocks = sourceLocations(content, [
+    { id: "p-0000000", start: 0, end: offset(cut), text: content.slice(0, cut) },
+    { id: "p-0000039", start: offset(cut), end: [...content].length, text: content.slice(cut) },
+  ]);
+  const article = {
+    pmid: "123",
+    content_hash: "source",
+    content_text: content,
+    blocks,
+    figures: [],
+    reading_layout: layout,
+  };
+  const { container } = render(<OriginalBody article={article} activeId="p-0000039" />);
+  expect(container.querySelectorAll("sup.original-citation")).toHaveLength(2);
+  expect(container.querySelector(".original-paragraph").textContent).toBe(
+    content.replace("12", "[12]").replace("3 Area", "[3] Area"),
+  );
+  expect(container.querySelectorAll("#p-0000039")).toHaveLength(1);
+  expect(screen.queryByRole("button", { name: "참고문헌 3 보기" })).toBeNull();
+  const button = screen.getByRole("button", { name: "참고문헌 12 보기" });
+  fireEvent.click(button);
+  const details = screen.getByRole("complementary", { name: "참고문헌 12" });
+  expect(details).toHaveTextContent("Alpha. Clinical study.");
+  expect(container.querySelector("script")).toBeNull();
+  expect(button).toHaveAttribute("aria-expanded", "true");
+  fireEvent.keyDown(details, { key: "Escape" });
+  expect(screen.queryByRole("complementary")).toBeNull();
+  expect(button).toHaveFocus();
+});
 test("duplicate XML section labels share one heading and retain both evidence anchors", () => {
   const content = "Results\nResults\nBody.\nResults\nEnd.";
   let start = 0;

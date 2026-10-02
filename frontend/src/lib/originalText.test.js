@@ -26,6 +26,29 @@ const restored = (text, blocks) =>
     .map((p) => p.runs.map((r) => r.text).join(""))
     .join("\n");
 
+test("invalid citation annotations are ignored without losing verified reading text", () => {
+  const text = "N = 195. Reading body 1.";
+  const layout = readingLayout(text, "source", {
+    version: 1,
+    content_hash: "source",
+    blocks: [{ kind: "paragraph", start: 0, end: text.length }],
+    citation_version: 1,
+    citations: [
+      null,
+      { start: -1, end: 2, text: "N", targets: ["R1"] },
+      { start: 0, end: 1, text: "wrong", targets: ["R1"] },
+    ],
+    references: [{ id: "R1", text: 42 }],
+  });
+  expect(layout.citations).toEqual([]);
+  expect(layout.references).toEqual([]);
+  expect(
+    originalParagraphs(text, [], layout)[0]
+      .runs.map((r) => r.text)
+      .join(""),
+  ).toBe(text);
+});
+
 test("source location boundaries cannot become paragraphs or split words", () => {
   const text = "a".repeat(1392) + " entirel" + "y at the clinician's discretion.\n\nSecond paragraph.";
   const blocks = sourceBlocks(text);

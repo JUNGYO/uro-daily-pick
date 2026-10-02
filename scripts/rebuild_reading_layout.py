@@ -31,12 +31,20 @@ def rebuild(path, *, apply=False):
     sidecar = path.with_suffix('.layout.json')
     if sidecar.is_symlink():
         return 'unsafe_path'
+    current = None
+    candidates = [doc.get('reading_layout')]
     try:
-        current = doc.get('reading_layout') or json.loads(sidecar.read_bytes())
-        validate_layout(current, text, digest)
-        return 'already_verified'
+        candidates.insert(0, json.loads(sidecar.read_bytes()))
     except (OSError, ValueError, TypeError, KeyError):
         pass
+    for candidate in candidates:
+        try:
+            validate_layout(candidate, text, digest)
+            current = candidate
+            if current.get('citation_version') == 1:
+                return 'already_verified'
+        except (OSError, ValueError, TypeError, KeyError):
+            pass
     layout, source_found = None, False
     for ext in ('.xml', '.html', '.pdf'):
         source = path.with_suffix(ext)
@@ -60,8 +68,13 @@ def rebuild(path, *, apply=False):
             return 'source_version_differs' if source_found else 'source_unavailable'
         units = [[{'kind':'paragraph','text':line} for line in s['text'].splitlines() if line.strip()]
                  for s in sections]
-        layout = build_layout(text, sections, units)
-        layout['structure_source'] = 'stored_sections'
+        layout = current or build_layout(text, sections, units)
+        if current is None:
+            layout['structure_source'] = 'stored_sections'
+        # Record that native citation markup was unavailable, not inferred from
+        # clinical numbers. Preserve any existing verified table structure.
+        layout = {**layout, 'citation_version': 1, 'citations': [], 'references': [],
+                  'citation_status': 'source_unavailable'}
     if not apply:
         return 'verified_dry_run'
     if path.read_bytes() != before:

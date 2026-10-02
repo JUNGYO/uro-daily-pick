@@ -64,3 +64,17 @@ health and an unchanged task definition.
 Validation uses synthetic articles: `python -m unittest discover -s tests`, frontend
 unit tests, and `tests/e2e/fulltext.spec.js` for mobile access, image retry,
 enlargement/download, logout, keyboard navigation and denial.
+
+Native JATS/Elsevier bibliographic cross-references and publisher HTML citation
+links are preserved as source-bound ranges in the optional reading layout.
+Numeric citations display as superscript bracketed markers. Selecting a marker
+opens the cited reference text beside its paragraph when that text was preserved
+in the source; unavailable references remain marked without a misleading link.
+Clinical numbers, years, figure/table links and mathematical superscripts are not
+guessed to be citations. Plain PDF extraction cannot recover lost reference markup.
+
+`rebuild_reading_layout.py` upgrades existing originals from matching cached sources
+using additive `.layout.json` sidecars. The viewer prefers a verified enriched
+sidecar and falls back to a verified embedded layout if it is missing or invalid.
+Original text, hashes, summaries and evidence positions remain unchanged. No new
+network route or access permission is required for reference details.
