@@ -197,13 +197,13 @@ function Layout({ children }) {
           연구 프로젝트
         </NavLink>
       </nav>
-      <main id="main-content" tabIndex={-1} className="flex-1 min-h-0 overflow-hidden pb-16 lg:pb-0">
+      <main id="main-content" tabIndex={-1} className="flex-1 min-h-0 overflow-hidden">
         {children}
       </main>
 
       {/* Mobile bottom tab bar */}
       <nav
-        className="lg:hidden fixed bottom-0 left-0 right-0 z-50 bg-card/95 backdrop-blur border-t border-border flex items-stretch justify-around"
+        className="lg:hidden relative z-50 shrink-0 bg-card/95 backdrop-blur border-t border-border flex items-stretch justify-around"
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
         {links.map(({ to, icon: Icon, label }) => (
@@ -217,7 +217,7 @@ function Layout({ children }) {
             }
           >
             <Icon size={20} />
-            <span className="text-[12px] font-medium">{label}</span>
+            <span className="max-w-full break-words text-center text-[12px] leading-snug font-medium">{label}</span>
           </NavLink>
         ))}
       </nav>
