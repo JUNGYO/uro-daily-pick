@@ -67,7 +67,15 @@ enlargement/download, logout, keyboard navigation and denial.
 
 Native JATS/Elsevier bibliographic cross-references and publisher HTML citation
 links are preserved as source-bound ranges in the optional reading layout.
-Numeric citations display as superscript bracketed markers. Selecting a marker
+All verified citation styles display as superscript bracketed numbers, assigned
+by first appearance within the article and reused for repeated source identities.
+This includes numeric superscripts, square/round/full-width brackets, author-year
+groups, marked-up symbols and split range endpoints. Explicit numeric ranges keep
+their intermediate members; a missing bibliography entry remains visibly unavailable
+instead of silently disappearing. Narrative author names remain in the sentence.
+Citation-only wrappers are removed without consuming surrounding parenthetical
+prose. These are display transformations; stored originals are not renumbered.
+Selecting a marker
 opens the cited reference text beside its paragraph when that text was preserved
 in the source; unavailable references remain marked without a misleading link.
 Clinical numbers, years, figure/table links and mathematical superscripts are not

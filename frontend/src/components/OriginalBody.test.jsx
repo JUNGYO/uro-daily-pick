@@ -37,13 +37,13 @@ test("native citations use brackets, retain evidence anchors and open only prese
   const { container } = render(<OriginalBody article={article} activeId="p-0000039" />);
   expect(container.querySelectorAll("sup.original-citation")).toHaveLength(2);
   expect(container.querySelector(".original-paragraph").textContent).toBe(
-    content.replace("12", "[12]").replace("3 Area", "[3] Area"),
+    content.replace("12", "[1]").replace("3 Area", "[2] Area"),
   );
   expect(container.querySelectorAll("#p-0000039")).toHaveLength(1);
-  expect(screen.queryByRole("button", { name: "참고문헌 3 보기" })).toBeNull();
-  const button = screen.getByRole("button", { name: "참고문헌 12 보기" });
+  expect(screen.queryByRole("button", { name: "참고문헌 2 보기" })).toBeNull();
+  const button = screen.getByRole("button", { name: "참고문헌 1 보기" });
   fireEvent.click(button);
-  const details = screen.getByRole("complementary", { name: "참고문헌 12" });
+  const details = screen.getByRole("complementary", { name: "참고문헌 1" });
   expect(details).toHaveTextContent("Alpha. Clinical study.");
   expect(container.querySelector("script")).toBeNull();
   expect(button).toHaveAttribute("aria-expanded", "true");
