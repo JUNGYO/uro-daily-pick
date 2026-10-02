@@ -67,6 +67,15 @@ const papers = Array.from({ length: 5 }, (_, i) => ({
     },
   ],
 }));
+if (scenario === "daily-long-titles") {
+  [
+    ["Differential effect of surgical technique on intravesical recurrence after radical nephroureterectomy in patients with upper tract urothelial cancer: a systematic review and meta-analysis.", "World journal of urology", "meta_analysis"],
+    ["'Igloo' technique for robot-assisted radical prostatectomy - maximum nerve sparing for early recovery of continence and sexual function.", "BJU international", "surgical"],
+    ["Advancements in Understanding and Managing Radiation Cystitis: A Comprehensive Review.", "Current urology reports", "epidemiology"],
+    ["Long-term patient-reported outcomes after multidisciplinary treatment for localized and locally advanced prostate cancer: an international prospective study with extended follow-up.", "International journal of urology : official journal of the Japanese Urological Association", "systematic_review"],
+    ["비뇨의학과 환자의 장기 치료 결과와 삶의 질을 평가하는 다기관 전향적 연구: 수술 방법에 따른 기능 회복 및 환자 보고 결과의 비교", "International urology and nephrology", "prospective"],
+  ].forEach(([title, journal, study_type], i) => Object.assign(papers[i], { title, journal, study_type }));
+}
 if (scenario === "reading-evidence" || scenario === "reading-evidence-no-access") {
   Object.assign(papers[0], {
     structured_data: {
@@ -740,7 +749,7 @@ export const supabase = {
         }).sort((a, b) => String(state(b.id).updated_at || "").localeCompare(String(state(a.id).updated_at || "")) || b.id - a.id);
         return { data: { items: matches.slice(page * 20, (page + 1) * 20).map((p) => ({ ...card(p), note: state(p.id).note || "", tags: state(p.id).tags || [], saved: !!state(p.id).saved, reading_state: state(p.id).reading_state || "unread" })), total: matches.length, page } };
       }
-      if (name === "reader_daily" && args.p_day && args.p_day !== today)
+      if (name === "reader_daily" && args.p_day && args.p_day !== today && scenario !== "daily-long-titles")
         return { data: [] };
       if (name === "reader_daily") {
         const profile = db.profiles.find((profile) => profile.id === user?.id) || {};
