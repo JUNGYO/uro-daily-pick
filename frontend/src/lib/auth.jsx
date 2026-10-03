@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { supabase } from "./supabase";
 import { checked, withTimeout } from "./data";
+import { useReaderVisits } from "./useReaderVisits";
 
 const AuthContext = createContext(null);
 export const useAuth = () => useContext(AuthContext);
@@ -18,6 +19,7 @@ function clearResearchDrafts(uid) {
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
+  useReaderVisits(user);
   const [profile, setProfile] = useState(null);
   const [authLoading, setAuthLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);

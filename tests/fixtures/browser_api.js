@@ -1096,9 +1096,9 @@ export const supabase = {
         };
       if (name === "admin_user_engagement" && scenario === "admin-login-activity")
         return {data:[
-          {name:"Recent login fixture",institution:"Test institution",likes:2,dislikes:0,reads:29,
+          {name:"Recent login fixture",institution:"Test institution",likes:2,dislikes:0,reads:29,read_papers:22,last_seen_at:"2026-10-03T05:00:00Z",
             last_sign_in_at:"2026-10-01T15:25:00Z",last_read_at:"2026-04-26T01:00:00Z",last_active:"2026-04-26T01:00:00Z"},
-          {name:"No history fixture",institution:"",likes:0,dislikes:0,reads:0,last_sign_in_at:null,last_read_at:null,last_active:null},
+          {name:"No history fixture",institution:"",likes:0,dislikes:0,reads:0,read_papers:0,last_seen_at:null,last_sign_in_at:null,last_read_at:null,last_active:null},
         ],error:null};
       return { data: name.startsWith("admin_") ? [] : null, error: null };
     })();
