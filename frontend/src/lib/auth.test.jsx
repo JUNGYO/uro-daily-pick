@@ -4,6 +4,7 @@ const mock = vi.hoisted(() => ({ listener: null, from: vi.fn(), getSession: vi.f
 vi.mock("./supabase", () => ({
   supabase: {
     from: mock.from,
+    rpc: vi.fn().mockResolvedValue({ data: null, error: null }),
     auth: {
       getSession: mock.getSession,
       onAuthStateChange: (fn) => {

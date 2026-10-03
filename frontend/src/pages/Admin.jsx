@@ -12,8 +12,8 @@ const activityDateFormat = new Intl.DateTimeFormat("ko-KR", {
   hour: "2-digit", minute: "2-digit", hourCycle: "h23",
 });
 
-function ActivityTime({ value }) {
-  if (value === null) return "기록 없음";
+function ActivityTime({ value, empty = "기록 없음" }) {
+  if (value === null) return empty;
   if (!value || !Number.isFinite(new Date(value).getTime())) return "확인 불가";
   return <time dateTime={value}>{activityDateFormat.format(new Date(value))}</time>;
 }
@@ -253,15 +253,16 @@ export default function Admin() {
           {(users) => (
             <>
               <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="사용자 로그인·읽기 현황 표">
-                <table className="w-full min-w-[660px] text-[0.778rem]">
+                <table className="w-full min-w-[850px] text-[0.778rem]">
                   <thead>
                     <tr className="text-text3 text-left border-b border-border">
                       <th className="pb-2 font-medium">User</th>
-                      <th className="pb-2 font-medium text-center">Likes</th>
-                      <th className="pb-2 font-medium text-center">Skips</th>
-                      <th className="pb-2 font-medium text-center">Reads</th>
-                      <th className="pb-2 font-medium text-right">최근 로그인</th>
-                      <th className="pb-2 font-medium text-right">최근 읽기</th>
+                      <th className="pb-2 px-2 font-medium text-center">Likes</th>
+                      <th className="pb-2 px-2 font-medium text-center">Skips</th>
+                      <th className="pb-2 font-medium text-center">열람 기록</th>
+                      <th className="pb-2 font-medium text-right">최근 접속</th>
+                      <th className="pb-2 font-medium text-right">최근 로그인 인증</th>
+                      <th className="pb-2 font-medium text-right">최근 열람 기록</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -271,9 +272,17 @@ export default function Admin() {
                           <span className="text-text1 font-medium">{u.name || "—"}</span>
                           {u.institution && <span className="text-text3 ml-1.5">{u.institution}</span>}
                         </td>
-                        <td className="py-2 text-center text-success font-medium">{u.likes}</td>
-                        <td className="py-2 text-center text-text3">{u.dislikes}</td>
-                        <td className="py-2 text-center">{u.reads}</td>
+                        <td className="py-2 px-2 text-center text-success font-medium">{u.likes}</td>
+                        <td className="py-2 px-2 text-center text-text3">{u.dislikes}</td>
+                        <td className="py-2 text-center whitespace-nowrap">
+                          <span>{u.reads}회</span>
+                          <span className="block text-text3 text-xs">
+                            {Number.isFinite(u.read_papers) ? `${u.read_papers}편` : "편수 확인 불가"}
+                          </span>
+                        </td>
+                        <td className="py-2 pl-3 text-right text-text3 whitespace-nowrap">
+                          <ActivityTime value={u.last_seen_at} empty="집계 시작 후 기록 없음" />
+                        </td>
                         <td className="py-2 pl-3 text-right text-text3 whitespace-nowrap">
                           <ActivityTime value={u.last_sign_in_at} />
                         </td>
@@ -286,7 +295,10 @@ export default function Admin() {
                 </table>
               </div>
               <p className="text-xs text-text3 mt-3">
-                로그인과 논문 읽기 시각을 구분합니다. 시간은 한국 시간(KST)입니다.
+                최근 접속은 로그인 유지 상태의 재방문도 포함합니다. 로그인 인증은 새로 로그인한 시각입니다. 시간은 한국 시간(KST)입니다.
+              </p>
+              <p className="text-xs text-text3 mt-2">
+                열람 기록은 요약·논문 상세 화면의 10초 이상 활동 기록으로, 반복 기록을 포함합니다. 편수는 중복을 제외하며 원문 화면 열람·읽음 표시 횟수와는 다릅니다.
               </p>
             </>
           )}
