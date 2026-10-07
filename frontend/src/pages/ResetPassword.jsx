@@ -3,6 +3,8 @@ import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/auth";
 import { ErrorNotice, Loading } from "../components/Status";
+import { withTimeout } from "../lib/data";
+import { authErrorMessage } from "../lib/authErrors";
 
 export default function ResetPassword() {
   const { user, loading: sessionLoading } = useAuth();
@@ -25,7 +27,7 @@ export default function ResetPassword() {
         {!user ? (
           <>
             <ErrorNotice message="This reset link is missing or has expired." />
-            <Link className="text-accent underline" to="/login">
+            <Link className="text-accent underline" to="/login?mode=forgot">
               Request another reset link
             </Link>
           </>
@@ -44,11 +46,11 @@ export default function ResetPassword() {
               }
               setBusy(true);
               try {
-                const { error } = await supabase.auth.updateUser({ password });
+                const { error } = await withTimeout(supabase.auth.updateUser({ password }));
                 if (error) throw error;
                 setSuccess(true);
               } catch (err) {
-                setError(err.message || "Could not update password.");
+                setError(authErrorMessage(err));
               } finally {
                 setBusy(false);
               }

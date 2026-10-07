@@ -3,7 +3,7 @@ const scenario =
   new URLSearchParams(location.search).get("scenario") || "reader";
 const today = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
 let user =
-  scenario === "signed-out"
+  scenario === "signed-out" || scenario.startsWith("auth-")
     ? null
     : {
         id: "reader",
@@ -712,12 +712,27 @@ export const supabase = {
       listener("SIGNED_OUT", null);
       return {};
     },
-    signInWithPassword: async () => ({}),
+    signInWithPassword: async ({ email, password }) => {
+      if (password !== "fixture-password")
+        return { error: { code: "invalid_credentials", message: "Invalid login credentials" } };
+      user = { id: "reader", email };
+      const session = { user, access_token: "fixture.access.token" };
+      listener("SIGNED_IN", session);
+      return { data: { session }, error: null };
+    },
     signInWithOAuth: async () => ({
       error: { message: "Provider test: redirect prepared" },
     }),
-    signUp: async () => ({ data: { session: null } }),
-    resetPasswordForEmail: async () => ({}),
+    signUp: async ({ email }) => {
+      if (scenario === "auth-confirmation") return { data: { session: null }, error: null };
+      user = { id: "reader", email };
+      const session = { user, access_token: "fixture.access.token" };
+      listener("SIGNED_IN", session);
+      return { data: { session }, error: null };
+    },
+    resetPasswordForEmail: async () => scenario === "auth-mail-failure"
+      ? { error: { code: "email_address_not_authorized" } }
+      : { error: null },
     updateUser: async () => ({}),
   },
   rpc(name, args = {}) {

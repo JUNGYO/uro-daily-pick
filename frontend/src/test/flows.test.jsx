@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, it, expect, vi } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Routes, Route } from "react-router-dom";
 const mock = vi.hoisted(() => ({
@@ -9,6 +9,7 @@ const mock = vi.hoisted(() => ({
   signUp: vi.fn(),
   signInWithPassword: vi.fn(),
   signInWithOAuth: vi.fn(),
+  resetPasswordForEmail: vi.fn(),
   updateUser: vi.fn(),
   setProfile: vi.fn(),
   picks: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock("../lib/supabase", () => ({
       signUp: mock.signUp,
       signInWithPassword: mock.signInWithPassword,
       signInWithOAuth: mock.signInWithOAuth,
+      resetPasswordForEmail: mock.resetPasswordForEmail,
       updateUser: mock.updateUser,
     },
   },
@@ -71,7 +73,10 @@ beforeEach(() => {
   };
   mock.from.mockReturnValue(query({ data: [], error: null }));
 });
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.useRealTimers();
+});
 
 it("keeps email sign-in and safe return without reviving the removed OAuth provider", async () => {
   vi.stubEnv("VITE_EMAIL_AUTH_READY", "false");
@@ -82,15 +87,15 @@ it("keeps email sign-in and safe return without reviving the removed OAuth provi
     .mockResolvedValueOnce({ error: null });
   show(<Login />, "/test?next=%2Flibrary");
   expect(screen.queryByText(/카카오|kakao/i)).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "Sign up" })).not.toBeInTheDocument();
-  expect(screen.queryByRole("button", { name: "Forgot password?" })).not.toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Sign up" })).toBeVisible();
+  expect(screen.getByRole("button", { name: "Forgot password?" })).toBeVisible();
   expect(screen.queryByRole("link", { name: /요약 체험/ })).not.toBeInTheDocument();
   expect(screen.queryByText(/공개 요약/)).not.toBeInTheDocument();
   const user = userEvent.setup();
   await user.type(screen.getByLabelText("Email"), "reader@example.test");
   await user.type(screen.getByLabelText("Password"), "existing-password");
   await user.click(screen.getByRole("button", { name: "Continue" }));
-  expect(await screen.findByRole("alert")).toHaveTextContent("Invalid login credentials");
+  expect(await screen.findByRole("alert")).toHaveTextContent("이메일 또는 비밀번호가 일치하지 않습니다");
   expect(screen.getByLabelText("Email")).toHaveValue("reader@example.test");
   await user.click(screen.getByRole("button", { name: "Continue" }));
   expect(await screen.findByRole("heading", { name: "Reader library" })).toBeVisible();
@@ -99,6 +104,76 @@ it("keeps email sign-in and safe return without reviving the removed OAuth provi
     password: "existing-password",
   });
   expect(mock.signInWithOAuth).not.toHaveBeenCalled();
+});
+it("registers directly from a signup link despite the obsolete deployment flag", async () => {
+  vi.stubEnv("VITE_EMAIL_AUTH_READY", "false");
+  mock.auth = { user: null, loading: false };
+  mock.signUp.mockResolvedValue({ data: { session: { user: { id: "new-reader" } } }, error: null });
+  show(<Login />, "/test?mode=signup&next=%2Flibrary");
+  const user = userEvent.setup();
+  await user.type(screen.getByLabelText("Name"), "New Reader");
+  await user.type(screen.getByLabelText("Email"), "new@example.test");
+  await user.type(screen.getByLabelText("Password"), "new-password");
+  await user.click(screen.getByRole("button", { name: "Get started" }));
+  expect(await screen.findByRole("heading", { name: "Reader library" })).toBeVisible();
+  expect(mock.signUp).toHaveBeenCalledWith({
+    email: "new@example.test",
+    password: "new-password",
+    options: {
+      data: { name: "New Reader" },
+      emailRedirectTo: expect.stringContaining("login?next=%2Flibrary"),
+    },
+  });
+});
+it("shows recovery failure honestly, retries, and preserves the login destination", async () => {
+  vi.stubEnv("VITE_EMAIL_AUTH_READY", "false");
+  mock.auth = { user: null, loading: false };
+  mock.resetPasswordForEmail
+    .mockResolvedValueOnce({ error: { code: "email_address_not_authorized" } })
+    .mockResolvedValueOnce({ error: null });
+  show(<Login />, "/test?mode=forgot&next=%2Flibrary");
+  const user = userEvent.setup();
+  expect(screen.queryByLabelText("Password")).not.toBeInTheDocument();
+  await user.type(screen.getByLabelText("Email"), "reader@example.test");
+  await user.click(screen.getByRole("button", { name: "Send reset link" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("메일 발송 설정 확인");
+  expect(screen.queryByRole("status")).not.toBeInTheDocument();
+  await user.click(screen.getByRole("button", { name: "Send reset link" }));
+  expect(await screen.findByRole("status")).toHaveTextContent("등록된 이메일이라면");
+  expect(mock.resetPasswordForEmail).toHaveBeenLastCalledWith("reader@example.test", {
+    redirectTo: expect.stringMatching(/\/reset-password$/),
+  });
+  await user.click(screen.getByRole("button", { name: "Back to sign in" }));
+  expect(screen.getByLabelText("Email")).toHaveValue("reader@example.test");
+  mock.signInWithPassword.mockResolvedValue({ error: null });
+  await user.type(screen.getByLabelText("Password"), "new-password");
+  await user.click(screen.getByRole("button", { name: "Continue" }));
+  expect(await screen.findByRole("heading", { name: "Reader library" })).toBeVisible();
+});
+it("releases a stalled request without claiming success or submitting duplicates", async () => {
+  vi.useFakeTimers();
+  mock.auth = { user: null, loading: false };
+  mock.signInWithPassword.mockReturnValue(new Promise(() => {}));
+  show(<Login />);
+  fireEvent.change(screen.getByLabelText("Email"), { target: { value: "reader@example.test" } });
+  fireEvent.change(screen.getByLabelText("Password"), { target: { value: "existing-password" } });
+  const form = screen.getByRole("button", { name: "Continue" }).closest("form");
+  fireEvent.submit(form);
+  fireEvent.submit(form);
+  expect(mock.signInWithPassword).toHaveBeenCalledTimes(1);
+  expect(screen.getByRole("button", { name: "처리 중…" })).toBeDisabled();
+  await act(() => vi.advanceTimersByTimeAsync(15001));
+  expect(screen.getByRole("alert")).toHaveTextContent("서버 응답을 확인하지 못했습니다");
+  expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
+  expect(screen.queryByText("Saved workspace")).not.toBeInTheDocument();
+});
+it("sends expired reset links back to the recovery form", () => {
+  mock.auth = { user: null, loading: false };
+  show(<ResetPassword />);
+  expect(screen.getByRole("link", { name: "Request another reset link" })).toHaveAttribute(
+    "href",
+    "/login?mode=forgot",
+  );
 });
 it("highlights a standalone AI mention without splitting Affairs and keeps the summary visible", async () => {
   const title =

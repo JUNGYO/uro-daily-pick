@@ -1,24 +1,37 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { safeReturn } from "../lib/workspace";
-import { appUrl } from "../lib/data";
+import { appUrl, withTimeout } from "../lib/data";
+import { authErrorMessage } from "../lib/authErrors";
 import { Loader2 } from "lucide-react";
 import { useAuth } from "../lib/auth";
 
 export default function Login() {
-  const emailAuthReady = import.meta.env.VITE_EMAIL_AUTH_READY !== "false";
   const auth = useAuth();
-  const [mode, setMode] = useState("signin"); // signin | signup | forgot
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
+  const submitting = useRef(false);
   const navigate = useNavigate();
-  const [params] = useSearchParams();
+  const [params, setParams] = useSearchParams();
+  const requestedMode = params.get("mode");
+  const mode = ["signup", "forgot"].includes(requestedMode) ? requestedMode : "signin";
   const next = safeReturn(params.get("next"));
+  const setMode = (value) => {
+    const updated = new URLSearchParams(params);
+    if (value === "signin") updated.delete("mode");
+    else updated.set("mode", value);
+    setParams(updated);
+  };
+  useEffect(() => {
+    setError("");
+    setMessage("");
+    setPassword("");
+  }, [mode]);
   useEffect(() => {
     if (auth?.user && !auth.loading) navigate(next, { replace: true });
   }, [auth?.user?.id, auth?.loading, next]);
@@ -33,49 +46,56 @@ export default function Login() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (submitting.current) return;
+    submitting.current = true;
     setError("");
     setMessage("");
     setLoading(true);
     try {
-      if (!emailAuthReady && mode !== "signin")
-        throw new Error(
-          "Account registration and email recovery are temporarily unavailable. Existing members can sign in.",
-        );
       if (mode === "forgot") {
-        const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
-          redirectTo: appUrl("reset-password"),
-        });
+        const { error } = await withTimeout(
+          supabase.auth.resetPasswordForEmail(email.trim(), {
+            redirectTo: appUrl("reset-password"),
+          }),
+        );
         if (error) throw error;
-        setMessage("Password reset email sent. Check your inbox.");
+        setMessage(
+          "등록된 이메일이라면 비밀번호 재설정 안내가 전송됩니다. 받은편지함과 스팸함을 확인해 주세요.",
+        );
       } else if (mode === "signup") {
-        const { data, error: signUpError } = await supabase.auth.signUp({
-          email: email.trim(),
-          password,
-          options: {
-            data: { name: name.trim() },
-            emailRedirectTo: appUrl("login?next=" + encodeURIComponent(next)),
-          },
-        });
+        const { data, error: signUpError } = await withTimeout(
+          supabase.auth.signUp({
+            email: email.trim(),
+            password,
+            options: {
+              data: { name: name.trim() },
+              emailRedirectTo: appUrl("login?next=" + encodeURIComponent(next)),
+            },
+          }),
+        );
         if (signUpError) throw signUpError;
         if (data.session) navigate(next, { replace: true });
         else setMessage("Check your email to confirm your account, then sign in.");
       } else {
-        const { error: signInError } = await supabase.auth.signInWithPassword({
-          email: email.trim(),
-          password,
-        });
+        const { error: signInError } = await withTimeout(
+          supabase.auth.signInWithPassword({
+            email: email.trim(),
+            password,
+          }),
+        );
         if (signInError) throw signInError;
         navigate(next, { replace: true });
       }
     } catch (err) {
-      setError(err.message);
+      setError(authErrorMessage(err));
     } finally {
+      submitting.current = false;
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen bg-bg flex items-center justify-center p-8">
+    <div className="min-h-dvh bg-bg flex items-center justify-center px-4 py-8 sm:p-8">
       <div className="w-full max-w-[400px]">
         <div className="text-center mb-12">
           <svg width="48" height="48" viewBox="0 0 80 80" fill="none" className="mx-auto mb-4">
@@ -98,20 +118,15 @@ export default function Login() {
         </div>
 
         <div
-          className="bg-card rounded-xl border border-border p-8"
+          className="bg-card rounded-xl border border-border p-5 sm:p-8"
           style={{ boxShadow: "0 4px 24px rgba(0,0,0,0.08), 0 1px 4px rgba(0,0,0,0.04)" }}
         >
-          {!emailAuthReady && (
-            <p role="status" className="text-sm text-text2 mb-6">
-              기존 이메일 계정으로 로그인하세요.
-            </p>
-          )}
           {mode !== "forgot" && (
             <div className="flex rounded-lg border border-border overflow-hidden mb-8">
               {["Sign in", "Sign up"].map((label, i) => (
                 <button
-                  hidden={i === 1 && !emailAuthReady}
                   disabled={loading}
+                  aria-pressed={i === 0 ? mode === "signin" : mode === "signup"}
                   key={label}
                   onClick={() => {
                     setMode(i === 0 ? "signin" : "signup");
@@ -141,38 +156,47 @@ export default function Login() {
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-3">
             {mode === "signup" && (
-              <input
-                aria-label="Name"
-                autoComplete="name"
-                maxLength={100}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                placeholder="Name"
-                className={inputCls}
-              />
+              <label className="text-sm text-text2 flex flex-col gap-1">
+                Name
+                <input
+                  aria-label="Name"
+                  autoComplete="name"
+                  maxLength={100}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                  placeholder="Name"
+                  className={inputCls}
+                />
+              </label>
             )}
-            <input
-              aria-label="Email"
-              autoComplete="email"
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="Email"
-              required
-              className={inputCls}
-            />
-            {mode !== "forgot" && (
+            <label className="text-sm text-text2 flex flex-col gap-1">
+              Email
               <input
-                aria-label="Password"
-                autoComplete={mode === "signup" ? "new-password" : "current-password"}
-                minLength={mode === "signup" ? 8 : undefined}
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder={mode === "signup" ? "Password (min 8 chars)" : "Password"}
+                aria-label="Email"
+                autoComplete="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="Email"
                 required
                 className={inputCls}
               />
+            </label>
+            {mode !== "forgot" && (
+              <label className="text-sm text-text2 flex flex-col gap-1">
+                Password
+                <input
+                  aria-label="Password"
+                  autoComplete={mode === "signup" ? "new-password" : "current-password"}
+                  minLength={mode === "signup" ? 8 : undefined}
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder={mode === "signup" ? "Password (min 8 chars)" : "Password"}
+                  required
+                  className={inputCls}
+                />
+              </label>
             )}
 
             {error && (
@@ -198,7 +222,10 @@ export default function Login() {
               className="w-full h-11 rounded-lg bg-accent text-white text-[0.889rem] font-semibold hover:bg-[#0066D6] disabled:opacity-50 transition-colors mt-2"
             >
               {loading ? (
-                <Loader2 size={16} className="animate-spin" />
+                <span className="inline-flex items-center gap-2">
+                  <Loader2 size={16} className="animate-spin" />
+                  처리 중…
+                </span>
               ) : mode === "forgot" ? (
                 "Send reset link"
               ) : mode === "signup" ? (
@@ -227,7 +254,6 @@ export default function Login() {
               </button>
             ) : (
               <button
-                hidden={!emailAuthReady}
                 disabled={loading}
                 onClick={() => {
                   setMode("forgot");
