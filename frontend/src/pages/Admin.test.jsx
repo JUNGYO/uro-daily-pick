@@ -120,42 +120,91 @@ it("does not query for a reader and clears results on sign-out", async () => {
 it("separates login from reading, uses Korean time and refreshes new sign-ins", async () => {
   vi.useFakeTimers();
   let lastLogin = "2026-10-01T15:25:00Z";
-  mock.rpc.mockImplementation((name) => query(name === "admin_user_engagement" ? {
-    data: [{name:"Recent login fixture",likes:2,dislikes:0,reads:29,read_papers:22,last_seen_at:"2026-10-03T05:00:00Z",
-      last_sign_in_at:lastLogin,last_read_at:"2026-04-26T01:00:00Z",last_active:"2026-04-26T01:00:00Z"}],
-  } : response(name)));
+  mock.rpc.mockImplementation((name) =>
+    query(
+      name === "admin_user_engagement"
+        ? {
+            data: [
+              {
+                name: "Recent login fixture",
+                likes: 2,
+                dislikes: 0,
+                reads: 29,
+                read_papers: 22,
+                open_clicks: 3,
+                opened_papers: 2,
+                detail_clicks: 2,
+                original_clicks: 1,
+                publisher_clicks: 0,
+                last_opened_at: "2026-10-03T05:05:00Z",
+                last_seen_at: "2026-10-03T05:00:00Z",
+                last_sign_in_at: lastLogin,
+                last_read_at: "2026-04-26T01:00:00Z",
+                last_active: "2026-04-26T01:00:00Z",
+              },
+            ],
+          }
+        : response(name),
+    ),
+  );
   render(<Admin />);
   await act(async () => {});
-  const panel=within(screen.getByRole("region",{name:"User Engagement"}));
-  expect(panel.getByRole("columnheader",{name:"최근 로그인 인증"})).toBeVisible();
-  expect(panel.getByRole("columnheader",{name:"최근 열람 기록"})).toBeVisible();
-  expect(panel.getByRole("columnheader",{name:"최근 접속"})).toBeVisible();
-  expect(panel.getByText("2026. 10. 03. 14:00")).toHaveAttribute("datetime","2026-10-03T05:00:00Z");
+  const panel = within(screen.getByRole("region", { name: "User Engagement" }));
+  expect(panel.getByRole("columnheader", { name: "최근 로그인 인증" })).toBeVisible();
+  expect(panel.getByRole("columnheader", { name: "최근 열람 클릭" })).toBeVisible();
+  expect(panel.getByRole("columnheader", { name: "최근 접속" })).toBeVisible();
+  expect(panel.getByText("2026. 10. 03. 14:00")).toHaveAttribute("datetime", "2026-10-03T05:00:00Z");
   expect(panel.queryByText("Last Active")).not.toBeInTheDocument();
-  expect(panel.getByText("2026. 10. 02. 00:25")).toHaveAttribute("datetime",lastLogin);
-  expect(panel.getByText("2026. 04. 26. 10:00")).toHaveAttribute("datetime","2026-04-26T01:00:00Z");
-  lastLogin="2026-10-02T05:30:00Z";
-  await act(async () => {vi.advanceTimersByTime(30000);});
-  expect(panel.getByText("2026. 10. 02. 14:30")).toHaveAttribute("datetime",lastLogin);
-  expect(panel.getByText("2026. 04. 26. 10:00")).toBeVisible();
-  expect(panel.getByText("29회")).toBeVisible();
-  expect(panel.getByText("22편")).toBeVisible();
+  expect(panel.getByText("2026. 10. 02. 00:25")).toHaveAttribute("datetime", lastLogin);
+  expect(panel.getByText("2026. 10. 03. 14:05")).toHaveAttribute("datetime", "2026-10-03T05:05:00Z");
+  lastLogin = "2026-10-02T05:30:00Z";
+  await act(async () => {
+    vi.advanceTimersByTime(30000);
+  });
+  expect(panel.getByText("2026. 10. 02. 14:30")).toHaveAttribute("datetime", lastLogin);
+  expect(panel.getByText("2026. 10. 03. 14:05")).toBeVisible();
+  expect(panel.getByText("3회")).toBeVisible();
+  expect(panel.getByText("2편")).toBeVisible();
 });
 
 it("does not mistake unavailable login data for no login or reuse a reading timestamp", async () => {
-  mock.rpc.mockImplementation((name) => query(name === "admin_user_engagement" ? {
-    data:[
-      {name:"No history",likes:0,dislikes:0,reads:0,read_papers:0,last_seen_at:null,last_sign_in_at:null,last_read_at:null},
-      {name:"Legacy response",likes:0,dislikes:0,reads:1,last_active:"2026-04-26T01:00:00Z"},
-    ],
-  } : response(name)));
+  mock.rpc.mockImplementation((name) =>
+    query(
+      name === "admin_user_engagement"
+        ? {
+            data: [
+              {
+                name: "No history",
+                likes: 0,
+                dislikes: 0,
+                reads: 0,
+                read_papers: 0,
+                open_clicks: 0,
+                opened_papers: 0,
+                last_opened_at: null,
+                last_seen_at: null,
+                last_sign_in_at: null,
+                last_read_at: null,
+              },
+              {
+                name: "Legacy response",
+                likes: 0,
+                dislikes: 0,
+                reads: 1,
+                last_active: "2026-04-26T01:00:00Z",
+              },
+            ],
+          }
+        : response(name),
+    ),
+  );
   render(<Admin />);
-  const empty=(await screen.findByText("No history")).closest("tr");
+  const empty = (await screen.findByText("No history")).closest("tr");
   expect(within(empty).getAllByText("기록 없음")).toHaveLength(2);
   expect(within(empty).getByText("집계 시작 후 기록 없음")).toBeVisible();
-  const legacy=screen.getByText("Legacy response").closest("tr");
-  expect(within(legacy).getAllByText("확인 불가")).toHaveLength(2);
-  expect(within(legacy).getByText("2026. 04. 26. 10:00")).toBeVisible();
+  const legacy = screen.getByText("Legacy response").closest("tr");
+  expect(within(legacy).getAllByText("확인 불가")).toHaveLength(4);
+  expect(within(legacy).queryByText("2026. 04. 26. 10:00")).not.toBeInTheDocument();
 });
 
 it("treats a null stats response as failure but a null list as empty", async () => {
@@ -190,7 +239,12 @@ it("polls collection, worker and journal counts, preserving visible data during 
       .slice(callsBefore.length)
       .map(([name]) => name)
       .sort(),
-  ).toEqual(["admin_catalog_status", "admin_journal_fulltext_counts", "admin_user_engagement", "admin_worker_status"]);
+  ).toEqual([
+    "admin_catalog_status",
+    "admin_journal_fulltext_counts",
+    "admin_user_engagement",
+    "admin_worker_status",
+  ]);
   expect(mock.rpc.mock.calls.some(([name]) => name === "admin_fulltext_status")).toBe(false);
   const catalog = within(screen.getByRole("region", { name: "문헌 처리 현황" }));
   expect(catalog.getByText("90,000")).toBeVisible();
@@ -213,7 +267,13 @@ it("polls collection, worker and journal counts, preserving visible data during 
     "2026-09-18T01:00:00.000Z",
   );
   for (const name of callsBefore.filter(
-    (name) => !["admin_catalog_status", "admin_journal_fulltext_counts", "admin_user_engagement", "admin_worker_status"].includes(name),
+    (name) =>
+      ![
+        "admin_catalog_status",
+        "admin_journal_fulltext_counts",
+        "admin_user_engagement",
+        "admin_worker_status",
+      ].includes(name),
   )) {
     expect(mock.rpc.mock.calls.filter(([called]) => called === name)).toHaveLength(
       callsBefore.filter((called) => called === name).length,

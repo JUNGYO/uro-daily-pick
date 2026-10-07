@@ -204,7 +204,14 @@ export default function Paper() {
                   </p>
                 )}
                 <div className="reader-actions">
-                  <a className="btn-secondary" href={publisherLink(p)} target="_blank" rel="noreferrer">
+                  <a
+                    className="btn-secondary"
+                    href={publisherLink(p)}
+                    target="_blank"
+                    rel="noreferrer"
+                    data-paper-open="publisher"
+                    data-paper-pmid={p.pmid}
+                  >
                     출판사에서 확인
                   </a>
                   <a

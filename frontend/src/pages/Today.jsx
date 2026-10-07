@@ -16,6 +16,7 @@ import { publisherLink, sharedLink, plainCitation } from "../lib/workspace";
 import { useAuth } from "../lib/auth";
 import { useDailyReader } from "../lib/useDailyReader";
 import { useReading } from "../lib/useReading";
+import { recordPaperOpen } from "../lib/paperOpen";
 import { Resource } from "../components/ReaderUI";
 import DailyArticle, { TypeBadge } from "../components/DailyArticle";
 import "../today.css";
@@ -69,6 +70,7 @@ export default function Today() {
 
   function choose(index) {
     if (!r.cards[index]) return;
+    void recordPaperOpen(user, r.cards[index].pmid, "detail");
     const next = new URLSearchParams(params);
     next.set("date", day);
     next.set("paper", r.cards[index].pmid);
@@ -245,7 +247,9 @@ export default function Today() {
                             (fb === "like" ? "is-liked" : "")
                           }
                           aria-current={i === r.index ? "true" : undefined}
-                          onClick={() => choose(i)}
+                          onClick={(event) => {
+                            if (event.detail < 2) choose(i);
+                          }}
                         >
                           <span className="today-queue-number">{i + 1}</span>
                           <span className="today-queue-copy">
@@ -492,6 +496,8 @@ export default function Today() {
                         <a
                           className={data.access?.can_read ? "today-publisher" : "today-original"}
                           href={publisherLink(p)}
+                          data-paper-open="publisher"
+                          data-paper-pmid={p.pmid}
                           target="_blank"
                           rel="noreferrer"
                         >

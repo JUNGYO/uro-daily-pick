@@ -6,6 +6,7 @@ export { useAuth } from "./lib/auth";
 import "./reader.css";
 import { safeReturn } from "./lib/workspace";
 import { supabase } from "./lib/supabase";
+import { usePaperOpenLinks } from "./lib/paperOpen";
 function resilientLazy(load) {
   return lazy(() =>
     load().catch((error) => {
@@ -74,6 +75,7 @@ function ProtectedRoute({ children, onboarding = false }) {
 
 function Layout({ children }) {
   const { user, profile } = useAuth();
+  usePaperOpenLinks(user);
   const navigate = useNavigate();
   const location = useLocation();
   const [logoutError, setLogoutError] = useState("");
@@ -217,7 +219,9 @@ function Layout({ children }) {
             }
           >
             <Icon size={20} />
-            <span className="max-w-full break-words text-center text-[12px] leading-snug font-medium">{label}</span>
+            <span className="max-w-full break-words text-center text-[12px] leading-snug font-medium">
+              {label}
+            </span>
           </NavLink>
         ))}
       </nav>
