@@ -17,6 +17,7 @@ import { useAuth } from "../lib/auth";
 import { useDailyReader } from "../lib/useDailyReader";
 import { useReading } from "../lib/useReading";
 import { recordPaperOpen } from "../lib/paperOpen";
+import { useContentReading } from "../lib/contentReading";
 import { Resource } from "../components/ReaderUI";
 import DailyArticle, { TypeBadge } from "../components/DailyArticle";
 import "../today.css";
@@ -67,6 +68,7 @@ export default function Today() {
     r.states[c.id] ? r.states[c.id].reading_state === "read" : c.read,
   ).length;
   useReading(user.id, active ? p?.id : null, false, state.position);
+  useContentReading(user, p?.pmid, "summary", active && !!p, !params.get("paper"));
 
   function choose(index) {
     if (!r.cards[index]) return;

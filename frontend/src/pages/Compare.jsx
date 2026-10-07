@@ -1,5 +1,5 @@
 import { useSearchParams, Link } from "react-router-dom";
-import { rpc, exportReferences, download, csv, paperLink } from "../lib/workspace";
+import { rpc, downloadReferences, download, csv, paperLink } from "../lib/workspace";
 import { ReaderPage, Resource, useResource } from "../components/ReaderUI";
 import { FIELDS } from "./Paper";
 export default function Compare() {
@@ -37,16 +37,10 @@ export default function Compare() {
               >
                 비교 표 CSV
               </button>
-              <button
-                className="btn-secondary"
-                onClick={() => download("references.ris", exportReferences(r.data, "ris"))}
-              >
+              <button className="btn-secondary" onClick={() => downloadReferences(r.data, "ris")}>
                 참고문헌 RIS
               </button>
-              <button
-                className="btn-secondary"
-                onClick={() => download("references.bib", exportReferences(r.data, "bib"))}
-              >
+              <button className="btn-secondary" onClick={() => downloadReferences(r.data, "bib")}>
                 참고문헌 BibTeX
               </button>
             </div>

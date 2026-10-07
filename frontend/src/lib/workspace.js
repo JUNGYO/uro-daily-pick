@@ -141,6 +141,12 @@ export function download(name, text, type = "text/plain") {
   a.click();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
+export function downloadReferences(papers, format, name = `references.${format}`) {
+  download(name, exportReferences(papers, format));
+  const ids = [...new Set(papers.map((p) => p.id).filter((id) => Number.isSafeInteger(id) && id > 0))];
+  if (navigator.onLine && ids.length && ids.length <= 100)
+    void rpc("record_reference_export", { p_papers: ids, p_event: crypto.randomUUID() }).catch(() => {});
+}
 export function cachedPapers(uid) {
   try {
     const items = JSON.parse(localStorage.getItem("uro-offline:" + uid) || "[]");
