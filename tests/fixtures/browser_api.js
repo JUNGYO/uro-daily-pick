@@ -113,6 +113,7 @@ const db = {
   research_reference_entries: [],
   research_topic_entries: [],
   research_document_exports: [],
+  reader_open_events: [],
   profiles: [
     {
       id: "reader",
@@ -747,6 +748,15 @@ export const supabase = {
         insight: ready(p) ? p.summary_ko.split("\n")[1] : "",
         read: state(p.id).reading_state === "read",
       });
+      if (name === "record_reader_open") {
+        const paper = db.papers.find(p => p.pmid === args.p_pmid);
+        if (!user || !paper || !["detail","original","publisher"].includes(args.p_kind))
+          return { error: { message: "Invalid opening" } };
+        if (!db.reader_open_events.some(e => e.user_id === user.id && e.event_id === args.p_event_id))
+          db.reader_open_events.push({ user_id:user.id, event_id:args.p_event_id, paper_id:paper.id,
+            kind:args.p_kind, opened_at:new Date().toISOString() });
+        return { data:null,error:null };
+      }
       if (name.startsWith("review_")) return reviewRpc(name, args, scenario === "review-reader");
       if (scenario === "error")
         return { error: { message: "Simulated API outage" } };
@@ -1109,11 +1119,21 @@ export const supabase = {
           },
           error: null,
         };
+      if (name === "admin_user_engagement" && scenario === "admin-reader-opens") {
+        const events=db.reader_open_events.filter(e=>e.user_id===user.id);
+        return {data:[{name:"Click fixture",likes:0,dislikes:0,reads:19,read_papers:7,
+          open_clicks:events.length,opened_papers:new Set(events.map(e=>e.paper_id)).size,
+          last_opened_at:events.at(-1)?.opened_at||null,
+          detail_clicks:events.filter(e=>e.kind==="detail").length,
+          original_clicks:events.filter(e=>e.kind==="original").length,
+          publisher_clicks:events.filter(e=>e.kind==="publisher").length,
+          last_seen_at:null,last_sign_in_at:null,last_read_at:"2026-04-26T01:00:00Z"}],error:null};
+      }
       if (name === "admin_user_engagement" && scenario === "admin-login-activity")
         return {data:[
-          {name:"Recent login fixture",institution:"Test institution",likes:2,dislikes:0,reads:29,read_papers:22,last_seen_at:"2026-10-03T05:00:00Z",
+          {name:"Recent login fixture",institution:"Test institution",likes:2,dislikes:0,reads:29,read_papers:22,open_clicks:3,opened_papers:2,detail_clicks:2,original_clicks:1,publisher_clicks:0,last_opened_at:"2026-10-03T05:05:00Z",last_seen_at:"2026-10-03T05:00:00Z",
             last_sign_in_at:"2026-10-01T15:25:00Z",last_read_at:"2026-04-26T01:00:00Z",last_active:"2026-04-26T01:00:00Z"},
-          {name:"No history fixture",institution:"",likes:0,dislikes:0,reads:0,read_papers:0,last_seen_at:null,last_sign_in_at:null,last_read_at:null,last_active:null},
+          {name:"No history fixture",institution:"",likes:0,dislikes:0,reads:0,read_papers:0,open_clicks:0,opened_papers:0,last_opened_at:null,last_seen_at:null,last_sign_in_at:null,last_read_at:null,last_active:null},
         ],error:null};
       return { data: name.startsWith("admin_") ? [] : null, error: null };
     })();

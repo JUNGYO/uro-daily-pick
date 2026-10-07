@@ -8,8 +8,13 @@ import { Users, FileText, Heart, Clock } from "lucide-react";
 
 const ADMIN_EMAILS = ["crazyslime@gmail.com"];
 const activityDateFormat = new Intl.DateTimeFormat("ko-KR", {
-  timeZone: "Asia/Seoul", year: "numeric", month: "2-digit", day: "2-digit",
-  hour: "2-digit", minute: "2-digit", hourCycle: "h23",
+  timeZone: "Asia/Seoul",
+  year: "numeric",
+  month: "2-digit",
+  day: "2-digit",
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
 });
 
 function ActivityTime({ value, empty = "기록 없음" }) {
@@ -111,7 +116,7 @@ export default function Admin() {
                   icon={Clock}
                   label="Avg Dwell"
                   value={`${stats?.avg_dwell_seconds || 0}s`}
-                  sub={`${stats?.total_reads || 0} reads`}
+                  sub={`체류 기록 ${stats?.total_reads || 0}회`}
                   color="#965500"
                 />
               </div>
@@ -188,7 +193,12 @@ export default function Admin() {
           </AdminPanel>
 
           {/* Journal distribution */}
-          <AdminPanel title="저널별 원문 확보" rpc="admin_journal_fulltext_counts" refresh={retry} pollMs={30000}>
+          <AdminPanel
+            title="저널별 원문 확보"
+            rpc="admin_journal_fulltext_counts"
+            refresh={retry}
+            pollMs={30000}
+          >
             {({ counts_available, journals }) =>
               !counts_available ? (
                 <p role="status" className="text-sm text-text3">
@@ -252,17 +262,22 @@ export default function Admin() {
         <AdminPanel title="User Engagement" rpc="admin_user_engagement" refresh={retry} pollMs={30000} list>
           {(users) => (
             <>
-              <div className="overflow-x-auto" tabIndex={0} role="region" aria-label="사용자 로그인·읽기 현황 표">
+              <div
+                className="overflow-x-auto"
+                tabIndex={0}
+                role="region"
+                aria-label="사용자 로그인·읽기 현황 표"
+              >
                 <table className="w-full min-w-[850px] text-[0.778rem]">
                   <thead>
                     <tr className="text-text3 text-left border-b border-border">
                       <th className="pb-2 font-medium">User</th>
                       <th className="pb-2 px-2 font-medium text-center">Likes</th>
                       <th className="pb-2 px-2 font-medium text-center">Skips</th>
-                      <th className="pb-2 font-medium text-center">열람 기록</th>
+                      <th className="pb-2 font-medium text-center">열람 클릭</th>
                       <th className="pb-2 font-medium text-right">최근 접속</th>
                       <th className="pb-2 font-medium text-right">최근 로그인 인증</th>
-                      <th className="pb-2 font-medium text-right">최근 열람 기록</th>
+                      <th className="pb-2 font-medium text-right">최근 열람 클릭</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -275,9 +290,13 @@ export default function Admin() {
                         <td className="py-2 px-2 text-center text-success font-medium">{u.likes}</td>
                         <td className="py-2 px-2 text-center text-text3">{u.dislikes}</td>
                         <td className="py-2 text-center whitespace-nowrap">
-                          <span>{u.reads}회</span>
+                          <span
+                            title={`논문 상세 ${u.detail_clicks ?? "—"}회 · 원문 ${u.original_clicks ?? "—"}회 · 출판사 ${u.publisher_clicks ?? "—"}회`}
+                          >
+                            {Number.isFinite(u.open_clicks) ? `${u.open_clicks}회` : "확인 불가"}
+                          </span>
                           <span className="block text-text3 text-xs">
-                            {Number.isFinite(u.read_papers) ? `${u.read_papers}편` : "편수 확인 불가"}
+                            {Number.isFinite(u.opened_papers) ? `${u.opened_papers}편` : "편수 확인 불가"}
                           </span>
                         </td>
                         <td className="py-2 pl-3 text-right text-text3 whitespace-nowrap">
@@ -287,7 +306,7 @@ export default function Admin() {
                           <ActivityTime value={u.last_sign_in_at} />
                         </td>
                         <td className="py-2 pl-3 text-right text-text3 whitespace-nowrap">
-                          <ActivityTime value={u.last_read_at === undefined ? u.last_active : u.last_read_at} />
+                          <ActivityTime value={u.last_opened_at} />
                         </td>
                       </tr>
                     ))}
@@ -295,10 +314,16 @@ export default function Admin() {
                 </table>
               </div>
               <p className="text-xs text-text3 mt-3">
-                최근 접속은 로그인 유지 상태의 재방문도 포함합니다. 로그인 인증은 새로 로그인한 시각입니다. 시간은 한국 시간(KST)입니다.
+                최근 접속은 로그인 유지 상태의 재방문도 포함합니다. 로그인 인증은 새로 로그인한 시각입니다.
+                시간은 한국 시간(KST)입니다.
               </p>
               <p className="text-xs text-text3 mt-2">
-                열람 기록은 요약·논문 상세 화면의 10초 이상 활동 기록으로, 반복 기록을 포함합니다. 편수는 중복을 제외하며 원문 화면 열람·읽음 표시 횟수와는 다릅니다.
+                열람 클릭은 서비스에서 논문 상세·원문·출판사 링크를 직접 선택한 횟수입니다. 같은 논문을 다시
+                열면 횟수는 늘고 편수는 중복을 제외합니다. 읽기 완료를 뜻하지 않습니다.
+              </p>
+              <p className="text-xs text-text3 mt-2">
+                클릭 집계 적용 이후의 기록입니다. 자동 표시·새로고침과 이전 10초 체류 기록은 포함하지
+                않습니다. 체류시간은 별도로 집계합니다.
               </p>
             </>
           )}
