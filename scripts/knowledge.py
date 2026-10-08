@@ -13,6 +13,7 @@ import time
 import unicodedata
 
 VERSION = "corpus-v1"
+EXTRACTION_VERSION = "scientific-v1"
 PAGE_VERSION = "corpus-v1-en"
 KINDS = ("condition", "intervention", "test", "outcome", "method")
 
@@ -205,6 +206,9 @@ class KnowledgeStore:
               revision TEXT NOT NULL, payload TEXT NOT NULL, pending INTEGER NOT NULL DEFAULT 1,
               retry_at REAL NOT NULL DEFAULT 0, PRIMARY KEY(kind,id));
             CREATE TABLE IF NOT EXISTS meta(key TEXT PRIMARY KEY,value TEXT NOT NULL);
+            CREATE TABLE IF NOT EXISTS scientific_history(pmid TEXT NOT NULL,fingerprint TEXT NOT NULL,
+              revision TEXT NOT NULL,value TEXT NOT NULL,created_at TEXT NOT NULL,PRIMARY KEY(pmid,revision));
+            CREATE TABLE IF NOT EXISTS bibliography_refresh(pmid TEXT PRIMARY KEY,next_at REAL NOT NULL);
         """)
         if 'dirty_since' not in {row[1] for row in self.db.execute('PRAGMA table_info(concepts)')}:
             self.db.execute("ALTER TABLE concepts ADD COLUMN dirty_since TEXT NOT NULL DEFAULT ''")
@@ -227,16 +231,25 @@ class KnowledgeStore:
         content_hash = hashlib.sha256(body.encode()).hexdigest()
         if not re.fullmatch(r"[0-9]{1,12}", pmid) or document["content_hash"] != content_hash:
             raise ValueError("Invalid original identity/hash")
-        fp = digest([VERSION, MODEL, content_hash, paper["title"], paper.get("integrity_status", "current"), paper.get('related_notices',[])])
-        previous = self.db.execute("SELECT fingerprint FROM sources WHERE pmid=?", (pmid,)).fetchone()
-        if previous and previous[0] == fp:
+        fp = digest([VERSION, EXTRACTION_VERSION, MODEL, content_hash, paper["title"], paper.get("integrity_status", "current"), paper.get('related_notices',[])])
+        previous = self.db.execute("SELECT * FROM sources WHERE pmid=?", (pmid,)).fetchone()
+        if previous and previous['fingerprint'] == fp:
+            # Refresh bibliographic edits independently of expensive model extraction.
+            with self.db:
+                self.db.execute('UPDATE sources SET paper=? WHERE pmid=?', (encode(paper),pmid))
             return False
+        old_paper = json.loads(previous['paper']) if previous else {}
+        same_original = previous and previous['content_hash'] == content_hash and all(
+            old_paper.get(k) == paper.get(k) for k in ('title','integrity_status','related_notices'))
         with self.db:
-            self.db.execute("UPDATE concepts SET dirty_since=CASE WHEN dirty=0 THEN ? ELSE dirty_since END,dirty=1 WHERE id IN (SELECT concept_id FROM memberships WHERE pmid=?)", (now(),pmid))
-            self.db.execute("DELETE FROM publications WHERE kind='page' AND id IN (SELECT concept_id FROM memberships WHERE pmid=?)", (pmid,))
-            self.db.execute("DELETE FROM publications WHERE kind='source' AND id=?", (pmid,))
-            self.db.execute("DELETE FROM findings WHERE pmid=?", (pmid,))
-            self.db.execute("DELETE FROM memberships WHERE pmid=?", (pmid,))
+            # A recipe/model upgrade does not make an unchanged original invalid.
+            # Keep its usable knowledge until the replacement commits atomically.
+            if not same_original:
+                self.db.execute("UPDATE concepts SET dirty_since=CASE WHEN dirty=0 THEN ? ELSE dirty_since END,dirty=1 WHERE id IN (SELECT concept_id FROM memberships WHERE pmid=?)", (now(),pmid))
+                self.db.execute("DELETE FROM publications WHERE kind='page' AND id IN (SELECT concept_id FROM memberships WHERE pmid=?)", (pmid,))
+                self.db.execute("DELETE FROM publications WHERE kind IN ('source','science') AND id=?", (pmid,))
+                self.db.execute("DELETE FROM findings WHERE pmid=?", (pmid,))
+                self.db.execute("DELETE FROM memberships WHERE pmid=?", (pmid,))
             self.db.execute("""INSERT INTO sources VALUES (?,?,?,?,'pending',0,0,?) ON CONFLICT(pmid)
               DO UPDATE SET paper=excluded.paper,fingerprint=excluded.fingerprint,content_hash=excluded.content_hash,
               state='pending',attempts=0,retry_at=0,updated_at=excluded.updated_at""", (pmid, encode(paper), fp, content_hash, now()))
@@ -247,7 +260,7 @@ class KnowledgeStore:
             self.db.execute("UPDATE concepts SET dirty_since=CASE WHEN dirty=0 THEN ? ELSE dirty_since END,dirty=1 WHERE id IN (SELECT concept_id FROM memberships WHERE pmid=?)", (now(),pmid))
             self.db.execute("DELETE FROM findings WHERE pmid=?", (pmid,))
             self.db.execute("DELETE FROM memberships WHERE pmid=?", (pmid,))
-            self.db.execute("DELETE FROM publications WHERE kind='source' AND id=?", (pmid,))
+            self.db.execute("DELETE FROM publications WHERE kind IN ('source','science') AND id=?", (pmid,))
             self.db.execute("UPDATE sources SET state='withdrawn' WHERE pmid=?", (pmid,))
 
     def stage(self, kind, identity, payload):
@@ -257,7 +270,7 @@ class KnowledgeStore:
             WHERE publications.revision<>excluded.revision""", (kind, identity, revision, encode(payload)))
         return revision
 
-    def complete(self, row, fragments):
+    def complete(self, row, fragments, *, science=None):
         concepts, findings = {}, []
         for fragment in fragments:
             by_label = {}
@@ -280,6 +293,9 @@ class KnowledgeStore:
             actual = self.db.execute("SELECT fingerprint FROM sources WHERE pmid=?", (row["pmid"],)).fetchone()
             if not actual or actual[0] != row["fingerprint"]:
                 raise ValueError("Original changed during extraction")
+            self.db.execute("UPDATE concepts SET dirty_since=CASE WHEN dirty=0 THEN ? ELSE dirty_since END,dirty=1 WHERE id IN (SELECT concept_id FROM memberships WHERE pmid=?)", (now(),row['pmid']))
+            self.db.execute('DELETE FROM findings WHERE pmid=?',(row['pmid'],))
+            self.db.execute('DELETE FROM memberships WHERE pmid=?',(row['pmid'],))
             for cid, c in concepts.items():
                 self.db.execute("""INSERT INTO concepts(id,label,label_ko,kind,aliases,dirty,dirty_since) VALUES (?,?,?,?,?,1,?) ON CONFLICT(id) DO UPDATE
                     SET dirty_since=CASE WHEN concepts.dirty=0 THEN excluded.dirty_since ELSE concepts.dirty_since END,dirty=1""", (cid, c["label"], c["label_ko"], c["kind"], encode(c["aliases"]),now()))
@@ -291,11 +307,16 @@ class KnowledgeStore:
             self.stage("source", row["pmid"], {"pmid": row["pmid"], "content_hash": row["content_hash"],
                 "title": json.loads(row["paper"])["title"], "version": VERSION,
                 "concepts": [{"id": cid, **c} for cid, c in sorted(concepts.items())]})
+            if science is not None:
+                science['terminology'] = [t for t in science['terminology'] if t['concept_id'] in concepts]
+                revision = self.stage('science', row['pmid'], science)
+                self.db.execute('INSERT OR IGNORE INTO scientific_history VALUES (?,?,?,?,?)',
+                    (row['pmid'],row['fingerprint'],revision,encode(science),now()))
 
     def page_inputs(self, cid):
         # Stable, bounded input sample. All memberships remain available separately.
         rows = self.db.execute("""SELECT f.*,s.content_hash,s.paper FROM findings f JOIN sources s ON s.pmid=f.pmid
-            WHERE f.concept_id=? AND s.state='done' ORDER BY json_extract(s.paper,'$.pub_date') DESC,f.id LIMIT 80""", (cid,)).fetchall()
+            WHERE f.concept_id=? AND s.state<>'withdrawn' ORDER BY json_extract(s.paper,'$.pub_date') DESC,f.id LIMIT 80""", (cid,)).fetchall()
         per_paper, inputs = Counter(), []
         for row in rows:
             if per_paper[row["pmid"]] >= 3 or len(inputs) >= 24:

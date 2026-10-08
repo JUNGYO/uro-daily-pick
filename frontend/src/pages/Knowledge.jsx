@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import { useAuth } from "../lib/auth";
 import { rpc } from "../lib/workspace";
 import { ReaderPage, Resource, useResource } from "../components/ReaderUI";
+import { ScientificPaper } from "../components/KnowledgeEvidence";
 import "../knowledge.css";
 
 const TYPES = {
@@ -322,15 +323,7 @@ function KnowledgeDetail({ id }) {
                 of independent studies.
               </p>
               {data.papers.slice(0, 20).map((p) => (
-                <article className="reader-card" key={p.pmid}>
-                  <h3>
-                    <Link to={"/papers/" + p.pmid}>{p.title}</Link>
-                  </h3>
-                  <p className="reader-muted">
-                    {p.journal} · {p.pub_date}
-                  </p>
-                  <Link to={"/fulltext/" + p.pmid}>Read full text</Link>
-                </article>
+                <ScientificPaper key={p.pmid} paper={p} />
               ))}
               <Pager
                 page={page}
