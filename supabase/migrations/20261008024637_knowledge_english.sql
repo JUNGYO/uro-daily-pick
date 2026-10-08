@@ -72,7 +72,7 @@ BEGIN
    FOR paragraph IN SELECT value FROM jsonb_array_elements(p_payload->'paragraphs') LOOP
      IF jsonb_typeof(paragraph) IS DISTINCT FROM 'object' OR paragraph-ARRAY['text','sources']<>'{}'
        OR coalesce(length(paragraph->>'text'),0) NOT BETWEEN 5 AND 700
-       OR paragraph->>'text' !~ '[A-Za-z]' OR paragraph->>'text' ~ '[ᄀ-ᇿ㄰-㆏가-힯぀-ヿ㐀-鿿]'
+       OR paragraph->>'text' !~ '[A-Za-z]' OR paragraph->>'text' ~ U&'[\1100-\11FF\3130-\318F\AC00-\D7AF\3040-\30FF\3400-\9FFF]'
        OR jsonb_typeof(paragraph->'sources') IS DISTINCT FROM 'array' OR jsonb_array_length(paragraph->'sources') NOT BETWEEN 1 AND 6 THEN
        RAISE EXCEPTION 'Invalid wiki paragraph'; END IF;
      FOR source IN SELECT value FROM jsonb_array_elements(paragraph->'sources') LOOP
