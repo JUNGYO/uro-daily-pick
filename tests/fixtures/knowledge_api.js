@@ -31,6 +31,17 @@ let liveAtlasCalls = 0;
 export function knowledgeRpc(name, args, scenario, papers) {
   if (scenario === "knowledge-error")
     return { error: { message: "Simulated knowledge outage" } };
+  if (name === "knowledge_network") {
+    const f=args.p_filters;
+    const old=knowledgeRpc('knowledge_atlas',{p_query:f.q,p_from:f.from,p_to:f.to,p_journal:f.journal,p_design:f.design,p_relation:f.relation},scenario,papers).data;
+    const mapped=old.nodes.map(n=>({...n,kind:n.kind==='paper'?'paper':n.kind==='condition'?'condition':'unclassified',resolution:n.kind==='condition'?'exact':'unmapped',concept_ui:n.kind==='condition'?'M0017834':null,vocabulary_year:'2026',source_labels:[n.label],concept_ids:[n.id]}));
+    const selection=mapped.find(n=>n.id===f.focus),peer=mapped.find(n=>n.id===f.peer);
+    return {data:{...old,nodes:mapped,filters:f,focus:f.focus,peer:f.peer,selection,selection_peer:peer,
+      selected_documents:f.peer?12:old.matched_documents,
+      edges:old.edges.filter(e=>e.weight>=f.min_shared),updated_at:'2026-10-08T01:00:00Z',
+      coverage:{concepts:old.nodes.length,resolved:1,node_limit:f.limit,edge_limit:500,minimum_shared:f.min_shared,links_at_threshold:old.edges.length,single_paper_pairs:0,metadata_papers:12,papers_with_reference_ids:5,reference_identifiers:30},
+      notes:selection&&!f.peer?[{concept_id:selection.id,label:selection.label,wiki:knowledgeRpc('knowledge_page',{p_id:selection.id},scenario,papers).data.wiki}]:[]},error:null};
+  }
   if (name === "knowledge_atlas") {
     const liveCount = scenario === 'atlas-live' ? 30 + liveAtlasCalls++ : 30;
     const graphNodes = scenario === "atlas-dense" ? [...nodes,...Array.from({length:21},(_,i)=>({id:(i+10).toString(16).padStart(24,'0'),label:['robot-assisted radical prostatectomy','urinary continence recovery','biochemical recurrence-free survival','fluorescence confocal microscopy'][i%4]+` ${i+1}`,kind:['condition','intervention','outcome','test'][i%4],document_count:10-i%5}))] : nodes;

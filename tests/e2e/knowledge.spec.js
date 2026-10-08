@@ -20,7 +20,7 @@ for(const width of [1440,390,320]) test(`knowledge search, original-bound wiki a
  await english(page);await page.screenshot({path:info.outputPath(`wiki-${width}.png`)});
  await page.getByRole('link',{name:'Literature Map',exact:true}).click();
  await expect(page.getByRole('group',{name:'Concept map from full texts'})).toBeVisible();
- await page.getByRole('button',{name:'prostate cancer, 28 papers',exact:true}).focus();await page.keyboard.press('Enter');
+ await page.getByRole('button',{name:'prostate cancer, 28 papers, Disease',exact:true}).focus();await page.keyboard.press('Enter');
  await expect(page.getByRole('link',{name:'Open full knowledge page'})).toBeVisible();
  await expect(page.getByRole('article',{name:'Source-based knowledge'})).toBeVisible();
  await page.getByRole('button',{name:'Show accessible concept list'}).click();
@@ -57,7 +57,7 @@ for(const width of [1440,830,390,320]) test(`atlas opens with visible graph and 
  await expect(page.getByRole('group',{name:'Concept map from full texts'})).toBeVisible();
  await expect(page.getByRole('link',{name:'My activity',exact:true})).toBeVisible();
  await page.screenshot({path:info.outputPath(`atlas-initial-${width}.png`)});
- await page.getByRole('button',{name:'prostate cancer, 28 papers',exact:true}).click();
+ await page.getByRole('button',{name:'prostate cancer, 28 papers, Disease',exact:true}).click();
  await expect(page.getByRole('complementary',{name:'Selected research'}).getByRole('heading',{name:'prostate cancer'})).toBeVisible();
  await expect(page.getByRole('article',{name:'Source-based knowledge'})).toBeVisible();
  await page.getByRole('button',{name:'Filters',exact:true}).click();
@@ -94,13 +94,31 @@ test('atlas filters survive reload, empty results and failures remain actionable
 
 test('dense atlas keeps labels separate on desktop and exposes all concepts on mobile',async({page},info)=>{
  await page.setViewportSize({width:1440,height:1000});await page.goto('/uro-daily-pick/insights?scenario=atlas-dense');
- await expect(page.locator('.atlas-node')).toHaveCount(16);
- const bounds=await page.locator('.atlas-node rect').evaluateAll(nodes=>nodes.map(n=>{const r=n.getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom};}));
+ await expect(page.locator('.atlas-node')).toHaveCount(24);
+ await page.locator('.atlas-graph').scrollIntoViewIfNeeded();
+ const bounds=await page.locator('.atlas-node text').evaluateAll(nodes=>nodes.map(n=>{const r=n.getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom};}));
  for(let i=0;i<bounds.length;i++)for(let j=i+1;j<bounds.length;j++){const a=bounds[i],b=bounds[j];expect(a.right<=b.x||b.right<=a.x||a.bottom<=b.y||b.bottom<=a.y).toBe(true);}
  await page.screenshot({path:info.outputPath('atlas-dense-desktop.png')});
- await page.setViewportSize({width:390,height:1000});await expect(page.locator('.atlas-node')).toHaveCount(6);
+ await page.setViewportSize({width:390,height:1000});await expect(page.locator('.atlas-node')).toHaveCount(24);
+ await page.locator('.network-canvas-scroll').scrollIntoViewIfNeeded();
  await page.screenshot({path:info.outputPath('atlas-dense-mobile.png')});
  await page.getByRole('button',{name:'Show accessible concept list'}).click();await expect(page.locator('.atlas-node-list li')).toHaveCount(24);
+});
+
+test('connection selection shows its papers and exports reproducible data',async({page})=>{
+ await page.goto('/uro-daily-pick/insights');
+ const link=page.getByRole('button',{name:'prostate cancer and active surveillance: 12 shared papers',exact:true});
+ await link.focus();await page.keyboard.press('Enter');
+ await expect(page.getByRole('complementary',{name:'Selected research'})).toContainText('Jaccard overlap');
+ await expect(page.getByRole('complementary',{name:'Selected research'})).toContainText('0.375');
+ await expect(page.getByRole('heading',{name:'Papers behind this connection'})).toBeVisible();
+ await expect(page).toHaveURL(/with=/);
+ await page.getByLabel('Minimum shared papers').selectOption('3');await page.reload();
+ await expect(page.getByLabel('Minimum shared papers')).toHaveValue('3');
+ const download=page.waitForEvent('download');await page.getByRole('button',{name:'Export data'}).click();
+ const file=await download;expect(file.suggestedFilename()).toBe('research-network.json');
+ const stream=await file.createReadStream();const chunks=[];for await (const part of stream)chunks.push(part);
+ const result=JSON.parse(Buffer.concat(chunks).toString());expect(result.filters.min_shared).toBe(3);expect(result.nodes).toHaveLength(3);expect(result.edges[0].weight).toBe(12);
 });
 
 test('atlas reflects new indexed papers without losing the selected wiki or graph view',async({page})=>{

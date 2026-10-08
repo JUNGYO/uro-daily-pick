@@ -967,7 +967,7 @@
   white-space: nowrap;
 }
 .atlas-missing {
-  color: #687b8d;
+  color: #526579;
   font-size: 12px;
 }
 .atlas-result {
@@ -1202,3 +1202,40 @@
 .knowledge-refresh { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 16px; margin: 8px 0 12px; color: #526780; font-size: 12px; }
 .knowledge-refresh button { min-height: 36px; padding: 6px 12px; border: 1px solid #bdcce0; border-radius: 8px; background: #fff; color: #214e7d; cursor: pointer; }
 .knowledge-refresh button:disabled { cursor: wait; opacity: .65; }
+.research-network { min-width: 0; }
+.network-options { display:flex; flex-wrap:wrap; align-items:end; gap:12px; padding:16px 20px; background:#f8fafc; border-block:1px solid #e2e8f0; }
+.network-options label { display:flex; flex-direction:column; gap:5px; color:#475569; font-size:11px; font-weight:600; }
+.network-options select,.network-options button { min-height:36px; border:1px solid #cbd5e1; border-radius:6px; background:white; padding:6px 9px; font-size:12px; color:#253e61; }
+.network-options button { display:flex; align-items:center; gap:6px; margin-left:auto; }
+.network-coverage { display:flex; justify-content:space-between; flex-wrap:wrap; gap:6px; padding:14px 20px 4px; color:#475569; font-size:12px; }
+.network-notice { margin:12px 20px; padding:12px; font-size:12px; color:#4b5c70; background:#f1f5f9; border-radius:6px; }
+.network-canvas-scroll { overflow:auto; max-width:100%; overscroll-behavior:contain; background:radial-gradient(circle at 50% 50%,#fff,#f4f7fb); }
+.atlas-graph.scientific-network { display:block; width:100%; min-width:680px; height:auto; max-height:none; touch-action:none; }
+.network-node text { font-size:13px; font-weight:500; fill:#253e61; paint-order:stroke; stroke:white; stroke-width:4px; stroke-linejoin:round; pointer-events:none; }
+.network-node:focus { outline:none; }
+.network-node:focus .network-node-disc { stroke:#0f172a; stroke-width:4px; }
+.network-edge { cursor:pointer; }
+.network-edge:focus { outline:none; }
+.network-edge:focus line:first-of-type { stroke:#122c59; stroke-opacity:1; }
+.network-navigation { padding:8px 20px; font-size:11px; color:#526780; }
+.network-legend { display:flex; flex-wrap:wrap; gap:8px 16px; padding:8px 20px 14px; font-size:11px; color:#40546d; }
+.network-legend span { display:inline-flex; align-items:center; gap:5px; }
+.network-legend i { width:9px; height:9px; border-radius:50%; }
+.network-method { margin:0 20px 20px; border-top:1px solid #e2e8f0; padding-top:12px; color:#475569; font-size:12px; line-height:1.65; }
+.network-method summary { cursor:pointer; font-weight:600; color:#253e61; }
+.network-method p { margin-top:10px; }
+.network-authority { border-left:3px solid #a6bbd4; padding-left:12px; font-size:12px; color:#526780; line-height:1.6; }
+.network-pair-stats { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin:20px 0; }
+.network-pair-stats div { background:#f1f5f9; border-radius:8px; padding:14px; }
+.network-pair-stats dt { font-size:11px; color:#526780; }
+.network-pair-stats dd { font-size:26px; color:#1b3d66; font-weight:650; }
+.network-note { margin-top:18px; }
+.atlas-node-list small { display:block; }
+@media(max-width:680px) {
+ .network-options { padding:12px; gap:8px; }
+ .network-options button { margin-left:0; }
+ .network-coverage { padding-inline:15px; }
+ .network-canvas-scroll { max-height:420px; }
+ .atlas-graph.scientific-network { min-width:760px; }
+ .network-method { margin-inline:15px; }
+}

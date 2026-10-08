@@ -204,7 +204,8 @@ def pubmed_metadata(article, pmid):
 
 def bibliography(paper, directory, *, fetch=True):
     """Cache NLM metadata separately. This endpoint receives only a public PMID."""
-    import requests
+    from knowledge_terms import metadata_bytes
+    from urllib.parse import urlencode
     from local_summary import _checkpoint
     pmid = str(paper['pmid'])
     if not re.fullmatch(r'\d{1,12}', pmid):
@@ -219,12 +220,9 @@ def bibliography(paper, directory, *, fetch=True):
         pass
     if fetch:
         try:
-            response = requests.get('https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi',
-                params={'db':'pubmed','id':pmid,'retmode':'xml','tool':'uro_daily_pick'},timeout=20)
-            response.raise_for_status()
-            if len(response.content) > 5_000_000:
-                raise ValueError('Oversized metadata response')
-            root = ET.fromstring(response.content)
+            content = metadata_bytes('https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?' +
+                urlencode({'db':'pubmed','id':pmid,'retmode':'xml','tool':'uro_daily_pick'}))
+            root = ET.fromstring(content)
             articles = root.findall('./PubmedArticle')
             if len(articles) != 1:
                 raise ValueError('Incomplete metadata response')
@@ -236,8 +234,8 @@ def bibliography(paper, directory, *, fetch=True):
             target.parent.mkdir(parents=True,exist_ok=True)
             _checkpoint(target,value)
             return value
-        except (requests.RequestException, OSError, ValueError, ET.ParseError):
-            pass
+        except (OSError, ValueError, ET.ParseError) as failure:
+            print(json.dumps({'event':'bibliography_unavailable','pmid':pmid,'reason':type(failure).__name__}),flush=True)
     return {**{k:paper.get(k) for k in ('pmid','title','doi','journal','volume','issue','pages')}, 'authors':paper.get('authors') or [],
         'source':'catalog','fetched_at':None,'pmcid':None,'issns':[],
         'dates':[{'kind':'catalog','date':paper.get('pub_date'),'precision':'unknown','raw':paper.get('pub_date')}],

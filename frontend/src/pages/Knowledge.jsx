@@ -6,20 +6,7 @@ import { ReaderPage, Resource, useResource } from "../components/ReaderUI";
 import { ScientificPaper } from "../components/KnowledgeEvidence";
 import "../knowledge.css";
 
-const TYPES = {
-  condition: "Condition",
-  intervention: "Treatment / procedure",
-  test: "Test",
-  outcome: "Outcome",
-  method: "Method",
-};
-const COLORS = {
-  condition: "#2364aa",
-  intervention: "#237b61",
-  test: "#8455ae",
-  outcome: "#a56412",
-  method: "#526475",
-};
+import { CATEGORY_LABELS as TYPES, CATEGORY_COLORS as COLORS } from "../lib/researchNetwork";
 const number = (n) => Number(n || 0).toLocaleString("en-US");
 const date = (s) => (s ? new Date(s).toLocaleDateString("en-US", { timeZone: "Asia/Seoul" }) : "");
 const detailUrl = (id) => "/knowledge/" + encodeURIComponent(id);
@@ -35,193 +22,6 @@ function Pager({ page, more, change }) {
         Next
       </button>
     </nav>
-  );
-}
-
-export function KnowledgeMap({ focus = null }) {
-  const { user } = useAuth();
-  const r = useResource(() => rpc("knowledge_graph", { p_id: focus }), [user.id, focus]);
-  const [selected, setSelected] = useState(null);
-  const [group, setGroup] = useState("");
-  useEffect(() => setSelected(null), [focus]);
-  const allNodes = r.data?.nodes || [];
-  const groups = (r.data?.groups || []).filter((g) =>
-    g.concepts.some((id) => allNodes.some((n) => n.id === id)),
-  );
-  const currentGroup = groups.find((g) => g.id === group);
-  const nodes = currentGroup ? allNodes.filter((n) => currentGroup.concepts.includes(n.id)) : allNodes,
-    edges = r.data?.edges || [];
-  const points = new Map(
-    nodes.map((n, i) => {
-      const angle = i * 2.399963229728653,
-        radius = 40 + 210 * Math.sqrt(i / Math.max(1, nodes.length - 1));
-      return [n.id, { x: 300 + Math.cos(angle) * radius, y: 280 + Math.sin(angle) * radius }];
-    }),
-  );
-  const active = nodes.find((n) => n.id === selected);
-  const linked = edges.filter((e) => e.source === selected || e.target === selected);
-  return (
-    <Resource
-      resource={r}
-      loadingText="Loading knowledge…"
-      errorMessage="Unable to load knowledge. Please try again."
-      retryLabel="Try again"
-    >
-      {!nodes.length ? (
-        <div className="reader-empty">
-          The map will appear as concepts are indexed from available full texts.
-        </div>
-      ) : (
-        <>
-          <p className="reader-muted">
-            Select a concept to explore related topics. Lines connect concepts studied in the same paper; they
-            do not measure treatment effects or strength of evidence.
-          </p>
-          {!!groups.length && (
-            <div className="knowledge-group-picker">
-              <label htmlFor="knowledge-group">Topic groups</label>
-              <select
-                id="knowledge-group"
-                value={currentGroup?.id || ""}
-                onChange={(e) => {
-                  setGroup(e.target.value);
-                  setSelected(null);
-                }}
-              >
-                <option value="">All groups</option>
-                {groups.map((g) => (
-                  <option key={g.id} value={g.id}>
-                    {allNodes.find((n) => n.id === g.id)?.label ||
-                      allNodes.find((n) => g.concepts.includes(n.id))?.label ||
-                      "Topic group"}
-                  </option>
-                ))}
-              </select>
-              <p className="reader-muted">
-                Groups reflect concepts occurring together. Only groups represented in this map are shown.
-              </p>
-            </div>
-          )}
-          <div className="knowledge-map-layout">
-            <svg
-              className="knowledge-map"
-              viewBox="0 0 600 560"
-              role="group"
-              aria-label="Concept map from full texts"
-            >
-              {edges.map((e) => {
-                const a = points.get(e.source),
-                  b = points.get(e.target);
-                if (!a || !b) return null;
-                return (
-                  <line
-                    key={e.source + e.target}
-                    x1={a.x}
-                    y1={a.y}
-                    x2={b.x}
-                    y2={b.y}
-                    stroke={
-                      selected && (e.source === selected || e.target === selected) ? "#2364aa" : "#cbd5e1"
-                    }
-                    strokeWidth={Math.min(4, 1 + Math.log2(e.weight + 1))}
-                    opacity={selected && e.source !== selected && e.target !== selected ? 0.25 : 0.8}
-                  />
-                );
-              })}
-              {nodes.map((n, i) => {
-                const p = points.get(n.id);
-                return (
-                  <g
-                    key={n.id}
-                    role="button"
-                    tabIndex={0}
-                    aria-label={`${n.label}, ${n.document_count} papers`}
-                    aria-pressed={selected === n.id}
-                    onClick={() => setSelected(n.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        setSelected(n.id);
-                      }
-                    }}
-                  >
-                    <circle
-                      cx={p.x}
-                      cy={p.y}
-                      r={selected === n.id ? 24 : 20}
-                      fill={COLORS[n.kind] || COLORS.method}
-                      stroke={selected === n.id ? "#111827" : "white"}
-                      strokeWidth="3"
-                    />
-                    <text
-                      x={p.x}
-                      y={p.y + 5}
-                      textAnchor="middle"
-                      fill="white"
-                      fontSize="15"
-                      fontWeight="600"
-                      aria-hidden="true"
-                    >
-                      {i + 1}
-                    </text>
-                  </g>
-                );
-              })}
-            </svg>
-            <div className="knowledge-map-info" aria-live="polite">
-              {active ? (
-                <>
-                  <span className="knowledge-kind">{TYPES[active.kind]}</span>
-                  <h2>{active.label}</h2>
-
-                  <Link className="btn-primary" to={detailUrl(active.id)}>
-                    Read knowledge page
-                  </Link>
-                  <h3>Related concepts</h3>
-                  {!linked.length && <p>No connected concepts in this map.</p>}
-                  <ul>
-                    {linked.map((e) => {
-                      const n = nodes.find((x) => x.id === (e.source === selected ? e.target : e.source));
-                      return (
-                        n && (
-                          <li key={n.id}>
-                            <button onClick={() => setSelected(n.id)}>{n.label}</button>
-                            <span>{number(e.weight)} shared papers</span>
-                          </li>
-                        )
-                      );
-                    })}
-                  </ul>
-                </>
-              ) : (
-                <p>Select a concept on the map or in the list below.</p>
-              )}
-            </div>
-          </div>
-          <ol className="knowledge-node-list">
-            {nodes.map((n, i) => (
-              <li key={n.id}>
-                <button aria-pressed={n.id === selected} onClick={() => setSelected(n.id)}>
-                  <span className="knowledge-dot" style={{ background: COLORS[n.kind] }}>
-                    {i + 1}
-                  </span>
-                  <span>
-                    {n.label}
-                    <small>{TYPES[n.kind]}</small>
-                  </span>
-                  <span>{number(n.document_count)} papers</span>
-                </button>
-              </li>
-            ))}
-          </ol>
-          <p className="reader-muted">
-            Showing up to 30{" "}
-            {focus ? "concepts near the selected topic" : "concepts with the most connected papers"}. Find
-            other concepts in Knowledge Explorer.
-          </p>
-        </>
-      )}
-    </Resource>
   );
 }
 
@@ -266,7 +66,8 @@ function KnowledgeDetail({ id }) {
         {data ? (
           <>
             <p className="reader-muted">
-              {TYPES[data.concept.kind]} · {number(data.concept.document_count)} connected papers
+              {TYPES[data.concept.kind] || "Unresolved term"} · {number(data.concept.document_count)}{" "}
+              connected papers
             </p>
             {data.wiki?.status === "ready" && data.wiki.paragraphs.length ? (
               <article className="knowledge-article" aria-label="Source-based knowledge">
@@ -406,7 +207,7 @@ function KnowledgeBrowse() {
             <div className="knowledge-grid">
               {r.data.items.slice(0, 20).map((c) => (
                 <article className="knowledge-card" key={c.id}>
-                  <span className="knowledge-kind">{TYPES[c.kind]}</span>
+                  <span className="knowledge-kind">{TYPES[c.kind] || "Unresolved term"}</span>
                   <h2>
                     <Link to={detailUrl(c.id)}>{c.label}</Link>
                   </h2>
