@@ -84,6 +84,20 @@ class KnowledgeTests(unittest.TestCase):
         self.store.acknowledge('page', 'x', second)
         self.assertEqual(self.store.db.execute('SELECT pending FROM publications').fetchone()[0], 0)
 
+    def test_recipe_upgrade_keeps_current_knowledge_until_atomic_replacement(self):
+        self.store.complete(self.row(),[FRAGMENT])
+        cid=concept_id('condition','prostate cancer')
+        self.store.db.execute('UPDATE concepts SET dirty=0');self.store.db.commit()
+        before=self.store.page_inputs(cid)
+        with patch('knowledge.EXTRACTION_VERSION','synthetic-next-recipe'):
+            self.assertTrue(self.store.observe(self.paper,self.document))
+        self.assertEqual(self.row()['state'],'pending')
+        self.assertEqual(self.store.page_inputs(cid),before)
+        self.assertEqual(self.store.db.execute('SELECT dirty FROM concepts').fetchone()[0],0)
+        self.store.complete(self.row(),[FRAGMENT])
+        self.assertEqual(len(self.store.page_inputs(cid)),1)
+        self.assertEqual(self.store.db.execute('SELECT count(*) FROM memberships').fetchone()[0],1)
+
     def test_cloud_payload_never_contains_original_quotes(self):
         self.store.complete(self.row(), [FRAGMENT])
         payload = json.loads(self.store.db.execute('SELECT payload FROM publications').fetchone()[0])

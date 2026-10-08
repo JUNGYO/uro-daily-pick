@@ -11,6 +11,15 @@ from knowledge import (VERSION, PAGE_VERSION, KnowledgeStore, encode, digest, no
                        concept_schema, wiki_schema, validate_fragment, accepted_fragment, validate_page)
 from research_extraction import _chunk_blocks
 from local_summary import chat, ensure_server, literature_inference_scope, SummaryBudgetExpired
+import scientific_knowledge as scientific
+
+
+def scientific_fragment(value, blocks):
+    if not isinstance(value, dict) or set(value) != {'concepts','findings','science'}:
+        raise ValueError('Missing scientific extraction')
+    core = accepted_fragment({k:value[k] for k in ('concepts','findings')}, blocks)
+    core['science'], core['science_rejected'] = scientific.accepted(value['science'], blocks)
+    return core
 
 
 def load_original(state, paper):
@@ -107,10 +116,14 @@ def extract_step(store, state, deadline):
         for ordinal, blocks in enumerate(chunks):
             block_map = {b["id"]: b["text"] for b in blocks}
             if ordinal in cached:
-                validate_fragment(cached[ordinal], block_map)
+                validate_fragment({k:cached[ordinal][k] for k in ('concepts','findings')}, block_map)
+                if 'science' in cached[ordinal]:
+                    scientific.validate(cached[ordinal]['science'], block_map)
                 continue
-            value = ask(PROMPT, encode({"title": paper["title"], "source": numbered_source(blocks)}),
-                concept_schema(blocks), lambda x: accepted_fragment(x, block_map), state, deadline, cache_directory=store.directory/'candidates')
+            contract = concept_schema(blocks)
+            contract['required'].append('science'); contract['properties']['science'] = scientific.schema(blocks)
+            value = ask(PROMPT + scientific.PROMPT, encode({"title": paper["title"], "source": numbered_source(blocks)}),
+                contract, lambda x: scientific_fragment(x, block_map), state, deadline, cache_directory=store.directory/'candidates')
             with store.db:
                 store.db.execute("INSERT OR REPLACE INTO fragments VALUES (?,?,?,?)", (row["pmid"], row["fingerprint"], ordinal, encode(value)))
                 # Continue this paper next time, without holding admission across calls.
@@ -122,7 +135,12 @@ def extract_step(store, state, deadline):
             if fresh["content_hash"] != row["content_hash"]:
                 store.observe(paper, fresh)
             else:
-                store.complete(row, [cached[i] for i in range(len(chunks))])
+                fragments = [cached[i] for i in range(len(chunks))]
+                science = None
+                if all('science' in f for f in fragments):
+                    bib = scientific.bibliography(paper, store.directory)
+                    science = scientific.publication(row, fragments, bib, fresh)
+                store.complete(row, fragments, science=science)
         return True
     except SummaryBudgetExpired:
         raise
@@ -164,14 +182,42 @@ def page_step(store, state, deadline):
         return False
 
 
+def refresh_bibliography(store):
+    # One metadata-only refresh per ten minutes; failed enrichment never discards
+    # extraction. Existing NLM cache prevents redundant calls after restarts.
+    rows = store.db.execute("""SELECT p.*,s.paper,s.fingerprint FROM publications p JOIN sources s ON s.pmid=p.id
+        LEFT JOIN bibliography_refresh b ON b.pmid=p.id
+        WHERE p.kind='science' AND s.state='done' AND coalesce(b.next_at,0)<=? ORDER BY
+        coalesce(json_extract(p.payload,'$.bibliography.fetched_at'),'') LIMIT 1""", (time.time(),)).fetchall()
+    for row in rows:
+        value = json.loads(row['payload'])
+        bib = scientific.bibliography(json.loads(row['paper']),store.directory)
+        with store.db:
+            store.db.execute('INSERT OR REPLACE INTO bibliography_refresh VALUES (?,?)',
+                (row['id'],time.time()+(86400 if bib['source']=='PubMed' else 3600)))
+        if bib == value['bibliography']:
+            continue
+        # Retain reference identifiers extracted from the immutable original.
+        extra = [r for r in value['bibliography']['references'] if r['source_id'].startswith('original-ref-')]
+        bib['references'] = (bib['references']+extra)[:500]
+        value['bibliography'] = bib
+        with store.db:
+            revision = store.stage('science',row['id'],value)
+            store.db.execute('INSERT OR IGNORE INTO scientific_history VALUES (?,?,?,?,?)',
+                (row['id'],row['fingerprint'],revision,encode(value),now()))
+
+
 def sync_step(store, service, deadline):
     service.sync_deadline = deadline
     for row in store.db.execute("""SELECT * FROM publications WHERE pending=1 AND retry_at<=?
-      ORDER BY CASE kind WHEN 'source' THEN 0 WHEN 'page' THEN 1 ELSE 2 END,id LIMIT 10""", (time.time(),)).fetchall():
+      ORDER BY CASE kind WHEN 'source' THEN 0 WHEN 'science' THEN 1 WHEN 'page' THEN 2 ELSE 3 END,id LIMIT 10""", (time.time(),)).fetchall():
         payload = json.loads(row["payload"])
         try:
-            result = service.request("rpc/publish_knowledge", {"p_worker_id": service.config["id"],
-                "p_token": service.token, "p_kind": row["kind"], "p_revision": row["revision"], "p_payload": payload})
+            args = {"p_worker_id": service.config["id"], "p_token": service.token,
+                "p_revision": row["revision"], "p_payload": payload}
+            if row['kind'] != 'science':
+                args['p_kind'] = row['kind']
+            result = service.request("rpc/" + ('publish_scientific_knowledge' if row['kind']=='science' else 'publish_knowledge'), args)
             if result != {"id": row["id"], "revision": row["revision"]}:
                 raise ValueError("Publication revision not acknowledged")
             store.acknowledge(row["kind"], row["id"], row["revision"])
@@ -216,6 +262,7 @@ def main():
                 sync_step(store, service, deadline-5); last_sync = time.monotonic()
             if time.monotonic() - last_groups > 600:
                 store.build_groups(); last_groups = time.monotonic()
+                refresh_bibliography(store)
             store.set_meta("heartbeat", {"at": now(), "state": "running"})
             try:
                 ensure_server()

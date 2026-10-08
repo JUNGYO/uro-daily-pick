@@ -42,6 +42,41 @@ try {
  const detail=await scalar('SELECT public.knowledge_page($1) v',[cid]);assert.equal(detail.wiki.status,'ready');assert.equal(detail.papers.length,1);assert.equal(detail.neighbors[0].shared_papers,1);
  assert.equal((await scalar('SELECT public.knowledge_graph() v')).edges[0].weight,1);
  assert.equal((await scalar('SELECT public.knowledge_graph() v')).groups[0].concepts.length,2);
+ // Scientific records are independently authenticated, typed and original-bound.
+ const bib={source:'PubMed',fetched_at:'2026-10-08T03:00:00Z',pmid:'12345',title:'Original',doi:null,pmcid:null,journal:'Urology',volume:'1',issue:'2',pages:'1-3',authors:['Fixture Author'],issns:[],dates:[{kind:'journal',date:'2024',precision:'year',raw:'2024'}],publication_types:['Journal Article'],mesh:[],registry_ids:['NCT12345678'],references:[{source_id:'ref1',pmid:'12346',doi:null}],related_articles:[]};
+ const fact={id:'f'.repeat(24),field:'sample_size',value:'195 men',locations:['p-0000000']};
+ const numerical={id:'e'.repeat(24),measure:'HR',estimate:'0.70',ci_low:'0.50',ci_high:'0.90',ci_level:'95',outcome:'recurrence',population:'195 men',comparison:null,timepoint:'12 months',unit:null,adjustment:'adjusted',locations:['p-0000000']};
+ const science={version:'scientific-v1',pmid:'12345',title:'Original',content_hash:hash,bibliography:bib,facts:[fact],results:[numerical],terminology:[],registry_mentions:[],provenance:{model:'Fixture',recipe:'scientific-v1',extracted_at:'2026-10-08T03:00:00Z',validation:'source_checked',review_status:'unreviewed',chunks:2,rejected_candidates:1},coverage:{facts_total:1,results_total:1,facts_published:1,results_published:1}};
+ const publishScience=(value= science,key=token)=>scalar('SELECT public.publish_scientific_knowledge($1,$2,$3,$4) v',[worker,key,revision,value]);
+ await assert.rejects(()=>publishScience(science,'bad'),{code:'42501'});
+ await assert.rejects(()=>publishScience({...science,content_text:'raw original'}));
+ await assert.rejects(()=>publishScience({...science,facts:[{...fact,quote:'raw original'}]}));
+ await assert.rejects(()=>publishScience({...science,results:[{...numerical,ci_low:'0.80'}]}));
+ await assert.rejects(()=>publishScience({...science,results:[{...numerical,locations:['p-9999999']}]}));
+ await assert.rejects(()=>publishScience({...science,provenance:{...science.provenance,review_status:'human_reviewed'}}));
+ await publishScience();await publishScience();
+ const scienceDetail=await scalar('SELECT public.knowledge_paper($1) v',['12345']);
+ assert.equal(scienceDetail.science.results[0].estimate,'0.70');assert.equal(scienceDetail.science.bibliography.dates[0].date,'2024');
+ assert.equal(scienceDetail.science.provenance.review_status,'unreviewed');
+ await db.exec(`RESET ROLE; UPDATE public.papers SET journal='Urology',study_type='RCT' WHERE id=1;
+ INSERT INTO public.papers(id,pmid,title,journal,pub_date,fulltext_available,study_type) VALUES(991,'12346','Another original','Other journal','2023-02-01',true,'Retrospective');
+ INSERT INTO app_private.local_fulltext_sources(paper_id,worker_id,title,content_hash,summary_source_hash,characters,section_count) VALUES(991,'${worker}','Another original','${hash}','${hash}',10000,3);SET ROLE authenticated;`);
+ await publish('source',{...source,pmid:'12346',title:'Another original'});
+ await publishScience({...science,pmid:'12346',title:'Another original',bibliography:{...bib,pmid:'12346',title:'Another original',references:[],registry_ids:[]},registry_mentions:['NCT12345678']});
+ const atlas=await scalar('SELECT public.knowledge_atlas() v');
+ assert.equal(atlas.matched_documents,2);assert.equal(atlas.structured_documents,2);assert.deepEqual(atlas.years.map(y=>y.year),[2023,2024]);
+ assert.equal(atlas.nodes[0].document_count,2);
+ assert.equal((await scalar("SELECT public.knowledge_atlas(p_journal=>'Urology',p_from=>2024,p_to=>2024,p_design=>'RCT') v")).matched_documents,1);
+ assert.equal((await scalar("SELECT public.knowledge_atlas(p_query=>'no-such-paper') v")).papers.length,0);
+ const citations=await scalar("SELECT public.knowledge_atlas(p_relation=>'citations') v");
+ assert.deepEqual(citations.edges,[{source:'12345',target:'12346',weight:1}]);
+ const reports=(await scalar("SELECT public.knowledge_paper('12345') v")).related_reports;
+ assert.equal(reports[0].pmid,'12346');assert.equal(reports[0].target_relation,'mentioned');
+ await assert.rejects(()=>scalar('SELECT public.knowledge_atlas(p_from=>2025,p_to=>2020) v'));
+ await db.exec('SET ROLE anon');
+ await assert.rejects(()=>scalar('SELECT public.knowledge_atlas() v'),{code:'42501'});
+ await assert.rejects(()=>scalar("SELECT public.knowledge_paper('12345') v"),{code:'42501'});
+ await db.exec('RESET ROLE;DELETE FROM public.papers WHERE id=991;SET ROLE authenticated');
  await publish('page',{id:cid2,version:'corpus-v1-en',paragraphs:[]});
  assert.equal((await scalar('SELECT public.knowledge_page($1) v',[cid2])).wiki.status,'indexed');
  assert.equal((await scalar('SELECT public.knowledge_search() v')).items.find(c=>c.id===cid2).status,'indexed');
@@ -61,7 +96,8 @@ try {
  assert.equal((await scalar('SELECT public.knowledge_search() v')).indexed_documents,0);
  await assert.rejects(()=>publish('page',page));
  await db.exec('RESET ROLE');
- for(const table of ['knowledge_documents','knowledge_concepts','knowledge_memberships','knowledge_pages','knowledge_dependencies']) {
+ assert.equal(await scalar('SELECT count(*)::int v FROM app_private.knowledge_science'),0);
+ for(const table of ['knowledge_documents','knowledge_concepts','knowledge_memberships','knowledge_pages','knowledge_dependencies','knowledge_science','knowledge_references','knowledge_registries']) {
   assert.equal(await scalar(`SELECT relrowsecurity v FROM pg_class WHERE oid='app_private.${table}'::regclass`),true);
   assert.equal(await scalar(`SELECT has_table_privilege('authenticated','app_private.${table}','SELECT') v`),false);
  }

@@ -54,7 +54,7 @@ test("only read and saved transitions stamp dates; later note edits preserve bot
 });
 
 test("insights separates ten-second views from marked-read dates and drills topics into real paper lists", async ({ page }) => {
-  await page.goto("/uro-daily-pick/insights?scenario=insights-network");
+  await page.goto("/uro-daily-pick/insights?view=activity&scenario=insights-network");
   await page.getByRole("combobox", { name: "Period", exact: true }).selectOption("30");
   const activities = page.locator('[aria-label="Activity to explore"]');
   await activities.getByRole("button", { name: /^Marked read/ }).click();
@@ -79,7 +79,7 @@ test("insights separates ten-second views from marked-read dates and drills topi
 
 test("sparse recommendations show content explanations without similar-reader claims", async ({ page }, info) => {
   await page.setViewportSize({ width: 1440, height: 1000 });
-  await page.goto("/uro-daily-pick/insights?scenario=insights-network");
+  await page.goto("/uro-daily-pick/insights?view=activity&scenario=insights-network");
   await expect(page.getByRole("heading", { name: "Interest expansion", exact: true })).toBeVisible();
   await expect(page.getByText("Not enough verified similar-reader evidence is available. Content and profile interests remain the starting point.")).toBeVisible();
   await expect(page.getByText(/Liked by \d+ similar readers/)).toHaveCount(0);
@@ -90,7 +90,7 @@ test("sparse recommendations show content explanations without similar-reader cl
 });
 
 test("qualified recommendations show actual support and turning personalization off clears their cache", async ({ page }) => {
-  await page.goto("/uro-daily-pick/insights?scenario=insights-qualified");
+  await page.goto("/uro-daily-pick/insights?view=activity&scenario=insights-qualified");
   await expect(page.getByText(/Liked by 3 similar readers \(group: 4\)/)).toBeVisible();
   await page.getByRole("link", { name: "내 설정", exact: true }).click();
   const personalized = page.getByRole("checkbox", { name: /열람·좋아요 기록으로/ });
@@ -99,6 +99,7 @@ test("qualified recommendations show actual support and turning personalization 
   await expect.poll(async () => (await snapshot(page)).profiles[0].personalization_enabled).toBe(false);
   expect((await snapshot(page)).recommendations).toEqual([]);
   await page.getByRole("link", { name: "Insights", exact: true }).click();
+  await page.getByRole("link", { name: "My activity", exact: true }).click();
   await expect(page.getByText("Behavior-based personalization is off. Suggestions use your explicit profile and content preferences.")).toBeVisible();
   await expect(page.getByText(/Liked by \d+ similar readers/)).toHaveCount(0);
 });
@@ -169,7 +170,7 @@ test("shared project readers can inspect graphs and return to a read-only table"
 
 test("insights and project network retain usable lists without page overflow at 320 pixels", async ({ page }, info) => {
   await page.setViewportSize({ width: 320, height: 900 });
-  await page.goto("/uro-daily-pick/insights?scenario=insights-network");
+  await page.goto("/uro-daily-pick/insights?view=activity&scenario=insights-network");
   await expect(page.getByRole("heading", { name: "Interest expansion", exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: info.outputPath("reading-insights-mobile.png"), fullPage: true });

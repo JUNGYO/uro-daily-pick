@@ -27,24 +27,16 @@ import {
 } from "../components/InsightsPanels";
 import { Loader2, TrendingUp, BookOpen, Zap } from "lucide-react";
 import "../insights.css";
-import { KnowledgeMap } from "./Knowledge";
+import ResearchAtlas from "./ResearchAtlas";
 
 export default function Insights() {
   const [params] = useSearchParams();
-  if (params.get("view") === "knowledge")
-    return (
-      <div className="insights-page h-full overflow-y-auto" lang="en">
-        <div className="p-4 sm:p-6 max-w-[1000px] mx-auto">
-          <h1 className="text-[1.111rem] font-bold text-text1 mb-5">Literature Map</h1>
-          <nav className="knowledge-nav">
-            <Link to="/insights">My research activity</Link>
-            <Link to="/knowledge">Knowledge Explorer</Link>
-          </nav>
-          <KnowledgeMap focus={params.get("concept") || null} />
-        </div>
-      </div>
-    );
-  return <PersonalInsights />;
+  const legacyActivity = ["period", "activity", "topic", "method", "day", "month"].some((k) => params.has(k));
+  return params.get("view") === "activity" || (legacyActivity && params.get("view") !== "knowledge") ? (
+    <PersonalInsights />
+  ) : (
+    <ResearchAtlas />
+  );
 }
 
 function PersonalInsights() {
@@ -153,6 +145,7 @@ function PersonalInsights() {
   ).sort((a, b) => b[1] - a[1])[0];
   function change(values, drill = false) {
     const next = new URLSearchParams(params);
+    next.set("view", "activity");
     for (const [key, value] of Object.entries(values)) {
       if (value) next.set(key, value);
       else next.delete(key);
@@ -188,7 +181,7 @@ function PersonalInsights() {
       <div className="p-4 sm:p-6 max-w-[800px] mx-auto">
         <h1 className="text-[1.111rem] font-bold text-text1 mb-5">Research Insights</h1>
         <nav className="knowledge-nav">
-          <Link to="/insights?view=knowledge">Literature Map</Link>
+          <Link to="/insights">Research atlas</Link>
         </nav>
         <div className="insights-controls">
           <label>

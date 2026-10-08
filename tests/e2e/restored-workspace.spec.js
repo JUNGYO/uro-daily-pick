@@ -91,6 +91,7 @@ test("original menus, collections and insights coexist with research tools", asy
     .getByRole("link", { name: "Insights", exact: true })
     .filter({ visible: true })
     .click();
+  await page.getByRole("link", { name: "My activity", exact: true }).click();
   await expect(
     page.getByRole("heading", { name: "Research Insights" }),
   ).toBeVisible();
