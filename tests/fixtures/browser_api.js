@@ -1,4 +1,5 @@
 import { reviewRpc, reviewFixture } from "./review_api";
+import { knowledgeRpc } from "./knowledge_api";
 const scenario =
   new URLSearchParams(location.search).get("scenario") || "reader";
 const today = new Date(Date.now() + 9 * 3600000).toISOString().slice(0, 10);
@@ -740,6 +741,7 @@ export const supabase = {
   },
   rpc(name, args = {}) {
     const result = (async () => {
+      if (name.startsWith("knowledge_")) return knowledgeRpc(name, args, scenario, db.papers);
       const ready = (p) =>
         p.fulltext_available && p.summary_basis === "fulltext";
       const state = (id) =>

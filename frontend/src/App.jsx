@@ -27,6 +27,7 @@ function resilientLazy(load) {
 }
 const DailyPick = resilientLazy(() => import("./pages/Today"));
 const Discover = resilientLazy(() => import("./pages/Discover"));
+const Knowledge = resilientLazy(() => import("./pages/Knowledge"));
 const Paper = resilientLazy(() => import("./pages/Paper"));
 const Compare = resilientLazy(() => import("./pages/Compare"));
 const Library = resilientLazy(() => import("./pages/Library"));
@@ -284,6 +285,8 @@ export default function App() {
                       <Routes>
                         <Route path="/" element={<DailyPick />} />
                         <Route path="/discover" element={<Discover />} />
+                        <Route path="/knowledge" element={<Knowledge />} />
+                        <Route path="/knowledge/:id" element={<Knowledge />} />
                         <Route path="/papers/:pmid" element={<Paper />} />
                         <Route path="/compare" element={<Compare />} />
                         <Route path="/library" element={<Library />} />

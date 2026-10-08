@@ -16,6 +16,7 @@ import {
 } from "../lib/workspace";
 import { ReaderPage, Resource, useResource } from "../components/ReaderUI";
 import { useReading } from "../lib/useReading";
+import { KnowledgeLinks } from "./Knowledge";
 import { useContentReading } from "../lib/contentReading";
 import { FIELDS, IntegrityNotice, SummaryContent, StudyContent } from "../components/ReadingContent";
 export { FIELDS };
@@ -116,6 +117,7 @@ export default function Paper() {
               </div>
             )}
             <IntegrityNotice paper={p} />
+            {!r.data.offline && <KnowledgeLinks pmid={p.pmid} />}
             <div className="reader-actions">
               <button
                 className={s.saved ? "btn-primary" : "btn-secondary"}

@@ -1,0 +1,41 @@
+import {test,expect} from '../../frontend/node_modules/@playwright/test/index.mjs';
+import AxeBuilder from '../../frontend/node_modules/@axe-core/playwright/dist/index.mjs';
+test.beforeEach(async({page})=>{await page.route(/https?:\/\//,r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());});
+for(const width of [1440,390,320]) test(`knowledge search, original-bound wiki and map at ${width}px`,async({page},info)=>{
+ await page.setViewportSize({width,height:900});
+ await page.goto('/uro-daily-pick/discover');
+ await page.getByRole('link',{name:'관련 지식 탐색',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'지식 탐색',exact:true})).toBeVisible();
+ await page.getByLabel('개념·질환·치료법 검색').fill('전립선');await page.getByRole('button',{name:'검색',exact:true}).click();
+ await expect(page.locator('.knowledge-card')).toHaveCount(1);
+ await page.getByRole('link',{name:'전립선암',exact:true}).click();
+ await expect(page.getByRole('article',{name:'원문 기반 지식 문서'})).toBeVisible();
+ await expect(page.getByRole('link',{name:'출처 · PMID 12345670'})).toHaveAttribute('href',/source=a{64}#p-0000000/);
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.screenshot({path:info.outputPath(`wiki-${width}.png`)});
+ await page.getByRole('link',{name:'전체 문헌 지도',exact:true}).click();
+ await expect(page.getByRole('group',{name:'원문에서 추출한 개념 연결 지도'})).toBeVisible();
+ await page.getByRole('button',{name:'전립선암, 28편',exact:true}).focus();await page.keyboard.press('Enter');
+ await expect(page.getByRole('link',{name:'지식 페이지 읽기'})).toBeVisible();
+ await expect(page.getByText('공통 논문 12편',{exact:true})).toBeVisible();
+ await expect(page.getByRole('link',{name:'지식 페이지 읽기'})).toHaveCSS('color','rgb(255, 255, 255)');
+ await page.getByLabel('자동 주제 묶음').selectOption('a'.repeat(24));
+ await expect(page.locator('.knowledge-node-list li')).toHaveCount(2);
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ const audit=await new AxeBuilder({page}).include('main').withTags(['wcag2a','wcag2aa','wcag21aa']).analyze();expect(audit.violations).toEqual([]);
+ await page.screenshot({path:info.outputPath(`map-${width}.png`)});
+});
+test('stale knowledge hides prose while retaining current paper navigation',async({page})=>{
+ await page.goto('/uro-daily-pick/knowledge/'+'a'.repeat(24)+'?scenario=knowledge-stale');
+ await expect(page.getByText(/출처가 변경되어 지식 문서를 갱신/)).toBeVisible();
+ await expect(page.getByRole('article',{name:'원문 기반 지식 문서'})).toHaveCount(0);
+ await expect(page.getByRole('link',{name:'원문 읽기'})).toHaveCount(3);
+});
+test('empty and failed knowledge have honest independent states',async({page})=>{
+ await page.goto('/uro-daily-pick/knowledge?scenario=knowledge-empty');
+ await expect(page.getByText(/지식 색인에 반영된 원문 0편/)).toBeVisible();
+ await expect(page.locator('.knowledge-card')).toHaveCount(0);
+ await page.goto('/uro-daily-pick/knowledge?scenario=knowledge-error');
+ await expect(page.getByRole('alert')).toBeVisible();
+ await expect(page.getByRole('link',{name:'문헌 탐색',exact:true}).last()).toBeVisible();
+});
