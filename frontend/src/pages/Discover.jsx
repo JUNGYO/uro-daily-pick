@@ -363,7 +363,7 @@ export default function Discover() {
       <p role="status">{message}</p>
       <div className="reader-actions">
         <Link to={"/knowledge" + (params.get("q") ? "?q=" + encodeURIComponent(params.get("q")) : "")}>
-          관련 지식 탐색
+          Knowledge Explorer
         </Link>
       </div>
       <Resource resource={r}>

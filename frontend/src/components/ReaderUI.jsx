@@ -30,18 +30,24 @@ export function useResource(load, deps) {
   }, [...deps, revision]);
   return { data, setData, error, setError, loading, reload: () => setRevision((n) => n + 1) };
 }
-export function Resource({ resource, children }) {
+export function Resource({
+  resource,
+  children,
+  loadingText = "불러오는 중…",
+  errorMessage,
+  retryLabel = "다시 시도",
+}) {
   return resource.loading ? (
-    <Loading text="불러오는 중…" />
+    <Loading text={loadingText} />
   ) : resource.error ? (
-    <ErrorNotice message={resource.error} onRetry={resource.reload} retryLabel="다시 시도" />
+    <ErrorNotice message={errorMessage || resource.error} onRetry={resource.reload} retryLabel={retryLabel} />
   ) : (
     children
   );
 }
-export function ReaderPage({ title, description, children }) {
+export function ReaderPage({ title, description, children, lang }) {
   return (
-    <div className="reader-scroll h-full overflow-y-auto">
+    <div className="reader-scroll h-full overflow-y-auto" lang={lang}>
       <div className="reader-shell">
         <h1>{title}</h1>
         {description && <p className="reader-muted">{description}</p>}

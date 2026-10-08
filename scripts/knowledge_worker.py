@@ -7,7 +7,7 @@ import sqlite3
 import time
 
 from evidence import source_blocks, numbered_source
-from knowledge import (VERSION, KnowledgeStore, encode, digest, now, PROMPT, WIKI_PROMPT,
+from knowledge import (VERSION, PAGE_VERSION, KnowledgeStore, encode, digest, now, PROMPT, WIKI_PROMPT,
                        concept_schema, wiki_schema, validate_fragment, accepted_fragment, validate_page)
 from research_extraction import _chunk_blocks
 from local_summary import chat, ensure_server, literature_inference_scope, SummaryBudgetExpired
@@ -150,7 +150,7 @@ def page_step(store, state, deadline):
         else:
             paragraphs = []
         with store.db:
-            store.stage("page", row["id"], {"id": row["id"], "version": VERSION, "paragraphs": paragraphs})
+            store.stage("page", row["id"], {"id": row["id"], "version": PAGE_VERSION, "paragraphs": paragraphs})
             store.db.execute("UPDATE concepts SET dirty=0 WHERE id=?", (row["id"],))
         return True
     except SummaryBudgetExpired:
@@ -199,7 +199,7 @@ def main():
         store.close(); lock.close(); return
     deadline = time.monotonic() + max(5, min(args.max_seconds, 86400))
     try:
-        store.db.execute("UPDATE concepts SET dirty=1 WHERE dirty=2"); store.db.commit()
+        store.prepare_pages()
         if args.scan_only:
             count = scan_catalog(store, state)
             print(encode({"scanned": count}), flush=True)
@@ -222,7 +222,10 @@ def main():
                 store.set_meta("heartbeat", {"at": now(), "state": "inference_unavailable"})
                 time.sleep(min(15, max(0, deadline-time.monotonic())))
                 continue
-            if iteration % 3 == 2:
+            # Finish previously published pages under a changed prose recipe first.
+            upgrading = store.db.execute("""SELECT 1 FROM concepts c JOIN publications p ON p.id=c.id
+                WHERE p.kind='page' AND c.dirty=1 AND json_extract(p.payload,'$.version')<>? LIMIT 1""", (PAGE_VERSION,)).fetchone()
+            if upgrading or iteration % 3 == 2:
                 page_step(store, state, min(deadline-15, time.monotonic()+450))
             else:
                 extract_step(store, state, min(deadline-15, time.monotonic()+450))
