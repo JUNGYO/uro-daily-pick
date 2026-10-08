@@ -100,7 +100,13 @@ def extract_step(store, state, deadline):
     # cannot permanently starve the historical corpus.
     turn = store.meta("turn", 0)
     order = "updated_at,pmid" if turn % 2 else "json_extract(paper,'$.pub_date') DESC,pmid"
-    row = store.db.execute(f"SELECT * FROM sources WHERE state IN ('pending','error') AND retry_at<=? ORDER BY {order} LIMIT 1", (time.time(),)).fetchone()
+    # New catalog pages arrive during inference. Finish a current-revision
+    # checkpoint before starting yet another paper; otherwise the recent lane
+    # continually leaves partially processed papers behind as discovery advances.
+    row = store.db.execute(f"""SELECT s.* FROM sources s
+        WHERE state IN ('pending','error') AND retry_at<=?
+        ORDER BY EXISTS(SELECT 1 FROM fragments f WHERE f.pmid=s.pmid
+          AND f.fingerprint=s.fingerprint) DESC,{order} LIMIT 1""", (time.time(),)).fetchone()
     if row is None:
         return False
     store.set_meta("turn", turn + 1)
@@ -146,8 +152,8 @@ def extract_step(store, state, deadline):
         # A bounded document step is shorter than the whole worker run. Keep
         # fragment checkpoints and let another document use the remaining run.
         with store.db:
-            store.db.execute("UPDATE sources SET state='pending',retry_at=? WHERE pmid=? AND fingerprint=?",
-                (time.time()+120, row['pmid'], row['fingerprint']))
+            store.db.execute("UPDATE sources SET state='pending',attempts=attempts+1,retry_at=? WHERE pmid=? AND fingerprint=?",
+                (time.time()+min(86400, 120 * 2**min(row['attempts'],9)), row['pmid'], row['fingerprint']))
         print(encode({'event':'extraction_deferred','pmid':row['pmid']}), flush=True)
         return False
     except (OSError, ValueError, TypeError, KeyError, RuntimeError):
