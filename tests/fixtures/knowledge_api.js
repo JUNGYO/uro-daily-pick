@@ -27,17 +27,19 @@ const nodes = [
     status: "building",
   },
 ];
+let liveAtlasCalls = 0;
 export function knowledgeRpc(name, args, scenario, papers) {
   if (scenario === "knowledge-error")
     return { error: { message: "Simulated knowledge outage" } };
   if (name === "knowledge_atlas") {
+    const liveCount = scenario === 'atlas-live' ? 30 + liveAtlasCalls++ : 30;
     const graphNodes = scenario === "atlas-dense" ? [...nodes,...Array.from({length:21},(_,i)=>({id:(i+10).toString(16).padStart(24,'0'),label:['robot-assisted radical prostatectomy','urinary continence recovery','biochemical recurrence-free survival','fluorescence confocal microscopy'][i%4]+` ${i+1}`,kind:['condition','intervention','outcome','test'][i%4],document_count:10-i%5}))] : nodes;
     const empty = scenario === "knowledge-empty" || args.p_query === "no-such-concept";
     const filtered = args.p_from === 2024 || args.p_journal || args.p_design;
     const selectedPapers = empty ? [] : papers.slice(0, filtered ? 1 : 3).map(p=>({...p,structured:true}));
     return {data:{nodes:empty?[]:args.p_relation === 'citations' ? selectedPapers.map(p=>({id:p.pmid,label:p.title,kind:'paper',document_count:1,year:2024})) : graphNodes,
       edges:empty?[]:args.p_relation === 'citations' ? [{source:papers[0].pmid,target:papers[1].pmid,weight:1}] : [{source:nodes[0].id,target:nodes[1].id,weight:12},{source:nodes[0].id,target:nodes[2].id,weight:8}],
-      relationship:args.p_relation||'concepts',matched_documents:empty?0:filtered?1:30,indexed_documents:empty?0:30,structured_documents:empty?0:filtered?1:12,
+      relationship:args.p_relation||'concepts',matched_documents:empty?0:filtered?1:liveCount,indexed_documents:empty?0:liveCount,structured_documents:empty?0:filtered?1:12,
       years:empty?[]:filtered?[{year:2024,papers:1,structured:1}]:[{year:2001,papers:3,structured:1},{year:2020,papers:7,structured:2},{year:2024,papers:12,structured:5},{year:2026,papers:8,structured:4}],
       journals:[{label:'European urology',papers:18},{label:'BJU international',papers:12}],designs:[{label:'RCT',papers:5},{label:'Retrospective',papers:25}],papers:selectedPapers,groups:[]},error:null};
   }

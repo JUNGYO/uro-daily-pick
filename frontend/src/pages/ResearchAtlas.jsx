@@ -15,7 +15,9 @@ import {
 } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { rpc } from "../lib/workspace";
-import { Resource, useResource } from "../components/ReaderUI";
+import { Resource } from "../components/ReaderUI";
+import { useRefreshingResource as useResource } from "../lib/useRefreshingResource";
+import KnowledgeRefresh from "../components/KnowledgeRefresh";
 import { ENGLISH_RESOURCE, KnowledgeNarrative, ScientificPaper } from "../components/KnowledgeEvidence";
 import "../knowledge.css";
 
@@ -583,6 +585,7 @@ export default function ResearchAtlas() {
                   Search all literature <ArrowUpRight size={14} />
                 </Link>
               </div>
+              <KnowledgeRefresh resource={r} />
               <div className="atlas-workbench">
                 <section className="atlas-network-panel" aria-label="Research network">
                   <div className="atlas-network-heading">

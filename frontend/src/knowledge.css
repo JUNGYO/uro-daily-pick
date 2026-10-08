@@ -1199,3 +1199,6 @@
     grid-template-columns: 1fr;
   }
 }
+.knowledge-refresh { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 8px 16px; margin: 8px 0 12px; color: #526780; font-size: 12px; }
+.knowledge-refresh button { min-height: 36px; padding: 6px 12px; border: 1px solid #bdcce0; border-radius: 8px; background: #fff; color: #214e7d; cursor: pointer; }
+.knowledge-refresh button:disabled { cursor: wait; opacity: .65; }

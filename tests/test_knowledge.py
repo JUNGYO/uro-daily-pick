@@ -180,6 +180,42 @@ class KnowledgeTests(unittest.TestCase):
         self.assertEqual(json.loads(saved['payload']),prior)
         self.assertEqual(saved['pending'],0)
 
+    def test_new_catalog_arrivals_do_not_displace_a_current_checkpoint(self):
+        self.store.db.execute('INSERT INTO fragments VALUES (?,?,?,?)',
+            ('12345',self.row()['fingerprint'],0,json.dumps(FRAGMENT)))
+        self.store.db.commit()
+        self.store.observe({**self.paper,'pmid':'34567','pub_date':'2026-10-08'},self.document)
+        # The recent lane must finish the older checkpoint instead of beginning
+        # another newly discovered paper. The completed fragment needs no call.
+        self.store.set_meta('turn',0)
+        with patch('knowledge_worker.load_original',return_value=self.document) as original, \
+             patch('knowledge_worker.ask') as ask:
+            self.assertTrue(extract_step(self.store,self.store.directory,None))
+        self.assertEqual(original.call_args.args[1]['pmid'],'12345')
+        ask.assert_not_called()
+        self.assertEqual(self.store.db.execute("SELECT state FROM sources WHERE pmid='34567'").fetchone()[0],'pending')
+
+    def test_obsolete_checkpoint_does_not_change_recent_priority(self):
+        self.store.db.execute('INSERT INTO fragments VALUES (?,?,?,?)',
+            ('12345','obsolete-recipe',0,json.dumps(FRAGMENT)))
+        self.store.db.commit()
+        self.store.observe({**self.paper,'pmid':'34567','pub_date':'2026-10-08'},self.document)
+        self.store.set_meta('turn',0)
+        with patch('knowledge_worker.load_original',return_value=self.document) as original, \
+             patch('knowledge_worker.ask',return_value=FRAGMENT):
+            self.assertTrue(extract_step(self.store,self.store.directory,None))
+        self.assertEqual(original.call_args.args[1]['pmid'],'34567')
+
+    def test_repeated_step_timeouts_back_off_without_losing_prior_fragments(self):
+        from local_summary import SummaryBudgetExpired
+        self.store.db.execute("UPDATE sources SET attempts=3");self.store.db.commit()
+        with patch('knowledge_worker.time.time',return_value=10000), \
+             patch('knowledge_worker.load_original',return_value=self.document), \
+             patch('knowledge_worker.ask',side_effect=SummaryBudgetExpired('step expired')):
+            self.assertFalse(extract_step(self.store,self.store.directory,None))
+        self.assertEqual(self.row()['attempts'],4)
+        self.assertEqual(self.row()['retry_at'],10960)
+
     def test_invalid_cached_candidate_guides_first_retry_without_publishing_it(self):
         from knowledge_worker import ask
         from knowledge import VERSION
