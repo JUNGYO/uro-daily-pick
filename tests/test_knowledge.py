@@ -116,6 +116,7 @@ class KnowledgeTests(unittest.TestCase):
         with patch('knowledge_worker.ask', return_value=[{'text':'The study included 25 patients.','sources':[]}]) as ask:
             self.assertTrue(page_step(self.store, self.store.directory, None))
         self.assertIn('English knowledge page', ask.call_args.args[0])
+        self.assertEqual(json.loads(ask.call_args.args[1])['findings'][0]['source_excerpts'], ['The study included 25 patients.'])
         self.assertEqual(json.loads(self.store.db.execute("SELECT payload FROM publications WHERE kind='page'").fetchone()[0])['version'], PAGE_VERSION)
         self.store.prepare_pages()
         self.assertEqual(self.store.db.execute('SELECT dirty FROM concepts').fetchone()[0], 0)

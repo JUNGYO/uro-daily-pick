@@ -144,7 +144,8 @@ def page_step(store, state, deadline):
     try:
         if inputs:
             wire_inputs = [{**f, 'id':str(i+1)} for i,f in enumerate(inputs)]
-            public_input = [{k: f[k] for k in ("id", "title", "text", "context", "basis")} for f in wire_inputs]
+            public_input = [{**{k: f[k] for k in ("id", "title", "text", "context", "basis")},
+                "source_excerpts": [e["quote"] for e in f["evidence"]]} for f in wire_inputs]
             paragraphs = ask(WIKI_PROMPT, encode({"concept": row["label"], "findings": public_input}),
                 wiki_schema(wire_inputs), lambda x: validate_page(x, wire_inputs), state, deadline, cache_directory=store.directory/'candidates')
         else:
