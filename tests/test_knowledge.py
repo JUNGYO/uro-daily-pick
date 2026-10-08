@@ -143,6 +143,43 @@ class KnowledgeTests(unittest.TestCase):
         ask.assert_not_called()
         self.assertEqual(self.row()['state'], 'done')
 
+    def test_document_step_timeout_preserves_checkpoint_and_allows_next_document(self):
+        from local_summary import SummaryBudgetExpired
+        self.store.db.execute('INSERT INTO fragments VALUES (?,?,?,?)',
+            ('12345',self.row()['fingerprint'],0,json.dumps(FRAGMENT)))
+        self.store.db.commit()
+        chunks=[[{'id':'p-0000000','text':TEXT,'start':0,'end':len(TEXT)}],
+                [{'id':'p-0000100','text':TEXT,'start':100,'end':100+len(TEXT)}]]
+        with patch('knowledge_worker.load_original',return_value=self.document), \
+             patch('knowledge_worker._chunk_blocks',return_value=chunks), \
+             patch('knowledge_worker.ask',side_effect=SummaryBudgetExpired('step expired')):
+            self.assertFalse(extract_step(self.store,self.store.directory,None))
+        self.assertEqual(self.row()['state'],'pending')
+        self.assertGreater(self.row()['retry_at'],0)
+        self.assertEqual(self.store.db.execute('SELECT count(*) FROM fragments').fetchone()[0],1)
+        self.assertEqual(self.store.db.execute('SELECT count(*) FROM publications').fetchone()[0],0)
+        other={**self.paper,'pmid':'23456'}
+        self.store.observe(other,self.document)
+        with patch('knowledge_worker.load_original',return_value=self.document), \
+             patch('knowledge_worker.ask',return_value=FRAGMENT):
+            self.assertTrue(extract_step(self.store,self.store.directory,None))
+        self.assertEqual(self.store.db.execute("SELECT state FROM sources WHERE pmid='23456'").fetchone()[0],'done')
+        self.assertEqual(self.store.db.execute("SELECT state FROM sources WHERE pmid='12345'").fetchone()[0],'pending')
+
+    def test_page_step_timeout_preserves_published_page_and_defers_only_that_page(self):
+        from local_summary import SummaryBudgetExpired
+        self.store.complete(self.row(),[FRAGMENT])
+        cid=concept_id('condition','prostate cancer')
+        prior={'id':cid,'version':PAGE_VERSION,'paragraphs':[]}
+        revision=self.store.stage('page',cid,prior)
+        self.store.acknowledge('page',cid,revision)
+        with patch('knowledge_worker.ask',side_effect=SummaryBudgetExpired('step expired')):
+            self.assertFalse(page_step(self.store,self.store.directory,None))
+        self.assertEqual(self.store.db.execute('SELECT dirty FROM concepts WHERE id=?',(cid,)).fetchone()[0],2)
+        saved=self.store.db.execute("SELECT * FROM publications WHERE kind='page'").fetchone()
+        self.assertEqual(json.loads(saved['payload']),prior)
+        self.assertEqual(saved['pending'],0)
+
     def test_invalid_cached_candidate_guides_first_retry_without_publishing_it(self):
         from knowledge_worker import ask
         from knowledge import VERSION

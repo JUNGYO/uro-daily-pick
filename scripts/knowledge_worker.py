@@ -143,7 +143,13 @@ def extract_step(store, state, deadline):
                 store.complete(row, fragments, science=science)
         return True
     except SummaryBudgetExpired:
-        raise
+        # A bounded document step is shorter than the whole worker run. Keep
+        # fragment checkpoints and let another document use the remaining run.
+        with store.db:
+            store.db.execute("UPDATE sources SET state='pending',retry_at=? WHERE pmid=? AND fingerprint=?",
+                (time.time()+120, row['pmid'], row['fingerprint']))
+        print(encode({'event':'extraction_deferred','pmid':row['pmid']}), flush=True)
+        return False
     except (OSError, ValueError, TypeError, KeyError, RuntimeError):
         with store.db:
             store.db.execute("UPDATE sources SET state='error',attempts=attempts+1,retry_at=? WHERE pmid=?",
@@ -173,7 +179,11 @@ def page_step(store, state, deadline):
             store.db.execute("UPDATE concepts SET dirty=0 WHERE id=?", (row["id"],))
         return True
     except SummaryBudgetExpired:
-        raise
+        # The previous published page remains readable; other pages and
+        # documents must still progress during this scheduled run.
+        with store.db:
+            store.db.execute("UPDATE concepts SET dirty=2 WHERE id=?", (row['id'],))
+        return False
     except (ValueError, KeyError, TypeError, RuntimeError):
         # Failed pages go to the back of the retry order. The next scheduled run
         # restores them, while other pages can still be built now.
