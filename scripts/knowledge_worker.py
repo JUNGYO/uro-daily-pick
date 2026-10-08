@@ -68,8 +68,10 @@ def ask(system, content, schema, validate, state, deadline, *, cache_directory=N
     try:
         saved = json.loads(cache.read_text(encoding='utf-8'))
         return validate(json.loads(saved['response']))
-    except (OSError,ValueError,KeyError,TypeError):
+    except OSError:
         pass
+    except (ValueError,KeyError,TypeError) as failure:
+        error = " Cached output failed validation: " + str(failure)[:150] + ". Cite the exact blocks for both result AND context; omit unsupported details."
     for _ in range(2):
         # One shared slot per call, within the same GLOBAL four-slot admission.
         # Yield between calls; research's existing exclusive gate still wins.
@@ -80,7 +82,7 @@ def ask(system, content, schema, validate, state, deadline, *, cache_directory=N
             return validate(json.loads(raw))
         except (ValueError, TypeError, KeyError) as failure:
             print(encode({"event": "knowledge_validation_retry", "reason": str(failure)[:120]}), flush=True)
-            error = " Previous output failed validation: " + str(failure)[:150] + ". Use exact source quotes/IDs, source-bound numbers and the exact schema."
+            error = " Previous output failed validation: " + str(failure)[:150] + ". Cite the exact blocks for both result AND context; omit unsupported details. Use exact source quotes/IDs and the exact schema."
     raise ValueError("Knowledge output failed validation")
 
 

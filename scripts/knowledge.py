@@ -121,8 +121,9 @@ def validate_fragment(value, blocks):
             raise ValueError("Invalid finding")
         source = evidence_text(f["evidence"], blocks)
         derived = f["text"] + " " + f["context"]
-        if not _numbers(derived).issubset(_numbers(source)):
-            raise ValueError("Number absent from original")
+        missing = _numbers(derived) - _numbers(source)
+        if missing:
+            raise ValueError("Numbers absent from cited blocks: " + ",".join(sorted(missing)))
         if any(derived[i:i+100] in source for i in range(max(0, len(derived)-99))):
             raise ValueError("Original prose must remain local")
     return value

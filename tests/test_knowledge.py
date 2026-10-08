@@ -103,6 +103,21 @@ class KnowledgeTests(unittest.TestCase):
         ask.assert_not_called()
         self.assertEqual(self.row()['state'], 'done')
 
+    def test_invalid_cached_candidate_guides_first_retry_without_publishing_it(self):
+        from knowledge_worker import ask
+        from knowledge import VERSION
+        from local_summary import MODEL
+        cache=self.store.directory/'candidates';cache.mkdir()
+        bad=copy.deepcopy(FRAGMENT);bad['findings'][0]['text']='250 patients participated.'
+        (cache/(digest([VERSION,MODEL,'system','content',{}])+'.json')).write_text(
+            json.dumps({'response':json.dumps(bad)}),encoding='utf-8')
+        with patch('knowledge_worker.chat',return_value=json.dumps(FRAGMENT)) as chat:
+            actual=ask('system','content',{},lambda v:validate_fragment(v,BLOCKS),self.store.directory,None,cache_directory=cache)
+        self.assertEqual(actual,FRAGMENT)
+        self.assertEqual(chat.call_count,1)
+        self.assertIn('250',chat.call_args.args[0])
+        self.assertIn('context',chat.call_args.args[0])
+
     def test_failed_sync_retains_outbox(self):
         self.store.complete(self.row(), [FRAGMENT])
         class Service:
