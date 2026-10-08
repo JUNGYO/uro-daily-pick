@@ -45,7 +45,7 @@ try {
  assert.equal((await scalar('SELECT public.knowledge_graph() v')).edges[0].weight,1);
  assert.equal((await scalar('SELECT public.knowledge_graph() v')).groups[0].concepts.length,2);
  // Scientific records are independently authenticated, typed and original-bound.
- const bib={source:'PubMed',fetched_at:'2026-10-08T03:00:00Z',pmid:'12345',title:'Original',doi:null,pmcid:null,journal:'Urology',volume:'1',issue:'2',pages:'1-3',authors:['Fixture Author'],issns:[],dates:[{kind:'journal',date:'2024',precision:'year',raw:'2024'}],publication_types:['Journal Article'],mesh:[],registry_ids:['NCT12345678'],references:[{source_id:'ref1',pmid:'12346',doi:null}],related_articles:[]};
+ const bib={source:'PubMed',fetched_at:'2026-10-08T03:00:00Z',pmid:'12345',title:'Original',doi:null,pmcid:null,journal:'Urology',volume:'1',issue:'2',pages:'1-3',authors:['Fixture Author'],issns:[],dates:[{kind:'journal',date:'2024',precision:'year',raw:'2024'}],publication_types:['Journal Article'],mesh:[],registry_ids:['NCT12345678'],references:[{source_id:'ref1',pmid:'12346',doi:null},{source_id:'original-ref-2',pmid:'12348',doi:null}],related_articles:[]};
  const fact={id:'f'.repeat(24),field:'sample_size',value:'195 men',locations:['p-0000000']};
  const numerical={id:'e'.repeat(24),measure:'HR',estimate:'0.70',ci_low:'0.50',ci_high:'0.90',ci_level:'95',outcome:'recurrence',population:'195 men',comparison:null,timepoint:'12 months',unit:null,adjustment:'adjusted',locations:['p-0000000']};
  const science={version:'scientific-v1',pmid:'12345',title:'Original',content_hash:hash,bibliography:bib,facts:[fact],results:[numerical],terminology:[],registry_mentions:[],provenance:{model:'Fixture',recipe:'scientific-v1',extracted_at:'2026-10-08T03:00:00Z',validation:'source_checked',review_status:'unreviewed',chunks:2,rejected_candidates:1},coverage:{facts_total:1,results_total:1,facts_published:1,results_published:1}};
@@ -57,6 +57,8 @@ try {
  await assert.rejects(()=>publishScience({...science,results:[{...numerical,locations:['p-9999999']}]}));
  await assert.rejects(()=>publishScience({...science,provenance:{...science.provenance,review_status:'human_reviewed'}}));
  await publishScience();await publishScience();
+ const mergedReferences=await scalar("SELECT public.knowledge_network('{\"relation\":\"citations\"}') v");
+ assert.equal(mergedReferences.coverage.reference_identifiers,2,'Retain original-reference supplements without duplicating PubMed identifiers');
  const scienceDetail=await scalar('SELECT public.knowledge_paper($1) v',['12345']);
  assert.equal(scienceDetail.science.results[0].estimate,'0.70');assert.equal(scienceDetail.science.bibliography.dates[0].date,'2024');
  assert.equal(scienceDetail.science.provenance.review_status,'unreviewed');
