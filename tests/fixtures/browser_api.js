@@ -114,6 +114,8 @@ const db = {
   research_topic_entries: [],
   research_document_exports: [],
   reader_open_events: [],
+  content_sessions: [],
+  usage_actions: [],
   profiles: [
     {
       id: "reader",
@@ -748,6 +750,29 @@ export const supabase = {
         insight: ready(p) ? p.summary_ko.split("\n")[1] : "",
         read: state(p.id).reading_state === "read",
       });
+      if (name === "record_reader_content") {
+        if (!db.papers.some(p=>p.pmid===args.p_pmid)) return {error:{message:"Unknown paper"}};
+        let row=db.content_sessions.find(s=>s.session===args.p_session);
+        if (!row) { row={session:args.p_session,pmid:args.p_pmid,kind:args.p_kind,seconds:0,sections:[]};db.content_sessions.push(row); }
+        row.seconds=Math.max(row.seconds,args.p_seconds);row.sections=[...new Set([...row.sections,...args.p_sections])];
+        return {data:null,error:null};
+      }
+      if (name === "record_reference_export") {
+        if (!db.usage_actions.some(e=>e.id===args.p_event)) db.usage_actions.push({id:args.p_event,kind:"export"});
+        return {data:null,error:null};
+      }
+      if (name === "admin_reader_usage") {
+        const sessions=db.content_sessions, unique=items=>new Set(items.map(s=>s.pmid)).size;
+        const viewed=unique(sessions),engaged=unique(sessions.filter(s=>s.seconds>=(s.kind==="summary"?30:60)&&s.sections.length));
+        const count=kind=>db.usage_actions.filter(a=>a.kind===kind).length;
+        return {data:{days:args.p_days,measured_since:new Date().toISOString(),window_start:new Date().toISOString(),
+          active_users:viewed||db.usage_actions.length?1:0,viewing_users:viewed?1:0,engaged_users:engaged?1:0,usage_users:db.usage_actions.length?1:0,returning_users:0,
+          viewed_user_papers:viewed,used_user_papers:new Set(db.usage_actions.filter(a=>sessions.some(s=>db.papers.find(p=>p.pmid===s.pmid)?.id===a.paper_id)).map(a=>a.paper_id)).size,
+          daily:Array.from({length:args.p_days},(_,i)=>({day:new Date(Date.now()+9*3600000-(args.p_days-1-i)*86400000).toISOString().slice(0,10),viewing_users:i===args.p_days-1&&viewed?1:0,usage_users:i===args.p_days-1&&db.usage_actions.length?1:0})),
+          users:[{name:"Usage fixture",summary_papers:unique(sessions.filter(s=>s.kind==="summary")),original_papers:unique(sessions.filter(s=>s.kind==="original")),
+          engaged_papers:engaged,active_seconds:sessions.reduce((n,s)=>n+s.seconds,0),active_days:viewed?1:0,last_activity_at:viewed?new Date().toISOString():null,
+          saves:count("save"),likes:0,notes:count("note"),project_adds:0,screenings:0,extractions:0,exports:count("export"),writing:0}]},error:null};
+      }
       if (name === "record_reader_open") {
         const paper = db.papers.find(p => p.pmid === args.p_pmid);
         if (!user || !paper || !["detail","original","publisher"].includes(args.p_kind))
@@ -825,6 +850,9 @@ export const supabase = {
         };
       }
       if (name === "update_reader_state") {
+        const previous=state(args.p_paper_id);
+        if(args.p_patch.saved===true&&!previous.saved) db.usage_actions.push({kind:"save",paper_id:args.p_paper_id});
+        if(args.p_patch.note&&args.p_patch.note!==previous.note) db.usage_actions.push({kind:"note",paper_id:args.p_paper_id});
         if (scenario === "slow-daily")
           await new Promise((r) => setTimeout(r, 500));
         if (

@@ -66,7 +66,12 @@ export function SummaryContent({ paper: p, abstract = true, facts = true }) {
   return (
     <>
       {hasFulltextSummary(p) ? (
-        <section className="reader-summary" aria-label="본문 기반 세 줄 요약">
+        <section
+          className="reader-summary"
+          aria-label="본문 기반 세 줄 요약"
+          data-reading-pmid={p.pmid}
+          data-reading-kind="summary"
+        >
           <h2>본문 기반 세 줄 요약</h2>
           <ol>
             {summaryLines(p).map((line, i) => (

@@ -8,8 +8,7 @@ import {
   publisherLink,
   sharedLink,
   plainCitation,
-  exportReferences,
-  download,
+  downloadReferences,
   cachePaper,
   cachedPapers,
   removeCached,
@@ -17,6 +16,7 @@ import {
 } from "../lib/workspace";
 import { ReaderPage, Resource, useResource } from "../components/ReaderUI";
 import { useReading } from "../lib/useReading";
+import { useContentReading } from "../lib/contentReading";
 import { FIELDS, IntegrityNotice, SummaryContent, StudyContent } from "../components/ReadingContent";
 export { FIELDS };
 export default function Paper() {
@@ -40,6 +40,12 @@ export default function Paper() {
     [projects, setProjects] = useState([]);
   useReading(user.id, r.data?.paper?.id, r.data?.offline, r.data?.state?.position);
   const tab = params.get("tab") || "summary";
+  useContentReading(
+    user,
+    r.data?.paper?.pmid,
+    "summary",
+    !r.data?.offline && tab === "summary" && !!r.data?.paper,
+  );
   useEffect(() => {
     setMessage("");
     setReport(false);
@@ -320,13 +326,13 @@ export default function Paper() {
                 <div className="reader-actions">
                   <button
                     className="btn-secondary"
-                    onClick={() => download("PMID" + p.pmid + ".ris", exportReferences([p], "ris"))}
+                    onClick={() => downloadReferences([p], "ris", "PMID" + p.pmid + ".ris")}
                   >
                     RIS 내보내기
                   </button>
                   <button
                     className="btn-secondary"
-                    onClick={() => download("PMID" + p.pmid + ".bib", exportReferences([p], "bib"))}
+                    onClick={() => downloadReferences([p], "bib", "PMID" + p.pmid + ".bib")}
                   >
                     BibTeX 내보내기
                   </button>

@@ -6,6 +6,7 @@ import { readOriginal } from "../lib/fulltext";
 import ArticleFigure from "../components/ArticleFigure";
 import OriginalBody from "../components/OriginalBody";
 import { ErrorNotice, Loading } from "../components/Status";
+import { useContentReading } from "../lib/contentReading";
 
 export default function FullText() {
   const { pmid } = useParams();
@@ -50,6 +51,7 @@ export default function FullText() {
   }, [pmid, user.id, retry]);
   // Clear previous content immediately on a route or authenticated identity change.
   const article = result?.userId === user.id && result?.pmid === pmid ? result.article : null;
+  useContentReading(user, pmid, "original", !!article && tab === "body");
   useEffect(() => {
     setLocatorError("");
     if (!article || !location.hash) return;
@@ -70,7 +72,7 @@ export default function FullText() {
     return () => cancelAnimationFrame(frame);
   }, [article, location.hash, expectedHash]);
   return (
-    <div className="h-full overflow-y-auto">
+    <div className="h-full overflow-y-auto" data-original-scroll>
       <div className="page-shell max-w-4xl">
         <Link
           to={safeReturn(location.state?.returnTo || "/papers/" + pmid)}
@@ -110,6 +112,8 @@ export default function FullText() {
                   href={`https://doi.org/${encodeURIComponent(article.doi)}`}
                   target="_blank"
                   rel="noopener noreferrer"
+                  data-paper-open="publisher"
+                  data-paper-pmid={pmid}
                 >
                   출판사 원문
                 </a>
@@ -159,6 +163,8 @@ export default function FullText() {
             </div>
             <div id="body-panel" role="tabpanel" aria-labelledby="body-tab" hidden={tab !== "body"}>
               <article
+                data-reading-pmid={pmid}
+                data-reading-kind="original"
                 aria-label="논문 본문"
                 className="panel whitespace-pre-wrap break-words leading-[1.85]"
                 style={{ fontSize, overflowWrap: "anywhere" }}

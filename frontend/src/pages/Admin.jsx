@@ -2,6 +2,7 @@ import IntegrityReview from "../components/IntegrityReview";
 import IssueReview from "../components/IssueReview";
 import { useState } from "react";
 import AdminPanel from "../components/AdminPanel";
+import UsageAnalytics from "../components/UsageAnalytics";
 import CollectionOverview, { ProcessingHealth } from "../components/CollectionOverview";
 import { useAuth } from "../lib/auth";
 import { Users, FileText, Heart, Clock } from "lucide-react";
@@ -259,6 +260,7 @@ export default function Admin() {
         </AdminPanel>
 
         {/* User engagement */}
+        <UsageAnalytics refresh={retry} />
         <AdminPanel title="User Engagement" rpc="admin_user_engagement" refresh={retry} pollMs={30000} list>
           {(users) => (
             <>

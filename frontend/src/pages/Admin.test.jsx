@@ -15,6 +15,20 @@ function query(result) {
   return promise;
 }
 function response(name) {
+  if (name === "admin_reader_usage")
+    return {
+      data: {
+        users: [],
+        daily: [],
+        active_users: 0,
+        viewing_users: 0,
+        engaged_users: 0,
+        usage_users: 0,
+        returning_users: 0,
+        viewed_user_papers: 0,
+        used_user_papers: 0,
+      },
+    };
   if (name === "admin_integrity_queue")
     return {
       data: {
@@ -242,6 +256,7 @@ it("polls collection, worker and journal counts, preserving visible data during 
   ).toEqual([
     "admin_catalog_status",
     "admin_journal_fulltext_counts",
+    "admin_reader_usage",
     "admin_user_engagement",
     "admin_worker_status",
   ]);
@@ -271,6 +286,7 @@ it("polls collection, worker and journal counts, preserving visible data during 
       ![
         "admin_catalog_status",
         "admin_journal_fulltext_counts",
+        "admin_reader_usage",
         "admin_user_engagement",
         "admin_worker_status",
       ].includes(name),
