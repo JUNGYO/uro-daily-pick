@@ -64,10 +64,10 @@ export function knowledgeRpc(name, args, scenario, papers) {
         concept: nodes.find((n) => n.id === args.p_id) || nodes[0],
         wiki: {
           revision: "r1",
-          status: scenario === "knowledge-stale" ? "updating" : "ready",
+          status: scenario === "knowledge-stale" ? "updating" : scenario === "knowledge-indexed" ? "indexed" : "ready",
           updated_at: "2026-10-08T01:00:00Z",
           paragraphs:
-            scenario === "knowledge-stale"
+            ["knowledge-stale", "knowledge-indexed"].includes(scenario)
               ? []
               : [
                   {

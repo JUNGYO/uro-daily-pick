@@ -34,6 +34,9 @@ try {
  const detail=await scalar('SELECT public.knowledge_page($1) v',[cid]);assert.equal(detail.wiki.status,'ready');assert.equal(detail.papers.length,1);assert.equal(detail.neighbors[0].shared_papers,1);
  assert.equal((await scalar('SELECT public.knowledge_graph() v')).edges[0].weight,1);
  assert.equal((await scalar('SELECT public.knowledge_graph() v')).groups[0].concepts.length,2);
+ await publish('page',{id:cid2,version:'corpus-v1',paragraphs:[]});
+ assert.equal((await scalar('SELECT public.knowledge_page($1) v',[cid2])).wiki.status,'indexed');
+ assert.equal((await scalar('SELECT public.knowledge_search() v')).items.find(c=>c.id===cid2).status,'indexed');
  await assert.rejects(()=>db.query('SELECT * FROM app_private.knowledge_documents'),{code:'42501'});
  await assert.rejects(()=>publish('page',{...page,paragraphs:[{...page.paragraphs[0],sources:[{pmid:'12345',content_hash:'f'.repeat(64),locations:['p-0000000']}]}]}));
  await assert.rejects(()=>publish('page',{...page,paragraphs:[{...page.paragraphs[0],sources:[{pmid:'12345',content_hash:hash,locations:['p-9999999']}]}]}));

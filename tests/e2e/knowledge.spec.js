@@ -39,3 +39,10 @@ test('empty and failed knowledge have honest independent states',async({page})=>
  await expect(page.getByRole('alert')).toBeVisible();
  await expect(page.getByRole('link',{name:'문헌 탐색',exact:true}).last()).toBeVisible();
 });
+
+test('indexed concepts without findings offer originals without promising a pending page',async({page})=>{
+ await page.goto('/uro-daily-pick/knowledge/'+'a'.repeat(24)+'?scenario=knowledge-indexed');
+ await expect(page.getByRole('status')).toContainText('검증된 결과가 없어 연결 논문을 제공합니다');
+ await expect(page.getByRole('article',{name:'원문 기반 지식 문서'})).toHaveCount(0);
+ await expect(page.getByRole('link',{name:'원문 읽기'})).toHaveCount(3);
+});

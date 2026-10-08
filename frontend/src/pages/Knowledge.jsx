@@ -282,6 +282,8 @@ function KnowledgeDetail({ id }) {
               <p className="reader-empty" role="status">
                 {data.wiki?.status === "updating"
                   ? "출처가 변경되어 지식 문서를 갱신하고 있습니다. 아래에서 현재 연결된 논문을 확인할 수 있습니다."
+                  : data.wiki?.status === "indexed"
+                  ? "원문에서 확인된 개념입니다. 별도 지식 설명을 작성할 만큼 검증된 결과가 없어 연결 논문을 제공합니다."
                   : "지식 문서를 작성하고 있습니다. 연결된 논문은 먼저 탐색할 수 있습니다."}
               </p>
             )}
