@@ -8,7 +8,7 @@ const scalar=async(q,p=[]) => (await db.query(q,p)).rows[0].v;
 const publish=(kind,payload,rev=revision)=>scalar('SELECT public.publish_knowledge($1,$2,$3,$4,$5) v',[worker,token,kind,rev,payload]);
 const concept={id:cid,label:'prostate cancer',label_ko:'전립선암',kind:'condition',aliases:[]};
 const source={pmid:'12345',title:'Original',content_hash:hash,version:'corpus-v1',concepts:[concept,{...concept,id:cid2,label:'active surveillance',label_ko:'적극적 감시',kind:'intervention'}]};
-const page={id:cid,version:'corpus-v1',paragraphs:[{text:'가상 검증용 지식 문장입니다.',sources:[{pmid:'12345',content_hash:hash,locations:['p-0000000']}]}]};
+const page={id:cid,version:'corpus-v1-en',paragraphs:[{text:'This is a synthetic knowledge sentence for testing.',sources:[{pmid:'12345',content_hash:hash,locations:['p-0000000']}]}]};
 try {
  await db.exec(`CREATE ROLE anon;CREATE ROLE authenticated;CREATE ROLE service_role BYPASSRLS;CREATE SCHEMA auth;
  CREATE TABLE auth.users(id uuid PRIMARY KEY,email text,email_confirmed_at timestamptz,raw_user_meta_data jsonb);
@@ -27,6 +27,14 @@ try {
  await assert.rejects(()=>publish('source',{...source,content_text:'raw original'}));
  assert.deepEqual(await publish('source',source),{id:'12345',revision});
  await publish('source',source);await publish('page',page);
+ await assert.rejects(()=>publish('page',{...page,version:'corpus-v1'}));
+ await assert.rejects(()=>publish('page',{...page,paragraphs:[{...page.paragraphs[0],text:'한국어 문장은 게시할 수 없습니다.'}]}));
+ await db.exec("RESET ROLE;UPDATE app_private.knowledge_pages SET version='corpus-v1',stale=false");
+ await db.exec(await readFile(new URL('20261008024637_knowledge_english.sql',root),'utf8'));
+ await db.query("SELECT set_config('request.jwt.claim.sub',$1,false)",[reader]);await db.exec('SET ROLE authenticated');
+ assert.equal((await scalar('SELECT public.knowledge_page($1) v',[cid])).wiki.status,'updating');
+ assert.deepEqual((await scalar('SELECT public.knowledge_page($1) v',[cid])).wiki.paragraphs,[]);
+ await publish('page',page);
  await publish('network',{version:'corpus-v1',scope_concepts:2,source_documents:1,groups:[{id:cid,label:'전립선암',concepts:[cid,cid2]}]});
  await db.exec('RESET ROLE');await db.query("SELECT set_config('request.jwt.claim.sub',$1,false)",[reader]);await db.exec('SET ROLE authenticated');
  const search=await scalar('SELECT public.knowledge_search() v');assert.equal(search.indexed_documents,1);assert.equal(search.items[0].document_count,1);
@@ -34,7 +42,7 @@ try {
  const detail=await scalar('SELECT public.knowledge_page($1) v',[cid]);assert.equal(detail.wiki.status,'ready');assert.equal(detail.papers.length,1);assert.equal(detail.neighbors[0].shared_papers,1);
  assert.equal((await scalar('SELECT public.knowledge_graph() v')).edges[0].weight,1);
  assert.equal((await scalar('SELECT public.knowledge_graph() v')).groups[0].concepts.length,2);
- await publish('page',{id:cid2,version:'corpus-v1',paragraphs:[]});
+ await publish('page',{id:cid2,version:'corpus-v1-en',paragraphs:[]});
  assert.equal((await scalar('SELECT public.knowledge_page($1) v',[cid2])).wiki.status,'indexed');
  assert.equal((await scalar('SELECT public.knowledge_search() v')).items.find(c=>c.id===cid2).status,'indexed');
  await assert.rejects(()=>db.query('SELECT * FROM app_private.knowledge_documents'),{code:'42501'});

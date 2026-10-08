@@ -8,8 +8,8 @@ import unittest
 from unittest.mock import patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'scripts'))
-from knowledge import KnowledgeStore, validate_fragment, accepted_fragment, validate_page, concept_id, digest, communities
-from knowledge_worker import extract_step, sync_step
+from knowledge import PAGE_VERSION, KnowledgeStore, validate_fragment, accepted_fragment, validate_page, concept_id, digest, communities
+from knowledge_worker import extract_step, page_step, sync_step
 
 
 TEXT = 'Patients with prostate cancer were assessed. The study included 25 patients. Veterans Affairs supplied data.'
@@ -90,10 +90,36 @@ class KnowledgeTests(unittest.TestCase):
         self.assertNotIn('evidence', json.dumps(payload))
         self.assertNotIn(TEXT, json.dumps(payload))
         inputs = self.store.page_inputs(concept_id('condition', 'prostate cancer'))
-        page = validate_page({'paragraphs': [{'text': '관찰 연구에는 25명이 포함되었다.', 'finding_ids': [inputs[0]['id']]}]}, inputs)
+        page = validate_page({'paragraphs': [{'text': 'The observational study included 25 patients.', 'finding_ids': [inputs[0]['id']]}]}, inputs)
         self.assertEqual(page[0]['sources'][0]['locations'], ['p-0000000'])
         self.assertNotIn('quote', json.dumps(page))
-        with self.assertRaises(ValueError): validate_page({'paragraphs': [{'text': '250명 연구 결과이다.', 'finding_ids': [inputs[0]['id']]}]}, inputs)
+        with self.assertRaises(ValueError): validate_page({'paragraphs': [{'text': 'The study included 250 patients.', 'finding_ids': [inputs[0]['id']]}]}, inputs)
+
+    def test_korean_findings_can_support_english_pages_but_never_korean_prose(self):
+        self.store.complete(self.row(), [FRAGMENT])
+        inputs = self.store.page_inputs(concept_id('condition', 'prostate cancer'))
+        for text in ['연구에는 25명이 포함되었다.', 'This 연구 included 25 patients.', '25 patients 研究']:
+            with self.assertRaisesRegex(ValueError, 'English'):
+                validate_page({'paragraphs': [{'text': text, 'finding_ids': [inputs[0]['id']]}]}, inputs)
+
+    def test_page_recipe_upgrade_preserves_source_checkpoints_and_requeues_once(self):
+        self.store.complete(self.row(), [FRAGMENT])
+        cid = concept_id('condition', 'prostate cancer')
+        self.store.stage('page', cid, {'version': 'corpus-v1', 'paragraphs': []})
+        self.store.db.execute('UPDATE concepts SET dirty=0'); self.store.db.commit()
+        before = [tuple(r) for r in self.store.db.execute('SELECT * FROM findings')]
+        self.store.prepare_pages()
+        self.assertEqual(self.row()['state'], 'done')
+        self.assertEqual(before, [tuple(r) for r in self.store.db.execute('SELECT * FROM findings')])
+        self.assertEqual(self.store.db.execute('SELECT dirty FROM concepts').fetchone()[0], 1)
+        self.assertEqual(self.store.db.execute("SELECT pending FROM publications WHERE kind='page'").fetchone()[0], 0)
+        with patch('knowledge_worker.ask', return_value=[{'text':'The study included 25 patients.','sources':[]}]) as ask:
+            self.assertTrue(page_step(self.store, self.store.directory, None))
+        self.assertIn('English knowledge page', ask.call_args.args[0])
+        self.assertEqual(json.loads(ask.call_args.args[1])['findings'][0]['source_excerpts'], ['The study included 25 patients.'])
+        self.assertEqual(json.loads(self.store.db.execute("SELECT payload FROM publications WHERE kind='page'").fetchone()[0])['version'], PAGE_VERSION)
+        self.store.prepare_pages()
+        self.assertEqual(self.store.db.execute('SELECT dirty FROM concepts').fetchone()[0], 0)
 
     def test_checkpoint_resumes_without_model_call(self):
         with self.store.db:

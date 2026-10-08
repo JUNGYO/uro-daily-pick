@@ -33,12 +33,12 @@ export default function Insights() {
   const [params] = useSearchParams();
   if (params.get("view") === "knowledge")
     return (
-      <div className="insights-page h-full overflow-y-auto">
+      <div className="insights-page h-full overflow-y-auto" lang="en">
         <div className="p-4 sm:p-6 max-w-[1000px] mx-auto">
-          <h1 className="text-[1.111rem] font-bold text-text1 mb-5">전체 문헌 지도</h1>
+          <h1 className="text-[1.111rem] font-bold text-text1 mb-5">Literature Map</h1>
           <nav className="knowledge-nav">
-            <Link to="/insights">내 연구 활동</Link>
-            <Link to="/knowledge">지식 검색</Link>
+            <Link to="/insights">My research activity</Link>
+            <Link to="/knowledge">Knowledge Explorer</Link>
           </nav>
           <KnowledgeMap focus={params.get("concept") || null} />
         </div>
@@ -188,7 +188,7 @@ function PersonalInsights() {
       <div className="p-4 sm:p-6 max-w-[800px] mx-auto">
         <h1 className="text-[1.111rem] font-bold text-text1 mb-5">Research Insights</h1>
         <nav className="knowledge-nav">
-          <Link to="/insights?view=knowledge">전체 문헌 지도</Link>
+          <Link to="/insights?view=knowledge">Literature Map</Link>
         </nav>
         <div className="insights-controls">
           <label>

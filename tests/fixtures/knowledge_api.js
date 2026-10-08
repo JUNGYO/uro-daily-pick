@@ -71,7 +71,7 @@ export function knowledgeRpc(name, args, scenario, papers) {
               ? []
               : [
                   {
-                    text: "이 문장은 화면 검증을 위한 가상 자료입니다. 연구 대상과 비교군이 서로 달라 각 논문의 조건을 확인해야 합니다.",
+                    text: "This is synthetic material for interface testing. Findings depend on study populations and comparisons; check each paper for context.",
                     sources: [
                       {
                         pmid: papers[0].pmid,
