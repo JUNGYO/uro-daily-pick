@@ -361,6 +361,11 @@ export default function Discover() {
         <Link to="/library?tab=searches">저장된 검색</Link>
       </div>
       <p role="status">{message}</p>
+      <div className="reader-actions">
+        <Link to={"/knowledge" + (params.get("q") ? "?q=" + encodeURIComponent(params.get("q")) : "")}>
+          관련 지식 탐색
+        </Link>
+      </div>
       <Resource resource={r}>
         {r.data && (
           <>

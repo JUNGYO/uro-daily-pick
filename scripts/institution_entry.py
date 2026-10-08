@@ -65,11 +65,14 @@ def main():
             database.execute("PRAGMA journal_mode=WAL")
         # No cloud call precedes local work: a full or unavailable database must
         # never prevent durable discovery, acquisition or inference from starting.
-        for phase in ("catalog", "sync", "collect", "summarize", "figures", "research"):
+        for phase in ("catalog", "sync", "collect", "summarize", "figures", "research", "knowledge"):
             output = (state / (phase + ".log")).open("a", encoding="utf-8", buffering=1)
             logs.append(output)
             output.write(f"\n{datetime.now(timezone.utc).isoformat()} {phase} started\n")
-            if phase in {"catalog", "sync"}:
+            if phase == "knowledge":
+                command = [sys.executable, "-u", str(release / "knowledge_worker.py"),
+                           "--state-dir", str(state), "--max-seconds", "3300"]
+            elif phase in {"catalog", "sync"}:
                 script = "local_catalog_worker.py" if phase == "catalog" else "catalog_sync.py"
                 command = [sys.executable, "-u", str(release / script),
                            "--state-dir", str(state), "--max-seconds", "3560" if phase == "sync" else "3300"]
