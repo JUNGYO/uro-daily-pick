@@ -102,3 +102,22 @@ test('dense atlas keeps labels separate on desktop and exposes all concepts on m
  await page.screenshot({path:info.outputPath('atlas-dense-mobile.png')});
  await page.getByRole('button',{name:'Show accessible concept list'}).click();await expect(page.locator('.atlas-node-list li')).toHaveCount(24);
 });
+
+test('atlas reflects new indexed papers without losing the selected wiki or graph view',async({page})=>{
+ await page.clock.install();
+ await page.goto('/uro-daily-pick/insights?scenario=atlas-live&concept='+'a'.repeat(24));
+ await expect(page.locator('.atlas-status')).toContainText('30 full texts indexed');
+ await expect(page.getByRole('article',{name:'Source-based knowledge'})).toBeVisible();
+ await page.getByRole('button',{name:'Zoom in'}).click();
+ await page.getByRole('button',{name:'Research record',exact:true}).first().click();
+ await expect(page.getByRole('region',{name:'Bibliographic record'})).toBeVisible();
+ const transform=await page.locator('svg.atlas-graph > g').first().getAttribute('transform');
+ await page.clock.runFor(30050);
+ await expect(page.locator('.atlas-status')).toContainText('31 full texts indexed');
+ await expect(page.getByRole('article',{name:'Source-based knowledge'})).toBeVisible();
+ await expect(page.getByRole('region',{name:'Bibliographic record'})).toBeVisible();
+ expect(await page.locator('svg.atlas-graph > g').first().getAttribute('transform')).toBe(transform);
+ await expect(page.getByLabel('Knowledge refresh')).toContainText('Refreshes automatically');
+ await page.getByRole('button',{name:'Refresh',exact:true}).click();
+ await expect(page.locator('.atlas-status')).toContainText('32 full texts indexed');
+});
