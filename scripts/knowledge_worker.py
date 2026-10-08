@@ -226,7 +226,7 @@ def refresh_bibliography(store):
 def sync_step(store, service, deadline):
     service.sync_deadline = deadline
     for row in store.db.execute("""SELECT * FROM publications WHERE pending=1 AND retry_at<=?
-      ORDER BY CASE kind WHEN 'source' THEN 0 WHEN 'science' THEN 1 WHEN 'page' THEN 2 ELSE 3 END,id LIMIT 10""", (time.time(),)).fetchall():
+      ORDER BY CASE kind WHEN 'source' THEN 0 WHEN 'terms' THEN 1 WHEN 'bibliography' THEN 2 WHEN 'science' THEN 3 WHEN 'page' THEN 4 ELSE 5 END,id LIMIT 10""", (time.time(),)).fetchall():
         payload = json.loads(row["payload"])
         try:
             args = {"p_worker_id": service.config["id"], "p_token": service.token,
@@ -241,6 +241,28 @@ def sync_step(store, service, deadline):
             with store.db:
                 store.db.execute("UPDATE publications SET retry_at=? WHERE kind=? AND id=? AND revision=?",
                     (time.time()+120, row["kind"], row["id"], row["revision"]))
+
+
+def refresh_network_bibliography(store, limit=2):
+    # Citation coverage is metadata work; it must not wait for scientific LLM
+    # extraction to finish. The published original's exact identity is retained.
+    store.db.execute('CREATE TABLE IF NOT EXISTS network_bibliography(pmid TEXT PRIMARY KEY,content_hash TEXT NOT NULL,next_at REAL NOT NULL)')
+    rows=store.db.execute("""SELECT s.paper,p.payload FROM publications p JOIN sources s ON s.pmid=p.id
+        LEFT JOIN network_bibliography b ON b.pmid=p.id
+        WHERE p.kind='source' AND (b.pmid IS NULL OR b.content_hash<>json_extract(p.payload,'$.content_hash') OR b.next_at<=?)
+        ORDER BY coalesce(b.next_at,0),p.id LIMIT ?""",(time.time(),limit)).fetchall()
+    for row in rows:
+        paper=json.loads(row['paper']);source=json.loads(row['payload'])
+        bib=scientific.bibliography(paper,store.directory)
+        with store.db:
+            store.db.execute('INSERT OR REPLACE INTO network_bibliography VALUES (?,?,?)',
+                (paper['pmid'],source['content_hash'],time.time()+(86400 if bib['source']=='PubMed' else 3600)))
+            if bib['source']=='PubMed':
+                store.stage('bibliography',paper['pmid'],{'version':VERSION,'pmid':paper['pmid'],
+                    'title':source['title'],'content_hash':source['content_hash'],'source':'PubMed',
+                    'fetched_at':bib['fetched_at'],'references':bib['references']})
+        time.sleep(0.4)
+    return len(rows)
 
 
 def main():
@@ -261,6 +283,7 @@ def main():
     if not _try_lock(lock):
         store.close(); lock.close(); return
     deadline = time.monotonic() + max(5, min(args.max_seconds, 86400))
+    terminology = None
     try:
         store.prepare_pages()
         if args.scan_only:
@@ -269,12 +292,16 @@ def main():
             return
         from institution_worker import Service
         service = Service(state)
+        from knowledge_terms import ensure_index, reconcile_terms
+        terminology = ensure_index(target)
         last_scan = last_sync = last_groups = 0
         iteration = 0
         while deadline - time.monotonic() > 45:
             if time.monotonic() - last_scan > 30:
                 scan_catalog(store, state); last_scan = time.monotonic()
             if time.monotonic() - last_sync > 15:
+                reconcile_terms(store,terminology)
+                refresh_network_bibliography(store)
                 sync_step(store, service, deadline-5); last_sync = time.monotonic()
             if time.monotonic() - last_groups > 600:
                 store.build_groups(); last_groups = time.monotonic()
@@ -299,6 +326,8 @@ def main():
     except SummaryBudgetExpired:
         pass
     finally:
+        if terminology is not None:
+            terminology.close()
         store.set_meta("heartbeat", {"at": now(), "state": "idle"})
         _unlock(lock); lock.close(); store.close()
 

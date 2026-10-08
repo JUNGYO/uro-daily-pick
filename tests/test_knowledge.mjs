@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {networkCases} from './network_db_cases.mjs';
 import {readFile,readdir} from 'node:fs/promises';
 import {PGlite} from '../frontend/node_modules/@electric-sql/pglite/dist/index.js';
 const db=new PGlite();
@@ -27,6 +28,7 @@ try {
  await assert.rejects(()=>publish('source',{...source,content_text:'raw original'}));
  assert.deepEqual(await publish('source',source),{id:'12345',revision});
  await publish('source',source);await publish('page',page);
+ await networkCases(db,{publish,scalar,source,page,worker,token,reader,cid,cid2,hash,revision});
  await assert.rejects(()=>publish('page',{...page,version:'corpus-v1'}));
  await assert.rejects(()=>publish('page',{...page,paragraphs:[{...page.paragraphs[0],text:'한국어 문장은 게시할 수 없습니다.'}]}));
  await db.exec("RESET ROLE;UPDATE app_private.knowledge_pages SET version='corpus-v1',stale=false");
