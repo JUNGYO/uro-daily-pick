@@ -65,9 +65,11 @@ function ConceptPreview({ data }) {
       <h2>{item.label}</h2>
       <p>{num(item.document_count)} distinct papers in the filtered corpus</p>
       <p className="network-authority">
-        {item.resolution === "exact"
-          ? `MeSH ${item.vocabulary_year} · ${item.concept_ui} · Exact concept match`
-          : "No unambiguous MeSH match. The extracted label is retained without assigning a scientific category."}
+        {item.concept_ui
+          ? `MeSH ${item.vocabulary_year} · ${item.concept_ui} · Full term or definition verified within each paper`
+          : item.resolution === "definition"
+            ? "Expanded from an explicit definition in the source paper. No MeSH category is assigned."
+            : "No unambiguous MeSH match. Undeclared abbreviations are kept separate by paper; identical long-form labels are grouped."}
       </p>
       {item.source_labels?.length > 1 && (
         <details>
@@ -361,19 +363,52 @@ export default function ResearchAtlas() {
                     <ConceptPreview data={d} />
                   ) : relation === "citations" && selected ? (
                     <>
-                      <span className="atlas-eyebrow">SELECTED PAPER</span>
-                      <h2>{selectedNode?.label || `PMID ${selected}`}</h2>
+                      <span className="atlas-eyebrow">{peer ? "IDENTIFIED CITATION" : "SELECTED PAPER"}</span>
+                      {(d.citation_selection?.length ? d.citation_selection : [selectedNode])
+                        .filter(Boolean)
+                        .map((n, i) => (
+                          <section key={n.id} className="network-note">
+                            {peer && <p>{i === 0 ? "Citing paper" : "Referenced paper"}</p>}
+                            <h2>{n.label}</h2>
+                            <p>
+                              {n.matching_source === false
+                                ? "Reference metadata · Outside the matching indexed papers"
+                                : "Indexed full text"}
+                            </p>
+                            {n.in_catalog && n.pmid && (
+                              <Link className="atlas-text-link" to={`/papers/${n.pmid}`}>
+                                Open paper <ArrowUpRight size={16} />
+                              </Link>
+                            )}
+                            {!n.in_catalog && n.pmid && (
+                              <a
+                                className="atlas-text-link"
+                                href={`https://pubmed.ncbi.nlm.nih.gov/${n.pmid}/`}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                View on PubMed <ArrowUpRight size={16} />
+                              </a>
+                            )}
+                            {!n.in_catalog && !n.pmid && n.doi && (
+                              <a
+                                className="atlas-text-link"
+                                href={`https://doi.org/${encodeURIComponent(n.doi)}`}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                Open DOI <ArrowUpRight size={16} />
+                              </a>
+                            )}
+                            {n.integrity_status && n.integrity_status !== "current" && (
+                              <p>Publication status: {n.integrity_status}</p>
+                            )}
+                          </section>
+                        ))}
                       <p>
-                        Arrows point from a citing paper to its referenced paper.{" "}
-                        {peer
-                          ? "The two selected papers are listed below."
-                          : selectedNode?.metadata_available
-                            ? "Reference metadata retrieved; the list may be incomplete."
-                            : "Reference metadata has not been retrieved."}
+                        Arrows follow explicit PMID or DOI references. A reference node does not imply that
+                        its full text has been acquired or indexed.
                       </p>
-                      <Link className="atlas-text-link" to={`/papers/${selected}`}>
-                        Read paper <ArrowUpRight size={16} />
-                      </Link>
                     </>
                   ) : (
                     <>
@@ -393,8 +428,10 @@ export default function ResearchAtlas() {
                         ))}
                       </div>
                       <p className="atlas-footnote">
-                        This map covers indexed full texts, not every catalog record. Counts describe papers,
-                        not independent studies.
+                        {relation === "citations"
+                          ? "This map connects indexed papers to their identified references."
+                          : "This map covers indexed full texts, not every catalog record."}{" "}
+                        Counts describe papers, not independent studies.
                       </p>
                     </>
                   )}
@@ -406,11 +443,13 @@ export default function ResearchAtlas() {
                   <div>
                     <span className="atlas-eyebrow">CONNECTED LITERATURE</span>
                     <h2>
-                      {peer
-                        ? "Papers behind this connection"
-                        : selected
-                          ? "Papers behind this selection"
-                          : "Papers in this view"}
+                      {relation === "citations" && selected
+                        ? "Indexed papers behind this citation"
+                        : peer
+                          ? "Papers behind this connection"
+                          : selected
+                            ? "Papers behind this selection"
+                            : "Papers in this view"}
                     </h2>
                   </div>
                   <span>{num(d.selected_documents)} papers</span>

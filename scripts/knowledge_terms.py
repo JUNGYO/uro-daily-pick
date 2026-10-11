@@ -116,6 +116,11 @@ class MeshIndex:
         rows=self.db.execute('SELECT * FROM terms WHERE term=? ORDER BY concept,descriptor',(key(label),)).fetchall()
         identities={r['concept'] for r in rows}
         base={'matched_label':label,'vocabulary':'MeSH','year':self.meta['year'],'checksum':self.meta['sha256']}
+        # An entry term can be unique in MeSH but ambiguous in an article (PCA
+        # is also prostate cancer / principal component analysis). Dictionary
+        # uniqueness is not contextual disambiguation.
+        if is_short_form(label, [r['label'] for r in rows]):
+            return {**base,'status':'unmapped','entity_id':None,'label':label,'category':'unclassified','descriptor_ids':[],'concept_ui':None}
         if len(identities)!=1:
             return {**base,'status':'ambiguous' if identities else 'unmapped','entity_id':None,'label':label,'category':'unclassified','descriptor_ids':[],'concept_ui':None}
         identity=rows[0]['concept']
@@ -126,6 +131,107 @@ class MeshIndex:
         category=ROOT_CATEGORIES[roots[0]] if len(roots)==1 else 'multiple' if roots else 'unclassified'
         return {**base,'status':'exact','entity_id':hashlib.md5(('MeSH:'+identity).encode()).hexdigest()[:24],
             'label':rows[0]['label'],'category':category,'descriptor_ids':sorted({r['descriptor'] for r in rows}), 'concept_ui':identity}
+
+
+def is_short_form(label, preferred=()):
+    term=key(label)
+    if not re.fullmatch(r'[a-z][a-z0-9-]{1,7}',term) or any(key(p)==term for p in preferred):
+        return False
+    # Longer ordinary entry words (e.g. cancer -> Neoplasms) are not acronyms.
+    return not preferred or len(term)<=4 or any(_aligned_long_form(term,p) for p in preferred)
+
+
+def _aligned_long_form(short, candidate):
+    """Conservative backwards character alignment, not a learned expansion."""
+    letters=[c.casefold() for c in short if c.isalnum()]
+    cursor=len(candidate)-1
+    for i in range(len(letters)-1,-1,-1):
+        while cursor>=0 and (candidate[cursor].casefold()!=letters[i] or
+              (i==0 and cursor>0 and candidate[cursor-1].isalnum())):
+            cursor-=1
+        if cursor<0:return None
+        if i:cursor-=1
+    result=candidate[cursor:].strip()
+    if len(re.findall(r'\w+',result))<2 or len(result)>160:return None
+    return result
+
+
+def definitions(body, short):
+    """Only explicit LF (SF) / SF (LF) definitions in this paper's main text.
+
+    No corpus-wide alias propagation; conflicting definitions stay unresolved.
+    Offsets/hashes are local provenance, never copied source paragraphs.
+    """
+    end=re.search(r'(?im)^\s*(?:references|bibliography)\s*$',body)
+    body=body[:end.start()] if end else body
+    found={}
+    for m in re.finditer(r'\(([^()\n]{2,160})\)',body):
+        inside=m[1].strip()
+        if key(inside)==key(short):
+            prefix=body[max(0,m.start()-200):m.start()].rstrip()
+            prefix=re.split(r'[.;!?\n]',prefix)[-1].strip()
+            candidate=_aligned_long_form(short,prefix)
+        else:
+            before=body[:m.start()].rstrip()
+            explicit=re.search(r'(?<!\w)'+re.escape(short)+r'$',before,re.I)
+            candidate=_aligned_long_form(short,inside) if explicit else None
+            # In SF (LF), the entire LF must align, not a suffix of unrelated text.
+            if candidate and key(candidate)!=key(inside):candidate=None
+        if candidate:
+            normalized=key(candidate)
+            found[normalized]={'label':normalized,'start':m.start(),'end':m.end(),
+                'hash':hashlib.sha256(m[0].encode()).hexdigest()}
+    return list(found.values())
+
+
+def document_term(index, label, body, pmid):
+    value=index.resolve(label)
+    short=value['status']!='exact' and is_short_form(label)
+    proof=None
+    method='exact' if value['status']=='exact' else 'lexical'
+    if short:
+        candidates=definitions(body,label)
+        if len(candidates)==1:
+            proof=candidates[0]
+            value=index.resolve(proof['label'])
+            method='definition'
+        else:
+            method='ambiguous' if candidates else 'unresolved'
+    label_out=value['label'] if value['status']=='exact' else proof['label'] if proof else key(label)
+    identity=value['entity_id'] if value['status']=='exact' else hashlib.md5(
+        (('Unresolved:'+pmid+':') if method in ('unresolved','ambiguous') else 'Text:').encode()+key(label_out).encode()).hexdigest()[:24]
+    return {'matched_label':label,'entity_id':identity,'label':label_out,
+        'category':value['category'] if value['status']=='exact' else 'unclassified',
+        'resolution':method,'concept_ui':value['concept_ui'],'descriptor_ids':value['descriptor_ids'],
+        'year':index.meta['year'],'checksum':index.meta['sha256'],
+        'definition':proof}
+
+
+def reconcile_document_terms(store,index,state,limit=10):
+    """Replace each paper's derived identity overlay atomically and durably."""
+    if index is None:return 0
+    from knowledge import digest,VERSION
+    from knowledge_worker import load_original
+    recipe='document-terms-v1'
+    store.db.execute('CREATE TABLE IF NOT EXISTS document_terms(pmid TEXT PRIMARY KEY,revision TEXT NOT NULL)')
+    done=0
+    for row in store.db.execute("SELECT s.*,p.payload FROM sources s JOIN publications p ON p.kind='source' AND p.id=s.pmid WHERE s.state<>'withdrawn' ORDER BY s.pmid").fetchall():
+        source=json.loads(row['payload'])
+        revision=digest([recipe,index.meta['sha256'],source])
+        old=store.db.execute('SELECT revision FROM document_terms WHERE pmid=?',(row['pmid'],)).fetchone()
+        if old and old[0]==revision:continue
+        try:
+            doc=load_original(state,json.loads(row['paper']))
+            if doc['content_hash']!=source['content_hash']:continue
+        except (OSError,ValueError,TypeError,KeyError):continue
+        items=[{'concept_id':c['id'],**document_term(index,c['label'],doc['content_text'],row['pmid'])} for c in source['concepts']]
+        with store.db:
+            store.stage('document_terms',row['pmid'],{'version':VERSION,'recipe':recipe,'pmid':row['pmid'],
+                'title':source['title'],'content_hash':source['content_hash'],'items':items})
+            store.db.execute('INSERT OR REPLACE INTO document_terms VALUES(?,?)',(row['pmid'],revision))
+        done+=1
+        if done>=limit:break
+    return done
 
 
 def ensure_index(directory, *, download=True):

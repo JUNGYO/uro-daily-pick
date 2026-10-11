@@ -133,8 +133,9 @@ export default function ResearchNetwork({
       </div>
       <div className="network-coverage">
         <strong>
-          {data.nodes.length} / {citations ? data.matched_documents : coverage.concepts}{" "}
-          {citations ? "papers" : "concepts"}
+          {data.nodes.length} /{" "}
+          {citations ? (coverage.citation_nodes ?? data.matched_documents) : coverage.concepts}{" "}
+          {citations ? "papers and references" : "concepts"}
         </strong>
         <span>
           {data.edges.length} links shown
@@ -143,13 +144,19 @@ export default function ResearchNetwork({
             : ""}
         </span>
       </div>
+      {citations && coverage.displayed_references !== undefined && (
+        <p className="atlas-footnote">
+          {coverage.displayed_sources} matching source papers · {coverage.displayed_references} referenced
+          papers. Referenced papers can be outside the filters or have no indexed full text.
+        </p>
+      )}
       {citations && !data.edges.length && (
         <div className="network-notice">
           {!coverage.metadata_papers
             ? "Reference metadata has not been retrieved for these papers."
             : !coverage.reference_identifiers
               ? "Retrieved metadata contains no reference identifiers. Citation coverage is incomplete."
-              : "No identified citations connect papers within this displayed subset."}{" "}
+              : "No identified citation links are available for this selection."}{" "}
           This does not mean that the papers have no citations.
         </div>
       )}
@@ -201,7 +208,7 @@ export default function ResearchNetwork({
                   {n.label}
                   <small>{CATEGORY_LABELS[n.kind] || "Unclassified"}</small>
                 </span>
-                <small>{citations ? n.year : `${n.document_count} papers`}</small>
+                <small>{citations ? n.year || "Year unavailable" : `${n.document_count} papers`}</small>
               </button>
             </li>
           ))}
@@ -302,7 +309,7 @@ export default function ResearchNetwork({
                   className="atlas-node network-node"
                   role="button"
                   tabIndex={0}
-                  aria-label={`${p.label}, ${citations ? `published ${p.year}` : `${p.document_count} papers, ${CATEGORY_LABELS[p.kind] || "Unclassified"}`}`}
+                  aria-label={`${p.label}, ${citations ? `${CATEGORY_LABELS[p.kind] || "Paper"}, ${p.year ? `published ${p.year}` : "year unavailable"}` : `${p.document_count} papers, ${CATEGORY_LABELS[p.kind] || "Unclassified"}`}`}
                   aria-pressed={selected === p.id || peer === p.id}
                   onClick={() => select(p.id)}
                   onKeyDown={(e) => activate(e, () => select(p.id))}
@@ -348,7 +355,7 @@ export default function ResearchNetwork({
       </div>
       <p className="atlas-graph-note">
         {citations
-          ? "Arrows follow identified references: citing paper → referenced paper. Only links within this subset are shown."
+          ? "Arrows follow identified references: citing paper → referenced paper. Reference targets do not require indexed full texts."
           : "Circle area = distinct papers · Line width = log-scaled shared-paper count · Color = MeSH category. Position is a navigation aid, not a measured scientific distance."}
       </p>
       <details className="network-method">
@@ -356,12 +363,12 @@ export default function ResearchNetwork({
         <p>
           {citations
             ? `${coverage.metadata_papers} of ${data.matched_documents} matching papers have retrieved metadata; ${coverage.papers_with_reference_ids} contain reference identifiers. Reference lists may be incomplete.`
-            : `${coverage.resolved} of ${coverage.concepts} concepts have an exact, unambiguous MeSH mapping. Unmapped terms remain unclassified. Synonyms with the same MeSH concept identifier count once per paper.`}
+            : `${coverage.resolved} of ${coverage.concepts} concepts map to MeSH. Abbreviations require an explicit definition in each paper; missing or conflicting definitions remain unresolved. Identical long-form labels and verified synonyms count once per paper.`}
         </p>
         <p>
           {citations
-            ? "Nodes are the newest matching papers, with your selection retained."
-            : "Nodes are selected by paper count, with your selection retained. Links require the selected minimum shared-paper count and are capped at 500. Jaccard overlap = shared papers ÷ papers containing either concept. The layout uses overlap to arrange nodes; distances are not calibrated."}
+            ? "Filters select citing indexed papers. Their identified references may be older or outside the indexed corpus. Linked endpoints are prioritized, including commonly cited targets; selected endpoints are retained. Only links between displayed nodes are drawn, up to 500."
+            : "Nodes are selected by paper count. Selecting a concept prioritizes its connected neighbors and retains your selection. Links require the selected minimum shared-paper count and are capped at 500. Jaccard overlap = shared papers ÷ papers containing either concept. The layout uses overlap to arrange nodes; distances are not calibrated."}
         </p>
         <p>
           Counts describe indexed papers, not independent studies, clinical effect, research quality or
