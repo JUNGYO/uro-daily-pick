@@ -72,5 +72,43 @@ try {
  await db.exec('RESET ROLE');
  await db.exec('SET ROLE anon');
  await assert.rejects(db.query('SELECT public.reader_daily()'),{code:'42501'});
- console.log('Distinct daily recommendations: unread history, opt-out, per-reader isolation, persistent fallback, same-day replay, archive preservation and exhaustion passed.');
+ // Compare the optimized fallback with the original semantics, including all
+ // alert types and empty/duplicate keywords. Every comparison rolls back writes.
+ await db.exec('RESET ROLE');
+ const optimized=await scalar("SELECT pg_get_functiondef('public.reader_daily(date)'::regprocedure) r");
+ const original=(await readFile(new URL('../supabase/migrations/034_bounded_daily_recommendation_reads.sql',import.meta.url),'utf8'));
+ for(const scenario of [
+  {keywords:['prostate','prostate'],journals:[]},
+  {keywords:[],journals:['Urology']},
+  {keywords:[],journals:[],alert:['keyword','prostate']},
+  {keywords:[],journals:[],alert:['journal','urol']},
+  {keywords:[],journals:[],alert:['author','Fixture']},
+  {keywords:[],journals:[]},
+ ]) {
+  const results=[];
+  for(const definition of [original,optimized]) {
+   await db.exec(definition);
+   await db.exec('BEGIN');
+   await db.query('DELETE FROM public.recommendations WHERE user_id=$1',[owner]);
+   await db.query('UPDATE public.profiles SET keywords=$1,preferred_journals=$2 WHERE id=$3',[scenario.keywords,scenario.journals,owner]);
+   await db.exec(`UPDATE public.papers SET authors='["Fixture Author"]'::jsonb;
+    UPDATE public.papers SET summary_ko='invalid' WHERE id=14;
+    UPDATE public.papers SET summary_review_required=true WHERE id=13;
+    UPDATE public.papers SET integrity_status='retracted' WHERE id=12;
+    UPDATE public.papers SET paper_type='editorial' WHERE id=11;`);
+   if(scenario.alert) await db.query('INSERT INTO public.alerts(user_id,alert_type,value) VALUES($1,$2,$3)',[owner,...scenario.alert]);
+   await asUser(owner);
+   results.push(await ids());
+   await db.exec('ROLLBACK');
+   await db.exec('RESET ROLE');
+  }
+  assert.deepEqual(results[1],results[0],JSON.stringify(scenario));
+  assert.ok(results[1].every(id=>id<11),'Invalid, review-required, retracted and editorial candidates stay excluded');
+ }
+ await db.exec(optimized);
+ assert.equal(await scalar(`SELECT count(*)::int r FROM pg_indexes WHERE schemaname='public'
+  AND indexname IN ('papers_daily_ready_candidates','papers_daily_ready_search')`),2);
+ assert.equal(await scalar(`SELECT count(*)::int r FROM pg_statistic_ext
+  WHERE stxname='papers_daily_readiness_stats'`),1);
+ console.log('Distinct daily recommendations: history, isolation, replay, exhaustion, fallback equivalence, all alert types, readiness exclusions and indexed readiness schema passed.');
 } finally {await db.close();}
