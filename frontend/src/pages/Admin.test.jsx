@@ -15,6 +15,7 @@ function query(result) {
   return promise;
 }
 function response(name) {
+  if (name === "admin_memberships") return { data: { pending_count: 0, total: 0, items: [] } };
   if (name === "admin_reader_usage")
     return {
       data: {
@@ -256,6 +257,7 @@ it("polls collection, worker and journal counts, preserving visible data during 
   ).toEqual([
     "admin_catalog_status",
     "admin_journal_fulltext_counts",
+    "admin_memberships",
     "admin_reader_usage",
     "admin_user_engagement",
     "admin_worker_status",
@@ -286,6 +288,7 @@ it("polls collection, worker and journal counts, preserving visible data during 
       ![
         "admin_catalog_status",
         "admin_journal_fulltext_counts",
+        "admin_memberships",
         "admin_reader_usage",
         "admin_user_engagement",
         "admin_worker_status",

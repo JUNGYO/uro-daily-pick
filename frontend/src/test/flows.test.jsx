@@ -120,7 +120,7 @@ it("registers directly from a signup link despite the obsolete deployment flag",
     email: "new@example.test",
     password: "new-password",
     options: {
-      data: { name: "New Reader" },
+      data: { name: "New Reader", institution: "" },
       emailRedirectTo: expect.stringContaining("login?next=%2Flibrary"),
     },
   });
@@ -208,7 +208,7 @@ it("shows confirmation instructions when signup does not create a session", asyn
   await user.type(screen.getByLabelText("Email"), "reader@example.test");
   await user.type(screen.getByLabelText("Password"), "strong-password");
   await user.click(screen.getByRole("button", { name: "Get started" }));
-  expect(await screen.findByRole("status")).toHaveTextContent("confirm your account");
+  expect(await screen.findByRole("status")).toHaveTextContent("관리자 승인 후");
   expect(screen.queryByText("Saved workspace")).not.toBeInTheDocument();
 });
 it("keeps onboarding topics after a failed save and advances only after persistence", async () => {

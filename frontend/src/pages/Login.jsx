@@ -12,6 +12,7 @@ export default function Login() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
+  const [institution, setInstitution] = useState("");
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
@@ -68,14 +69,14 @@ export default function Login() {
             email: email.trim(),
             password,
             options: {
-              data: { name: name.trim() },
+              data: { name: name.trim(), institution: institution.trim() },
               emailRedirectTo: appUrl("login?next=" + encodeURIComponent(next)),
             },
           }),
         );
         if (signUpError) throw signUpError;
         if (data.session) navigate(next, { replace: true });
-        else setMessage("Check your email to confirm your account, then sign in.");
+        else setMessage("이메일 인증 후 로그인해 주세요. 관리자 승인 후 서비스를 이용할 수 있습니다.");
       } else {
         const { error: signInError } = await withTimeout(
           supabase.auth.signInWithPassword({
@@ -155,6 +156,24 @@ export default function Login() {
           )}
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-3">
+            {mode === "signup" && (
+              <>
+                <p className="text-sm text-text2">
+                  이메일 인증 → 관리자 확인 → 이용 시작 순서로 가입이 진행됩니다.
+                </p>
+                <label className="text-sm text-text2 flex flex-col gap-1">
+                  소속 (선택)
+                  <input
+                    aria-label="소속"
+                    autoComplete="organization"
+                    maxLength={200}
+                    value={institution}
+                    onChange={(e) => setInstitution(e.target.value)}
+                    className={inputCls}
+                  />
+                </label>
+              </>
+            )}
             {mode === "signup" && (
               <label className="text-sm text-text2 flex flex-col gap-1">
                 Name

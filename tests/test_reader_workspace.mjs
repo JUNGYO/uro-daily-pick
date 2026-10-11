@@ -1,3 +1,4 @@
+import { approvedReaderFixture } from './approved_reader_fixture.mjs';
 import assert from 'node:assert/strict';
 import {readFile,readdir} from 'node:fs/promises';
 import {PGlite} from '../frontend/node_modules/@electric-sql/pglite/dist/index.js';
@@ -17,6 +18,7 @@ async function accessContracts(){
 try{
  await db.exec(`CREATE ROLE anon;CREATE ROLE authenticated;CREATE ROLE service_role BYPASSRLS;CREATE SCHEMA auth;
  CREATE TABLE auth.users(id uuid PRIMARY KEY,email text,email_confirmed_at timestamptz,raw_user_meta_data jsonb);
+ ${approvedReaderFixture}
  CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
  GRANT USAGE ON SCHEMA auth,public TO authenticated,anon;`);
  for(const file of (await readdir(new URL('../supabase/migrations/',import.meta.url))).filter(f=>f.endsWith('.sql')).sort()){
@@ -199,7 +201,8 @@ try{
   await db.query("SELECT public.institution_worker_status($1,$2,'idle')",[worker,token]);
   assert.deepEqual((await db.query('SELECT public.claim_research_extractions($1,$2,1) r',[worker,token])).rows[0].r,[]);
   await assert.rejects(db.query("SELECT public.institution_worker_status($1,$2,'idle')",[worker,'invalid-token']),{code:'42501'});
-  assert.equal((await db.query("SELECT pmid FROM public.papers WHERE pmid='10001'")).rows.length,1);
+  // Public metadata is now restricted to approved readers; worker token RPCs above remain usable.
+  assert.equal((await db.query("SELECT pmid FROM public.papers WHERE pmid='10001'")).rows.length,0);
   await assert.rejects(searchV2({p_query:'prostate'}),{code:'42501'});
   await assert.rejects(db.query('SELECT public.search_journals()'),{code:'42501'});
   await assert.rejects(db.query('SELECT public.search_notifications()'),{code:'42501'});
@@ -207,4 +210,4 @@ try{
   assert.equal((await db.query("SELECT public.reader_paper('10001') r")).rows[0].r.paper.pmid,'10001');
   await user('');await assert.rejects(searchV2(),{code:'42501'});await assert.rejects(db.query('SELECT public.search_journals()'),{code:'42501'});
   console.log('Reader searches, inclusive date boundaries, journal autocomplete, pagination, AI boundaries, identity isolation, reader/editor sharing, revocation, reports, notifications, demo removal and preserved worker contracts passed');
-} catch(e){console.error(e.message,e.where||'',e.query||'');process.exitCode=1} finally {await db.close()}
+} catch(e){console.error(e.stack,e.where||'',e.query||'');process.exitCode=1} finally {await db.close()}

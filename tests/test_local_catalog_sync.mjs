@@ -1,3 +1,4 @@
+import { approvedReaderFixture } from './approved_reader_fixture.mjs';
 // Isolated PostgreSQL regression; no network or production credentials.
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
@@ -18,6 +19,7 @@ const status={local_papers:100,synced_papers:80,citation_pending:20,local_origin
 try {
  await db.exec(`CREATE ROLE anon;CREATE ROLE authenticated;CREATE ROLE service_role BYPASSRLS;CREATE SCHEMA auth;
  CREATE TABLE auth.users(id uuid PRIMARY KEY,email text,email_confirmed_at timestamptz,raw_user_meta_data jsonb);
+ ${approvedReaderFixture}
  CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
  GRANT USAGE ON SCHEMA auth,public TO authenticated,anon;`);
  for(const file of (await readdir(new URL('../supabase/migrations/',import.meta.url))).filter(f=>f.endsWith('.sql')).sort())

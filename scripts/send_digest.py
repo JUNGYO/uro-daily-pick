@@ -32,7 +32,7 @@ def get_digest_users(now=None):
     now = now or datetime.now(KST)
     users = paginate(sb_get, "profiles", {
         "select": "id,name,digest_frequency",
-        "email_digest": "eq.true", "onboarding_done": "eq.true", "order": "id",
+        "email_digest": "eq.true", "onboarding_done": "eq.true", "access_status": "eq.approved", "order": "id",
     })
     # Weekly digests are delivered on Monday, in Korea time.
     return [user for user in users if user.get("name") != "[DELETED]"

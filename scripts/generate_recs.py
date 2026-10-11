@@ -71,7 +71,7 @@ def sb_patch(table, row_id, data):
 def get_all_profiles():
     return paginate(lambda path, params: sb("GET", path, params), "profiles", {
         "select": "id,keywords,preferred_journals,preferred_study_types,personalization_enabled",
-        "onboarding_done": "eq.true", "name": "neq.[DELETED]", "order": "id"})
+        "onboarding_done": "eq.true", "access_status": "eq.approved", "name": "neq.[DELETED]", "order": "id"})
 
 
 def get_catalog_papers():

@@ -15,6 +15,41 @@ from fulltext import FulltextUnavailable
 
 
 class DurableCollectionTests(unittest.TestCase):
+    def test_source_pause_survives_restart_and_expires_without_blocking_other_sources(self):
+        f = self.f
+        calls = []
+        class BlockedBrowser:
+            def __init__(self, *args): pass
+            def read(self, paper, **kwargs):
+                calls.append(paper["pmid"])
+                return {"status": "challenge", "reason": "publisher_check", "url": "https://link.springer.com/article"}
+            def close(self): pass
+        def unavailable(*args, **kwargs): raise FulltextUnavailable()
+        f.deps.update(fetch_oa=unavailable, Browser=BlockedBrowser)
+        self.run_queue([f.paper(1)])
+        self.assertEqual(calls, ["1"])
+        self.assertGreater(f.db.execute("SELECT retry_at FROM collection_source_pauses WHERE source='springer-nature'").fetchone()[0], self.now[0])
+        self.run_queue([f.paper(2)])
+        self.assertEqual(calls, ["1"], "A new process must respect the host pause")
+        self.assertEqual(self.telemetry["restored_source_pauses"], 1)
+        f.deps["fetch_oa"] = lambda *a, **k: (f.xml, "https://oa.example.test/article")
+        self.assertEqual(self.run_queue([f.paper(3)])["completed"], 1)
+        self.now[0] += 86401
+        f.deps["fetch_oa"] = unavailable
+        self.run_queue([f.paper(4)])
+        self.assertEqual(calls, ["1", "4"])
+
+    def test_cached_negative_batch_never_submits_api_jobs(self):
+        f = self.f
+        f.deps.update(fetch_oa=f.forbid_network, discover_oa_batch=lambda pmids, **kwargs: {
+            p: {"status": "unavailable", "reason": "not_open_access"} for p in pmids})
+        papers = [f.paper(n, "10.1016/test-" + str(n)) for n in range(1, 151)]
+        result = self.run_queue(papers)
+        self.assertEqual(result["completed"], 0)
+        self.assertEqual(self.telemetry["api_candidates"], 0)
+        self.assertEqual(self.telemetry["cached_api_skipped"], 150)
+        self.assertEqual(self.telemetry["discovery_batches"], 3)
+
     def setUp(self):
         self.f = parallel_fixture.ParallelCollectionTests(methodName="runTest")
         self.f.setUp()
