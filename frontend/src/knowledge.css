@@ -1239,3 +1239,72 @@
  .atlas-graph.scientific-network { min-width:760px; }
  .network-method { margin-inline:15px; }
 }
+/* Citation maps use chronological lanes and a permanent reading list. */
+.atlas-workbench.atlas-citation-workbench { grid-template-columns: minmax(0,1fr); }
+.citation-workspace { display:grid; grid-template-columns:minmax(0,1fr) 340px; }
+.citation-main { min-width:0; }
+.citation-map-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:14px 20px; }
+.citation-map-heading h3,.citation-list-heading h3 { margin:0 0 4px; font-size:17px; font-weight:700; color:#193a59; }
+.citation-map-heading p { margin:0; font-size:12px; color:#526b82; }
+.citation-zoom { display:flex; gap:3px; }
+.citation-zoom button { display:grid; place-items:center; border:1px solid #dce4ee; border-radius:7px; width:34px; height:34px; background:white; color:#325573; }
+.citation-zoom button:disabled { opacity:.4; }
+.citation-canvas { width:100%; max-height:520px; overflow:auto; overscroll-behavior:contain; background:#fff; border-top:1px solid #e5edf4; border-bottom:1px solid #e5edf4; }
+.citation-canvas svg { display:block; max-width:none; }
+.citation-axis { font-size:12px; font-weight:650; fill:#4f6479; }
+.citation-number { font-size:11px; font-weight:750; fill:#163d64; paint-order:stroke; stroke:white; stroke-width:3px; }
+.citation-label { font-size:12px; fill:#243e57; paint-order:stroke; stroke:#f8fafc; stroke-width:3px; pointer-events:none; }
+.citation-node { cursor:pointer; outline:none; }
+.citation-node:focus-visible .citation-disc { stroke:#0e172d; stroke-width:4px; }
+.citation-focus-controls { display:flex; flex-wrap:wrap; justify-content:space-between; gap:8px; padding:0 20px 12px; font-size:12px; }
+.citation-focus-controls label,.citation-focus-controls button { display:flex; align-items:center; gap:6px; }
+.citation-focus-controls button { color:#315b86; }
+.citation-legend { display:flex; flex-wrap:wrap; gap:8px 16px; padding:13px 20px 0; font-size:11px; color:#50677e; }
+.citation-legend span { display:flex; align-items:center; gap:6px; }
+.citation-legend i { width:9px; height:9px; border-radius:50%; background:#2766aa; }
+.citation-legend .citation-reference-key { background:#b45c38; }
+.citation-reading-panel { min-width:0; border-left:1px solid #e1e8ef; background:#fbfcfe; }
+.citation-list-heading,.citation-selection { padding:22px 20px 16px; border-bottom:1px solid #e1e8ef; }
+.citation-list-heading p,.citation-selection p { font-size:12px; color:#52677c; line-height:1.6; margin:8px 0 0; overflow-wrap:anywhere; }
+.citation-selection h3 { font-size:16px; line-height:1.5; font-weight:650; margin:10px 0 0; overflow-wrap:anywhere; }
+.citation-selection section + section { border-top:1px solid #dce4ee; margin-top:14px; padding-top:14px; }
+.citation-selection section > small { display:block; color:#576a80; margin-top:8px; }
+.citation-selection a { display:inline-flex; align-items:center; gap:4px; font-size:12px; color:#225ca3; margin-top:10px; }
+.citation-counts { display:flex; gap:15px; margin-top:17px; padding-top:12px; border-top:1px solid #dce4ee; }
+.citation-counts span { flex:1; font-size:11px; color:#52677c; }
+.citation-counts b { display:block; font-size:22px; color:#234665; }
+.citation-selection .citation-scope { font-size:11px; }
+.citation-list-tabs { display:flex; padding:12px 12px 0; gap:4px; }
+.citation-list-tabs button { flex:1; border:1px solid #dce4ee; border-radius:6px; padding:8px 4px; color:#46627d; font-size:12px; background:white; }
+.citation-list-tabs button[aria-pressed="true"] { background:#e8f0fb; border-color:#91afd6; color:#204f87; font-weight:650; }
+.citation-list-count { margin:12px 16px; color:#536c84; font-size:11px; }
+.citation-paper-list { list-style:none; padding:0; margin:0; max-height:530px; overflow-y:auto; }
+.citation-paper-list li + li { border-top:1px solid #e5ebf2; }
+.citation-paper-button { display:flex; width:100%; gap:10px; padding:14px 16px; text-align:left; background:transparent; }
+.citation-paper-button:hover,.citation-paper-button[aria-pressed="true"] { background:#edf3fb; }
+.citation-paper-number { flex:0 0 25px; height:25px; border:1px solid #c7d7e7; border-radius:7px; display:grid; place-items:center; color:#2d5c89; font-size:11px; margin-top:2px; }
+.citation-paper-copy { min-width:0; display:flex; flex-direction:column; gap:5px; }
+.citation-paper-copy strong { font-weight:550; font-size:13px; color:#203b54; line-height:1.55; overflow-wrap:anywhere; }
+.citation-paper-copy span,.citation-paper-copy small { font-size:11px; color:#526c84; line-height:1.5; overflow-wrap:anywhere; }
+.citation-list-empty { font-size:12px; margin:16px; color:#536b80; line-height:1.6; }
+.citation-unlinked { margin:12px 20px 20px; padding-top:12px; border-top:1px solid #dce4ee; font-size:12px; color:#49657d; }
+.citation-unlinked summary { cursor:pointer; }
+.citation-unlinked p { margin:10px 0; }
+.citation-unlinked-pages { display:flex; flex-wrap:wrap; gap:10px; align-items:center; margin-top:12px; }
+.citation-unlinked-pages button { color:#245795; padding:6px; }
+.citation-unlinked-pages button:disabled { opacity:.4; }
+@media(max-width:1000px) { .citation-workspace { grid-template-columns:minmax(0,1fr) 290px; } }
+@media(max-width:760px) {
+ .citation-workspace { display:flex; flex-direction:column; }
+ .citation-main { display:contents; }
+ .citation-reading-panel { order:1; }
+ .citation-main > .atlas-graph-note,.citation-main > .network-method,.citation-main > .citation-unlinked { order:2; }
+ .citation-canvas { max-height:300px; }
+ .citation-reading-panel { border-left:0; border-top:1px solid #dce4ee; }
+ .citation-map-heading { padding:12px; }
+ .citation-map-heading h3 { font-size:16px; }
+ .citation-focus-controls { padding:0 12px 12px; }
+ .citation-paper-list { max-height:480px; }
+ .citation-list-heading,.citation-selection { padding:16px; }
+ .citation-legend { padding:12px 12px 0; }
+}

@@ -34,6 +34,13 @@ export function knowledgeRpc(name, args, scenario, papers) {
   if (name === "knowledge_network") {
     const f=args.p_filters;
     const old=knowledgeRpc('knowledge_atlas',{p_query:f.q,p_from:f.from,p_to:f.to,p_journal:f.journal,p_design:f.design,p_relation:f.relation},scenario,papers).data;
+    if(scenario==='citation-timeline' && f.relation==='citations') {
+      const graph=Array.from({length:60},(_,i)=>({id:String(900000+i),pmid:String(900000+i),label:i===0?'Radical prostatectomy and long-term functional outcomes: a multicentre prospective study':`Evidence on prostate cancer diagnosis and treatment: a longitudinal cohort investigation ${i+1}`,authors:[['Smith Jane','Lee Min','Johnson David','Park Il Woo'][i%4]],journal:['European Urology','BJU International'][i%2],year:i===59?null:i<6?2000+i*4:2024+i%3,kind:i<6?'reference':'paper',matching_source:i>=6,in_catalog:true,indexed:i>=6,incoming_citations:i<6?9:0,identified_references:i>=6?1:0}));
+      const edges=graph.slice(6).map((n,i)=>({source:n.id,target:graph[i%6].id,weight:1}));
+      return {data:{...old,relationship:'citations',nodes:graph,edges,filters:f,focus:f.focus,peer:f.peer,citation_selection:[f.focus,f.peer].map(id=>graph.find(n=>n.id===id)).filter(Boolean),
+       coverage:{citation_nodes:400,citation_links:600,metadata_papers:90,papers_with_reference_ids:85,reference_identifiers:600,unlinked_papers:1},
+       unlinked_papers:[{id:'999999',pmid:'999999',label:'Paper with reference metadata pending',year:2026,authors:['Example Author']}],papers:old.papers,notes:[]},error:null};
+    }
     if(scenario==='atlas-reference-targets' && f.relation==='citations') {
       const source={id:papers[0].pmid,pmid:papers[0].pmid,label:papers[0].title,kind:'paper',document_count:1,year:2024,indexed:true,in_catalog:true,matching_source:true};
       const targets=[{id:'99112233',pmid:'99112233',label:'Reference preceding the indexed corpus',year:1998},
