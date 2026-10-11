@@ -47,7 +47,8 @@ test("signup handles immediate sessions and confirmation without an external ret
   await page.getByLabel("Email", { exact: true }).fill("new@example.test");
   await page.getByLabel("Password", { exact: true }).fill("fixture-password");
   await page.getByRole("button", { name: "Get started" }).click();
-  await expect(page.getByRole("status")).toContainText("confirm your account");
+  await expect(page.getByRole("status")).toContainText("이메일 인증 후");
+  await expect(page.getByRole("status")).toContainText("관리자 승인 후");
   await expect(page).toHaveURL(/\/login\?/);
 });
 
