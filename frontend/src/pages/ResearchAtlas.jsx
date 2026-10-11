@@ -138,6 +138,7 @@ export default function ResearchAtlas() {
   const from = Math.max(2000, Math.min(2100, Number(params.get("from")) || 2000)),
     to = Math.max(from, Math.min(2100, Number(params.get("to")) || THIS_YEAR));
   const page = Math.max(0, Math.min(10000, Number(params.get("page")) || 0)),
+    unlinkedPage = Math.max(0, Math.min(10000, Number(params.get("unlinkedPage")) || 0)),
     relation = params.get("relation") === "citations" ? "citations" : "concepts";
   const [draft, setDraft] = useState(query),
     [filters, setFilters] = useState(false);
@@ -148,6 +149,7 @@ export default function ResearchAtlas() {
   const update = (fields) => {
     const next = new URLSearchParams(params);
     next.delete("page");
+    next.delete("unlinkedPage");
     next.delete("view");
     for (const [k, v] of Object.entries(fields)) {
       if (v === null || v === "") next.delete(k);
@@ -167,12 +169,13 @@ export default function ResearchAtlas() {
           focus: selected,
           peer,
           page,
+          unlinked_page: unlinkedPage,
           relation,
           min_shared: minimum,
           limit,
         },
       }),
-    [user.id, query, from, to, journal, design, selected, peer, page, relation, minimum, limit],
+    [user.id, query, from, to, journal, design, selected, peer, page, unlinkedPage, relation, minimum, limit],
   );
   const d = r.data;
   const activeFilters = !!(query || journal || design || from !== 2000 || to !== THIS_YEAR || selected);
@@ -343,8 +346,12 @@ export default function ResearchAtlas() {
                       selectEdge={(a, b) => update({ concept: a, with: b })}
                       limit={limit}
                       setLimit={(value) => update({ limit: value })}
-                      page={page}
-                      setPage={(value) => update({ page: value })}
+                      page={unlinkedPage}
+                      setPage={(value) => {
+                        const next = new URLSearchParams(params);
+                        next.set("unlinkedPage", String(value));
+                        setParams(next);
+                      }}
                     />
                   ) : d.nodes.length ? (
                     <ResearchNetwork

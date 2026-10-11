@@ -20,6 +20,11 @@ export async function citationTimelineCases(db,{publish,scalar,source,worker,has
  assert.deepEqual(d.nodes[0].authors,['Fixture Author']);
  assert.equal(d.coverage.unlinked_papers,1);
  assert.equal(d.unlinked_papers[0].id,'800026');
+ const unlinkedNext=await get({limit:10,journal:'Fixture journal',unlinked_page:1});
+ assert.equal(unlinkedNext.unlinked_papers.length,0);
+ assert.equal(unlinkedNext.papers.length,d.papers.length,'Unlinked pagination leaves connected-literature pagination unchanged');
+ assert.deepEqual(unlinkedNext.nodes,d.nodes);
+ await assert.rejects(()=>get({unlinked_page:-1}));
  d=await get({limit:100,journal:'Fixture journal'});
  assert.equal(d.edges.length,500);
  assert.equal(d.nodes.length,25);

@@ -431,7 +431,10 @@ export default function CitationNetwork({
             ))}
             <div className="citation-counts">
               <span>
-                <b>{refs}</b> identified references
+                <b>{focal.matching_source === false ? "—" : refs}</b>{" "}
+                {focal.matching_source === false
+                  ? "reference list outside this view"
+                  : "identified references"}
               </span>
               <span>
                 <b>{cited}</b> citations in filtered corpus
