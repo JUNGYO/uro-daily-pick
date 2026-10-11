@@ -21,6 +21,7 @@ import KnowledgeRefresh from "../components/KnowledgeRefresh";
 import { ENGLISH_RESOURCE, KnowledgeNarrative, ScientificPaper } from "../components/KnowledgeEvidence";
 import "../knowledge.css";
 import ResearchNetwork from "../components/ResearchNetwork";
+import CitationNetwork from "../components/CitationNetwork";
 import { CATEGORY_LABELS, categoryColor } from "../lib/researchNetwork";
 
 const num = (n) => Number(n || 0).toLocaleString("en-US");
@@ -137,6 +138,7 @@ export default function ResearchAtlas() {
   const from = Math.max(2000, Math.min(2100, Number(params.get("from")) || 2000)),
     to = Math.max(from, Math.min(2100, Number(params.get("to")) || THIS_YEAR));
   const page = Math.max(0, Math.min(10000, Number(params.get("page")) || 0)),
+    unlinkedPage = Math.max(0, Math.min(10000, Number(params.get("unlinkedPage")) || 0)),
     relation = params.get("relation") === "citations" ? "citations" : "concepts";
   const [draft, setDraft] = useState(query),
     [filters, setFilters] = useState(false);
@@ -147,6 +149,7 @@ export default function ResearchAtlas() {
   const update = (fields) => {
     const next = new URLSearchParams(params);
     next.delete("page");
+    next.delete("unlinkedPage");
     next.delete("view");
     for (const [k, v] of Object.entries(fields)) {
       if (v === null || v === "") next.delete(k);
@@ -166,15 +169,15 @@ export default function ResearchAtlas() {
           focus: selected,
           peer,
           page,
+          unlinked_page: unlinkedPage,
           relation,
           min_shared: minimum,
           limit,
         },
       }),
-    [user.id, query, from, to, journal, design, selected, peer, page, relation, minimum, limit],
+    [user.id, query, from, to, journal, design, selected, peer, page, unlinkedPage, relation, minimum, limit],
   );
   const d = r.data;
-  const selectedNode = d?.nodes.find((n) => n.id === selected);
   const activeFilters = !!(query || journal || design || from !== 2000 || to !== THIS_YEAR || selected);
   return (
     <div className="atlas-page h-full overflow-y-auto" lang="en">
@@ -306,12 +309,18 @@ export default function ResearchAtlas() {
                 </Link>
               </div>
               <KnowledgeRefresh resource={r} />
-              <div className="atlas-workbench">
+              <div
+                className={`atlas-workbench${relation === "citations" ? " atlas-citation-workbench" : ""}`}
+              >
                 <section className="atlas-network-panel" aria-label="Research network">
                   <div className="atlas-network-heading">
                     <div>
                       <h2>Research connections</h2>
-                      <p>Select a concept or connection to inspect its papers.</p>
+                      <p>
+                        {relation === "citations"
+                          ? "Follow references through time. Select a paper to explore its connections."
+                          : "Select a concept or connection to inspect its papers."}
+                      </p>
                     </div>
                     <div className="atlas-segment" aria-label="Network relationship">
                       <button
@@ -328,7 +337,23 @@ export default function ResearchAtlas() {
                       </button>
                     </div>
                   </div>
-                  {d.nodes.length ? (
+                  {relation === "citations" ? (
+                    <CitationNetwork
+                      data={d}
+                      selected={d.focus || selected}
+                      peer={d.peer || peer}
+                      select={(id) => update({ concept: id, with: null })}
+                      selectEdge={(a, b) => update({ concept: a, with: b })}
+                      limit={limit}
+                      setLimit={(value) => update({ limit: value })}
+                      page={unlinkedPage}
+                      setPage={(value) => {
+                        const next = new URLSearchParams(params);
+                        next.set("unlinkedPage", String(value));
+                        setParams(next);
+                      }}
+                    />
+                  ) : d.nodes.length ? (
                     <ResearchNetwork
                       key={relation}
                       data={d}
@@ -358,84 +383,37 @@ export default function ResearchAtlas() {
                     </div>
                   )}
                 </section>
-                <aside className="atlas-detail" aria-label="Selected research" aria-live="polite">
-                  {relation === "concepts" && selected ? (
-                    <ConceptPreview data={d} />
-                  ) : relation === "citations" && selected ? (
-                    <>
-                      <span className="atlas-eyebrow">{peer ? "IDENTIFIED CITATION" : "SELECTED PAPER"}</span>
-                      {(d.citation_selection?.length ? d.citation_selection : [selectedNode])
-                        .filter(Boolean)
-                        .map((n, i) => (
-                          <section key={n.id} className="network-note">
-                            {peer && <p>{i === 0 ? "Citing paper" : "Referenced paper"}</p>}
-                            <h2>{n.label}</h2>
-                            <p>
-                              {n.matching_source === false
-                                ? "Reference metadata · Outside the matching indexed papers"
-                                : "Indexed full text"}
-                            </p>
-                            {n.in_catalog && n.pmid && (
-                              <Link className="atlas-text-link" to={`/papers/${n.pmid}`}>
-                                Open paper <ArrowUpRight size={16} />
-                              </Link>
-                            )}
-                            {!n.in_catalog && n.pmid && (
-                              <a
-                                className="atlas-text-link"
-                                href={`https://pubmed.ncbi.nlm.nih.gov/${n.pmid}/`}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                View on PubMed <ArrowUpRight size={16} />
-                              </a>
-                            )}
-                            {!n.in_catalog && !n.pmid && n.doi && (
-                              <a
-                                className="atlas-text-link"
-                                href={`https://doi.org/${encodeURIComponent(n.doi)}`}
-                                target="_blank"
-                                rel="noreferrer"
-                              >
-                                Open DOI <ArrowUpRight size={16} />
-                              </a>
-                            )}
-                            {n.integrity_status && n.integrity_status !== "current" && (
-                              <p>Publication status: {n.integrity_status}</p>
-                            )}
-                          </section>
-                        ))}
-                      <p>
-                        Arrows follow explicit PMID or DOI references. A reference node does not imply that
-                        its full text has been acquired or indexed.
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <span className="atlas-eyebrow">START EXPLORING</span>
-                      <h2>A connected view of the literature.</h2>
-                      <p>
-                        Select a node for its knowledge and papers. Select a line to inspect the shared papers
-                        and overlap.
-                      </p>
-                      <div className="atlas-topics">
-                        {d.nodes.slice(0, 5).map((n) => (
-                          <button key={n.id} onClick={() => update({ concept: n.id, with: null })}>
-                            <i style={{ background: categoryColor(n.kind) }} />
-                            <span>{n.label}</span>
-                            <ChevronRight size={16} />
-                          </button>
-                        ))}
-                      </div>
-                      <p className="atlas-footnote">
-                        {relation === "citations"
-                          ? "This map connects indexed papers to their identified references."
-                          : "This map covers indexed full texts, not every catalog record."}{" "}
-                        Counts describe papers, not independent studies.
-                      </p>
-                    </>
-                  )}
-                </aside>
+                {relation !== "citations" && (
+                  <aside className="atlas-detail" aria-label="Selected research" aria-live="polite">
+                    {relation === "concepts" && selected ? (
+                      <ConceptPreview data={d} />
+                    ) : (
+                      <>
+                        <span className="atlas-eyebrow">START EXPLORING</span>
+                        <h2>A connected view of the literature.</h2>
+                        <p>
+                          Select a node for its knowledge and papers. Select a line to inspect the shared
+                          papers and overlap.
+                        </p>
+                        <div className="atlas-topics">
+                          {d.nodes.slice(0, 5).map((n) => (
+                            <button key={n.id} onClick={() => update({ concept: n.id, with: null })}>
+                              <i style={{ background: categoryColor(n.kind) }} />
+                              <span>{n.label}</span>
+                              <ChevronRight size={16} />
+                            </button>
+                          ))}
+                        </div>
+                        <p className="atlas-footnote">
+                          {relation === "citations"
+                            ? "This map connects indexed papers to their identified references."
+                            : "This map covers indexed full texts, not every catalog record."}{" "}
+                          Counts describe papers, not independent studies.
+                        </p>
+                      </>
+                    )}
+                  </aside>
+                )}
               </div>
               <Timeline years={d.years} choose={(year) => update({ from: year, to: year })} />
               <section className="atlas-paper-section">

@@ -137,10 +137,21 @@ export function networkSnapshot(data) {
         data.relationship === "citations"
           ? "Identified reference, citing paper to referenced paper"
           : "Distinct indexed papers containing both extracted concepts",
-      overlap: "shared / (source papers + target papers - shared)",
-      layout: "deterministic weighted force; coordinates are not a measurement",
+      overlap: data.relationship === "citations" ? null : "shared / (source papers + target papers - shared)",
+      layout:
+        data.relationship === "citations"
+          ? "linear publication-year axis; vertical connected groups are navigation lanes, not a measurement"
+          : "deterministic weighted force; coordinates are not a measurement",
+      citation_area:
+        data.relationship === "citations"
+          ? "proportional to 1 + incoming citations from filtered indexed source papers, capped at 20 citations"
+          : null,
+      citation_count_scope:
+        data.relationship === "citations"
+          ? "all identified references from filtered indexed citing papers; not global citation counts"
+          : null,
       selection:
-        "Concept frequency and selected concept neighbors; citation endpoints prioritized by references, with selected items retained; bounded counts",
+        "Concept frequency and selected concept neighbors; citation endpoints admitted together, selected items retained; bounded counts",
       interpretation:
         "Exploratory indexed corpus; not independent study counts, clinical effects or consensus",
     },

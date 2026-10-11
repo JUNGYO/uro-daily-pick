@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
+import {citationTimelineCases} from './citation_timeline_db_cases.mjs';
 export async function networkCases(db,ctx) {
  const {publish,scalar,source,page,worker,token,reader,cid,cid2,hash,revision}=ctx;
  const extra='c'.repeat(24), other='d'.repeat(24), entity='80bfd686cfc3cbb697a4f15a';
@@ -46,6 +47,7 @@ export async function networkCases(db,ctx) {
  c=await get({relation:'citations'});assert.deepEqual(c.edges,[{source:'12345',target:'12346',weight:1,reference_ids:['ref1']}]);
  assert.equal((await get({relation:'citations',focus:'12345',peer:'12346'})).selected_documents,2);
  await db.exec('RESET ROLE;DELETE FROM public.papers WHERE id=992;SET ROLE authenticated');
+ await citationTimelineCases(db,ctx);
  // One short form, two source-defined meanings. Neither dictionary uniqueness
  // nor a model-assigned kind is sufficient to merge them globally.
  const pca='e'.repeat(24),rp='f'.repeat(24),rp2='1'.repeat(24),stats='2'.repeat(24);
