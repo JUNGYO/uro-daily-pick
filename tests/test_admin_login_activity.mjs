@@ -1,3 +1,4 @@
+import { approvedReaderFixture } from './approved_reader_fixture.mjs';
 // Isolated PostgreSQL only. No production users or authentication requests.
 import assert from 'node:assert/strict';
 import {readFile,readdir} from 'node:fs/promises';
@@ -13,7 +14,8 @@ async function asUser(role,id='') {
 try {
   await db.exec(`CREATE ROLE anon;CREATE ROLE authenticated;CREATE SCHEMA auth;
     CREATE TABLE auth.users(id uuid PRIMARY KEY,email text,email_confirmed_at timestamptz,raw_user_meta_data jsonb,last_sign_in_at timestamptz);
-    CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
+    ${approvedReaderFixture}
+ CREATE FUNCTION auth.uid() RETURNS uuid LANGUAGE sql AS $$SELECT nullif(current_setting('request.jwt.claim.sub',true),'')::uuid$$;
     GRANT USAGE ON SCHEMA auth TO anon,authenticated;`);
   const root=new URL('../supabase/migrations/',import.meta.url);
   for(const file of (await readdir(root)).filter(f=>f.endsWith('.sql') && Number(f.slice(0,3))<=6).sort())

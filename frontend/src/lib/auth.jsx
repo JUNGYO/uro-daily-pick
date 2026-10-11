@@ -19,8 +19,8 @@ function clearResearchDrafts(uid) {
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
-  useReaderVisits(user);
   const [profile, setProfile] = useState(null);
+  useReaderVisits(profile?.id === user?.id && profile?.access_status === "approved" ? user : null);
   const [authLoading, setAuthLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(false);
   const [error, setError] = useState("");
@@ -111,7 +111,12 @@ export function AuthProvider({ children }) {
         if (data)
           localStorage.setItem(
             "uro-profile:" + uid,
-            JSON.stringify({ id: data.id, name: data.name, onboarding_done: data.onboarding_done }),
+            JSON.stringify({
+              id: data.id,
+              name: data.name,
+              onboarding_done: data.onboarding_done,
+              access_status: data.access_status,
+            }),
           );
       } catch {
         /* Storage limits must not break a valid login. */

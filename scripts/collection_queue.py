@@ -36,6 +36,8 @@ def _prepare_probe_state(db, papers):
             PRIMARY KEY(pmid,provider))""")
         db.execute("""CREATE TABLE IF NOT EXISTS collection_browser_pending(
             pmid TEXT PRIMARY KEY, identity TEXT NOT NULL, queued_at REAL NOT NULL)""")
+        db.execute("""CREATE TABLE IF NOT EXISTS collection_source_pauses(
+            source TEXT PRIMARY KEY, retry_at REAL NOT NULL)""")
     identities = {str(paper.get("pmid")): _paper_identity(paper) for paper in papers}
     probes, pending, invalid = {}, [], set()
     for pmid, provider, identity, status, next_probe, checked_at, pmcid in db.execute(
@@ -383,12 +385,33 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
         0 if deps.get("fetch_pmc_cloud") and "pmc_cloud" not in probes.get(str(paper.get("pmid")), {}) else
         min((row["checked_at"] for row in probes.get(str(paper.get("pmid")), {}).values()), default=0)))
     gate = SourceGate(deps["clock"], deps["sleep"])
+    # Source rejection belongs to the host, not one process or one paper.
+    # Persist wall-clock expiry while the in-process gate uses monotonic time.
+    saved_pauses = dict(db.execute("SELECT source,retry_at FROM collection_source_pauses"))
+    for source, retry_at in saved_pauses.items():
+        remaining = retry_at - deps["wall_clock"]()
+        if remaining > 0:
+            gate.blocked.add(source)
+            gate.blocked_until[source] = deps["clock"]() + remaining
+    def persist_pauses():
+        with gate.lock:
+            paused = dict(gate.blocked_until)
+        for source, until in paused.items():
+            retry_at = deps["wall_clock"]() + max(0, until - deps["clock"]())
+            if retry_at > saved_pauses.get(source, 0) + 1:
+                db.execute("INSERT OR REPLACE INTO collection_source_pauses VALUES(?,?)", (source, retry_at))
+                saved_pauses[source] = retry_at
+    cached_ids = set()
+    for folder, suffix in (("documents", ".json"), ("cloud-archive", ".json"), ("sources", ".browser.json")):
+        cached_ids.update(path.name[:-len(suffix)] for path in (directory / folder).glob("*" + suffix))
     browser = _SharedBrowser(directory, node, deadline, deps, gate)
     counts = {"completed": 0, "failed": 0, "deferred": 0}
     stats = {"api_candidates": 0, "provider_probes": 0, "cached_no_copy": 0,
              "cached_location": 0, "cached_retry": 0, "provider_errors": 0, "source_paused": 0,
              "discovery_batches": 0, "discovery_papers": 0, "browser_attempts": 0,
-             "api_http_403": 0, "api_http_429": 0, "api_http_other": 0, "api_parse_errors": 0, "api_network_errors": 0}
+             "api_http_403": 0, "api_http_429": 0, "api_http_other": 0, "api_parse_errors": 0, "api_network_errors": 0,
+             "cached_api_skipped": 0, "restored_source_pauses": len(gate.blocked), "elapsed_seconds": 0}
+    started_at = deps["clock"]()
     print(f"Collection workers: api={max(1, min(3, max_workers))}, browser=1; publisher navigation serialized", flush=True)
     seen, pending = set(), {}
     iterator = deque(papers)
@@ -417,9 +440,13 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
         db.execute("INSERT OR IGNORE INTO collection_browser_pending VALUES(?,?,?)",
                    (pmid, _paper_identity(paper), deps["wall_clock"]()))
         if pmid not in browser_enqueued:
+            browser_enqueued.add(pmid)
+            if gate.is_blocked(_browser_source(paper)):
+                counts["deferred"] += 1
+                stats["source_paused"] += 1
+                return False
             # Only catalog references are queued, never documents or open requests.
             browser_backlog.append(paper)
-            browser_enqueued.add(pmid)
             return True
         return False
 
@@ -567,10 +594,7 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
                             probes.get(pmid, {}), enabled, deps["wall_clock"]())):
                         counts["deferred"] += 1
                         continue
-                    has_cache = any(path.exists() for path in (
-                        directory / "documents" / (pmid + ".json"),
-                        directory / "cloud-archive" / (pmid + ".json"),
-                        directory / "sources" / (pmid + ".browser.json")))
+                    has_cache = pmid in cached_ids
                     if deps["clock"]() >= deadline:
                         counts["deferred"] += 1
                         exhausted = True
@@ -579,7 +603,14 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
                 if fill_batch and prepared:
                     discover(prepared)
                 while prepared and len(pending) < max(1, min(3, max_workers)) and deps["clock"]() < deadline:
-                    paper, _ = prepared.popleft()
+                    paper, has_cache = prepared.popleft()
+                    if not has_cache and not _providers_due(probes.get(str(paper["pmid"]), {}), enabled, deps["wall_clock"]()):
+                        stats["cached_api_skipped"] += 1
+                        for provider in enabled:
+                            prior = probes.get(str(paper["pmid"]), {}).get(provider, {})
+                            stats["cached_no_copy" if prior.get("status") in {"unavailable", "not_indexed"} else "cached_retry"] += 1
+                        enqueue_browser(paper)
+                        continue
                     try:
                         cache = _read_cache(directory, paper)
                     except (OSError, ValueError):
@@ -622,9 +653,14 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
                         finish(paper, outcome, browser_attempt=browser_attempt)
                 # Persist source outcomes and browser routing together before the
                 # next submission; do not fsync separately for every probe field.
+                persist_pauses()
                 db.commit()
     finally:
         browser.close()
+        persist_pauses()
+        db.commit()
+        stats["elapsed_seconds"] = round(max(0, deps["clock"]() - started_at), 3)
+        stats["new_originals"] = counts["completed"]
         stats["browser_pending"] = db.execute("SELECT count(*) FROM collection_browser_pending").fetchone()[0]
         print("Collection telemetry: " + json.dumps(stats, sort_keys=True), flush=True)
     return counts

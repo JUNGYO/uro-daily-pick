@@ -6,6 +6,8 @@ export { useAuth } from "./lib/auth";
 import "./reader.css";
 import { safeReturn } from "./lib/workspace";
 import { supabase } from "./lib/supabase";
+import MembershipPending from "./components/MembershipPending";
+import { useMembershipCount } from "./lib/useMembershipCount";
 import { usePaperOpenLinks } from "./lib/paperOpen";
 function resilientLazy(load) {
   return lazy(() =>
@@ -65,6 +67,7 @@ function ProtectedRoute({ children, onboarding = false }) {
   )
     return <Navigate to="/library?tab=offline" replace />;
   if (!profile) return <ErrorNotice message="Your profile is unavailable." onRetry={retry} />;
+  if (!user.offline && profile.access_status !== "approved") return <MembershipPending />;
   if (!onboarding && !profile.onboarding_done)
     return (
       <Navigate to={"/onboarding?next=" + encodeURIComponent(location.pathname + location.search)} replace />
@@ -76,6 +79,7 @@ function ProtectedRoute({ children, onboarding = false }) {
 
 function Layout({ children }) {
   const { user, profile } = useAuth();
+  const membershipCount = useMembershipCount(user);
   usePaperOpenLinks(user);
   const navigate = useNavigate();
   const location = useLocation();
@@ -104,7 +108,15 @@ function Layout({ children }) {
     { to: "/insights", icon: Network, label: "Insights" },
     { to: "/collections", icon: FolderOpen, label: "Collections" },
     { to: "/settings", icon: SettingsIcon, label: "내 설정" },
-    ...(isAdmin ? [{ to: "/admin", icon: BarChart3, label: "관리자" }] : []),
+    ...(isAdmin
+      ? [
+          {
+            to: "/admin",
+            icon: BarChart3,
+            label: membershipCount > 0 ? `관리자 (${membershipCount})` : "관리자",
+          },
+        ]
+      : []),
   ];
 
   return (

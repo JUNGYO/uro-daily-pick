@@ -13,6 +13,10 @@ let user =
           : "reader@example.test",
       };
 let listener = () => {};
+const membershipRequests = scenario === "admin-membership" ? [
+  { id: "new-reader", email: "new@example.test", name: "신규 연구자", institution: "Urology Research Center", access_status: "pending", access_revision: 0, created_at: "2026-10-12T00:00:00Z", email_confirmed_at: "2026-10-12T00:01:00Z" },
+  { id: "unverified", email: "unverified@example.test", name: "인증 전 연구자", institution: "", access_status: "pending", access_revision: 0, created_at: "2026-10-12T00:00:00Z", email_confirmed_at: null },
+] : [];
 let catalogAttempt = 0;
 let detailFailed = false,
   stateFailed = false;
@@ -128,6 +132,8 @@ const db = {
       personalization_enabled: true,
       email_digest: true,
       digest_frequency: "daily",
+      access_status: scenario === "membership-pending" ? "pending" : scenario === "membership-rejected" ? "rejected" : "approved",
+      access_note: scenario === "membership-rejected" ? "소속을 확인할 수 없습니다." : "",
       onboarding_done: scenario !== "onboarding",
     },
   ],
@@ -741,6 +747,17 @@ export const supabase = {
   },
   rpc(name, args = {}) {
     const result = (async () => {
+      if (name === "admin_membership_count") return { data: membershipRequests.filter(p => p.access_status === "pending").length };
+      if (name === "admin_memberships") {
+        const matching = membershipRequests.filter(p => p.access_status === args.p_status && `${p.name} ${p.email} ${p.institution}`.includes(args.p_query || ""));
+        return { data: { pending_count: membershipRequests.filter(p => p.access_status === "pending").length, total: matching.length, items: matching.slice(args.p_page * 20, args.p_page * 20 + 20) } };
+      }
+      if (name === "admin_review_membership") {
+        const person = membershipRequests.find(p => p.id === args.p_user_id);
+        if (!person || person.access_revision !== args.p_revision) return { error: { code: "40001" } };
+        Object.assign(person, { access_status: args.p_status, access_revision: person.access_revision + 1, access_note: args.p_note });
+        return { data: { id: person.id, status: person.access_status } };
+      }
       if (name.startsWith("knowledge_")) return knowledgeRpc(name, args, scenario, db.papers);
       const ready = (p) =>
         p.fulltext_available && p.summary_basis === "fulltext";

@@ -2,6 +2,7 @@ import IntegrityReview from "../components/IntegrityReview";
 import IssueReview from "../components/IssueReview";
 import { useState } from "react";
 import AdminPanel from "../components/AdminPanel";
+import MembershipReview from "../components/MembershipReview";
 import UsageAnalytics from "../components/UsageAnalytics";
 import CollectionOverview, { ProcessingHealth } from "../components/CollectionOverview";
 import { useAuth } from "../lib/auth";
@@ -65,6 +66,7 @@ export default function Admin() {
     <div tabIndex={0} role="region" aria-label="Admin content" className="h-full overflow-y-auto">
       <div key={user.id} className="max-w-[960px] mx-auto p-4 sm:p-6">
         <h1 className="text-[1.333rem] font-bold text-text1 mb-5">Admin Dashboard</h1>
+        <MembershipReview refresh={retry} />
 
         <button
           type="button"
