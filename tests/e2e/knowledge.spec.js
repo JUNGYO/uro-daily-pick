@@ -29,6 +29,15 @@ for(const width of [1440,390,320]) test(`knowledge search, original-bound wiki a
  const audit=await new AxeBuilder({page}).include('main').withTags(['wcag2a','wcag2aa','wcag21aa']).analyze();expect(audit.violations).toEqual([]);
  await english(page);await page.screenshot({path:info.outputPath(`map-${width}.png`)});
 });
+test('ambiguous acronyms offer distinct source-defined meanings without pooled prose',async({page})=>{
+ await page.setViewportSize({width:320,height:1000});
+ await page.goto('/uro-daily-pick/knowledge/'+'a'.repeat(24)+'?scenario=knowledge-disambiguation');
+ await expect(page.getByRole('status')).toContainText('different meanings across papers');
+ await expect(page.getByRole('article',{name:'Source-based knowledge'})).toHaveCount(0);
+ await expect(page.getByRole('link',{name:'Principal Component Analysis 1 connected papers'})).toHaveAttribute('href',/insights\?concept=b{24}/);
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+});
+
 test('stale knowledge hides prose while retaining current paper navigation',async({page})=>{
  await page.goto('/uro-daily-pick/knowledge/'+'a'.repeat(24)+'?scenario=knowledge-stale');
  await expect(page.getByText(/This knowledge page is being updated/)).toBeVisible();
@@ -138,4 +147,22 @@ test('atlas reflects new indexed papers without losing the selected wiki or grap
  await expect(page.getByLabel('Knowledge refresh')).toContainText('Refreshes automatically');
  await page.getByRole('button',{name:'Refresh',exact:true}).click();
  await expect(page.locator('.atlas-status')).toContainText('32 full texts indexed');
+});
+
+for(const width of [1440,320]) test(`citation targets remain connected without indexed originals at ${width}px`,async({page},info)=>{
+ await page.setViewportSize({width,height:1000});
+ await page.goto('/uro-daily-pick/insights?scenario=atlas-reference-targets&relation=citations');
+ await expect(page.locator('.network-coverage')).toContainText('3 / 3 papers and references');
+ await expect(page.locator('.network-edge')).toHaveCount(2);
+ await page.locator('.network-edge').first().focus();await page.keyboard.press('Enter');
+ const detail=page.getByRole('complementary',{name:'Selected research'});
+ await expect(detail).toContainText('IDENTIFIED CITATION');
+ await expect(detail).toContainText('Reference metadata');
+ await expect(detail.getByRole('link',{name:'View on PubMed'})).toHaveAttribute('href','https://pubmed.ncbi.nlm.nih.gov/99112233/');
+ await page.locator('.network-edge').nth(1).focus();await page.keyboard.press('Enter');
+ await expect(detail.getByRole('link',{name:'Open DOI',exact:true})).toHaveAttribute('href','https://doi.org/10.1234%2Ffixture-reference');
+ await expect(page.locator('.atlas-paper')).toHaveCount(1);
+ expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.screenshot({path:info.outputPath(`citation-reference-${width}.png`)});
+ const audit=await new AxeBuilder({page}).include('main').withTags(['wcag2a','wcag2aa','wcag21aa']).analyze();expect(audit.violations).toEqual([]);
 });

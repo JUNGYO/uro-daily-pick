@@ -96,10 +96,25 @@ function KnowledgeDetail({ id }) {
               <p className="reader-empty" role="status">
                 {data.wiki?.status === "updating"
                   ? "This knowledge page is being updated. You can explore its connected papers below."
-                  : data.wiki?.status === "indexed"
-                    ? "This concept is indexed from full texts. Connected papers are available, but there are not yet enough verified findings for a narrative page."
-                    : "This knowledge page is being prepared. You can explore its connected papers now."}
+                  : data.wiki?.status === "disambiguation"
+                    ? "This short form has unresolved or different meanings across papers. A combined narrative would mix concepts. Explore the source-defined meanings below."
+                    : data.wiki?.status === "indexed"
+                      ? "This concept is indexed from full texts. Connected papers are available, but there are not yet enough verified findings for a narrative page."
+                      : "This knowledge page is being prepared. You can explore its connected papers now."}
               </p>
+            )}
+            {!!data.meanings?.length && (
+              <section className="knowledge-section">
+                <h2>Meanings defined in the source papers</h2>
+                <div className="knowledge-related">
+                  {data.meanings.map((meaning) => (
+                    <Link key={meaning.entity_id} to={"/insights?concept=" + meaning.entity_id}>
+                      {meaning.label}
+                      <small>{number(meaning.document_count)} connected papers</small>
+                    </Link>
+                  ))}
+                </div>
+              </section>
             )}
             {!!data.neighbors.length && (
               <section className="knowledge-section">

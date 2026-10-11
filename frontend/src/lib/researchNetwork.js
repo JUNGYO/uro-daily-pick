@@ -21,6 +21,7 @@ export const CATEGORY_LABELS = {
   multiple: "Multiple MeSH categories",
   unclassified: "Unresolved term",
   paper: "Paper",
+  reference: "Referenced paper",
 };
 export const CATEGORY_COLORS = {
   condition: "#225ea8",
@@ -33,6 +34,7 @@ export const CATEGORY_COLORS = {
   multiple: "#526b7a",
   unclassified: "#87919e",
   paper: "#225ea8",
+  reference: "#b34c2d",
 };
 export const categoryColor = (kind) => CATEGORY_COLORS[kind] || "#526b7a";
 export const overlap = (edge, nodes) => {
@@ -130,7 +132,7 @@ export function networkSnapshot(data) {
     indexed_papers: data.indexed_documents,
     matching_papers: data.matched_documents,
     method: {
-      node: "Resolved MeSH concept or explicitly unresolved extracted term",
+      node: "Document-resolved concept; citation views include identified reference targets",
       edge:
         data.relationship === "citations"
           ? "Identified reference, citing paper to referenced paper"
@@ -138,7 +140,7 @@ export function networkSnapshot(data) {
       overlap: "shared / (source papers + target papers - shared)",
       layout: "deterministic weighted force; coordinates are not a measurement",
       selection:
-        "Most frequent concepts or newest papers, with selected items retained; bounded node and link counts",
+        "Concept frequency and selected concept neighbors; citation endpoints prioritized by references, with selected items retained; bounded counts",
       interpretation:
         "Exploratory indexed corpus; not independent study counts, clinical effects or consensus",
     },

@@ -34,6 +34,16 @@ export function knowledgeRpc(name, args, scenario, papers) {
   if (name === "knowledge_network") {
     const f=args.p_filters;
     const old=knowledgeRpc('knowledge_atlas',{p_query:f.q,p_from:f.from,p_to:f.to,p_journal:f.journal,p_design:f.design,p_relation:f.relation},scenario,papers).data;
+    if(scenario==='atlas-reference-targets' && f.relation==='citations') {
+      const source={id:papers[0].pmid,pmid:papers[0].pmid,label:papers[0].title,kind:'paper',document_count:1,year:2024,indexed:true,in_catalog:true,matching_source:true};
+      const targets=[{id:'99112233',pmid:'99112233',label:'Reference preceding the indexed corpus',year:1998},
+        {id:'e'.repeat(24),doi:'10.1234/fixture-reference',label:'DOI-only identified reference',year:null}].map(n=>({...n,kind:'reference',document_count:1,indexed:false,in_catalog:false,matching_source:false}));
+      const graph=[source,...targets];
+      return {data:{...old,relationship:'citations',nodes:graph,edges:targets.map(n=>({source:source.id,target:n.id,weight:1,reference_ids:['fixture-ref']})),
+        filters:f,focus:f.focus,peer:f.peer,selected_documents:1,matched_documents:1,indexed_documents:1,papers:[old.papers[0]],notes:[],
+        citation_selection:[f.focus,f.peer].map(id=>graph.find(n=>n.id===id)).filter(Boolean),
+        coverage:{citation_nodes:3,citation_links:2,displayed_sources:1,displayed_references:2,metadata_papers:1,papers_with_reference_ids:1,reference_identifiers:2}},error:null};
+    }
     const mapped=old.nodes.map(n=>({...n,kind:n.kind==='paper'?'paper':n.kind==='condition'?'condition':'unclassified',resolution:n.kind==='condition'?'exact':'unmapped',concept_ui:n.kind==='condition'?'M0017834':null,vocabulary_year:'2026',source_labels:[n.label],concept_ids:[n.id]}));
     const selection=mapped.find(n=>n.id===f.focus),peer=mapped.find(n=>n.id===f.peer);
     return {data:{...old,nodes:mapped,filters:f,focus:f.focus,peer:f.peer,selection,selection_peer:peer,
@@ -98,10 +108,10 @@ export function knowledgeRpc(name, args, scenario, papers) {
         concept: nodes.find((n) => n.id === args.p_id) || nodes[0],
         wiki: {
           revision: "r1",
-          status: scenario === "knowledge-stale" ? "updating" : scenario === "knowledge-indexed" ? "indexed" : "ready",
+          status: scenario === "knowledge-disambiguation" ? "disambiguation" : scenario === "knowledge-stale" ? "updating" : scenario === "knowledge-indexed" ? "indexed" : "ready",
           updated_at: "2026-10-08T01:00:00Z",
           paragraphs:
-            ["knowledge-stale", "knowledge-indexed"].includes(scenario)
+            ["knowledge-stale", "knowledge-indexed", "knowledge-disambiguation"].includes(scenario)
               ? []
               : [
                   {
@@ -116,6 +126,10 @@ export function knowledgeRpc(name, args, scenario, papers) {
                   },
                 ],
         },
+        meanings: scenario === "knowledge-disambiguation" ? [
+          {entity_id:'a'.repeat(24),label:'Prostate Cancer',document_count:5},
+          {entity_id:'b'.repeat(24),label:'Principal Component Analysis',document_count:1},
+        ] : [],
         papers: papers.slice(0, 3),
         neighbors: nodes
           .filter((n) => n.id !== args.p_id)

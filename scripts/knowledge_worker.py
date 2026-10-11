@@ -226,7 +226,7 @@ def refresh_bibliography(store):
 def sync_step(store, service, deadline):
     service.sync_deadline = deadline
     for row in store.db.execute("""SELECT * FROM publications WHERE pending=1 AND retry_at<=?
-      ORDER BY CASE kind WHEN 'source' THEN 0 WHEN 'terms' THEN 1 WHEN 'bibliography' THEN 2 WHEN 'science' THEN 3 WHEN 'page' THEN 4 ELSE 5 END,id LIMIT 10""", (time.time(),)).fetchall():
+      ORDER BY CASE kind WHEN 'source' THEN 0 WHEN 'terms' THEN 1 WHEN 'document_terms' THEN 1 WHEN 'bibliography' THEN 2 WHEN 'science' THEN 3 WHEN 'page' THEN 4 ELSE 5 END,id LIMIT 10""", (time.time(),)).fetchall():
         payload = json.loads(row["payload"])
         try:
             args = {"p_worker_id": service.config["id"], "p_token": service.token,
@@ -292,7 +292,7 @@ def main():
             return
         from institution_worker import Service
         service = Service(state)
-        from knowledge_terms import ensure_index, reconcile_terms
+        from knowledge_terms import ensure_index, reconcile_terms, reconcile_document_terms
         terminology = ensure_index(target)
         last_scan = last_sync = last_groups = 0
         iteration = 0
@@ -301,6 +301,7 @@ def main():
                 scan_catalog(store, state); last_scan = time.monotonic()
             if time.monotonic() - last_sync > 15:
                 reconcile_terms(store,terminology)
+                reconcile_document_terms(store,terminology,state)
                 refresh_network_bibliography(store)
                 sync_step(store, service, deadline-5); last_sync = time.monotonic()
             if time.monotonic() - last_groups > 600:

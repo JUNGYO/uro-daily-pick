@@ -12,6 +12,18 @@ Unicode normalization, case folding, whitespace and typographic hyphen
 normalization. It does not use fuzzy matching, model-proposed aliases or guessed
 acronym expansion.
 
+Short forms are **not** expanded from a unique dictionary entry. For example,
+PCA can denote prostate cancer, principal component analysis or passive cutaneous
+anaphylaxis. The resolver requires an explicit `long form (short form)` or
+`short form (long form)` definition in each original's main text. It uses conservative
+backwards character alignment; missing or conflicting definitions remain unresolved
+and their memberships are isolated by paper. Definitions in the reference section
+are excluded. This rule is not a claim of complete linguistic disambiguation.
+Source hashes and definition offsets/checksums remain attached to each resolution.
+Source-defined expansions then use the same exact MeSH lookup as full terms.
+Identical normalized long-form labels are combined across model-assigned roles,
+while more specific phrases remain distinct. No clinical relationships are invented.
+
 An exact, unambiguous match resolves to **ConceptUI**, rather than DescriptorUI:
 different narrower concepts under one descriptor are not automatically merged.
 Entry terms belonging to the same ConceptUI share an entity. Its category comes
@@ -39,7 +51,7 @@ scientific distances. Selecting an edge reveals the actual shared papers and
 marginal counts. Clinical association, effect, quality and consensus are not
 inferred from co-occurrence.
 
-Nodes are the most frequent concepts (or newest papers in citation mode), with
+Nodes are the most frequent concepts, with a selected concept's neighbors prioritized and
 the selected endpoints retained. The user can display 30, 60 or 100 nodes, and
 set the minimum shared-paper count. At most 500 co-occurrence edges are displayed.
 The same nodes and links are available on desktop and mobile. Panning, zooming,
@@ -55,6 +67,15 @@ of LLM inference. Retrieval failure, metadata with no reference identifiers and
 no links within a selected subset have different states. Neither missing links
 nor an empty PubMed reference list imply that a paper has no citations.
 
+Citation filters apply to the **citing indexed papers**. Their explicitly identified
+reference targets are included even when older, outside the journal/year filters,
+or without indexed/acquired full text. Exact catalog PMID/DOI matches supply titles;
+otherwise the identifier remains visible without inventing metadata. Reference nodes
+are distinguished from matching source nodes. Connected endpoints are prioritized
+within the node limit, starting with selected endpoints and commonly referenced targets.
+The reference counts describe this indexed source corpus, not global citation counts.
+Arrows are derived only from actual reference identifiers, never inferred similarity.
+
 Current original hashes, publication status and the existing confirmed-reader
 guard constrain the index. Bibliographic filters are applied before aggregation.
 Publication-year charts count indexed papers; they are not population-level
@@ -65,6 +86,7 @@ coverage bias. The atlas must not be described as clinically validated.
 
 - [NLM MeSH XML elements](https://www.nlm.nih.gov/mesh/xml_data_elements.html)
 - [Official MeSH downloads](https://www.nlm.nih.gov/databases/download/mesh.html)
+- [Schwartz and Hearst: explicit abbreviation definition extraction](https://pubmed.ncbi.nlm.nih.gov/12603049/)
 - [VOSviewer visual encodings](https://app.vosviewer.com/docs/user-interface/main-panel/)
 
 The implementation uses its own layout, not VOSviewer's clustering or inference.
