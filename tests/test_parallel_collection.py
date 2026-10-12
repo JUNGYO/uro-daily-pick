@@ -141,6 +141,28 @@ class ParallelCollectionTests(unittest.TestCase):
         with self.assertRaises(SourcePaused): gate("https://oa.example.test/next", 110)
         with self.assertRaises(TimeoutError): gate("https://other.example.test/next", clock[0])
 
+    def test_browser_timings_are_aggregated_without_article_content(self):
+        outer = self
+        class Browser:
+            def __init__(self, *args): pass
+            def read(self, paper, budget_ms):
+                return outer.browser_result(paper)
+            def close(self): pass
+        def unavailable(*args, **kwargs):
+            raise FulltextUnavailable("No synthetic OA copy")
+        self.deps.update(fetch_oa=unavailable, Browser=Browser)
+        with patch("builtins.print") as printed:
+            self.assertEqual(self.run_queue([self.paper(1)])["completed"], 1)
+        line = next(call.args[0] for call in printed.call_args_list
+                    if call.args and str(call.args[0]).startswith("Collection telemetry: "))
+        data = json.loads(line.removeprefix("Collection telemetry: "))
+        timings = data["browser_settlement_by_source_status"]
+        self.assertEqual(set(timings), {"springer-nature:ready"})
+        self.assertEqual(timings["springer-nature:ready"]["count"], 1)
+        self.assertGreaterEqual(timings["springer-nature:ready"]["seconds"], 0)
+        self.assertNotIn("Synthetic study", line)
+        self.assertNotIn("https://", line)
+
     def test_atomic_original_writes_retry_transient_windows_sharing_locks(self):
         real_replace = Path.replace
         for extension, write in ((".xml", lambda path: _save_bytes(path, b"new original")),

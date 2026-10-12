@@ -218,6 +218,36 @@ test("a route with insufficient remaining budget is aborted without requesting i
   expect(route.continue).not.toHaveBeenCalled();
   expect(vi.getTimerCount()).toBe(0);
 });
+
+test.each(["image", "media", "font", "script", "stylesheet", "xhr", "fetch", "document"])(
+  "article acquisition handles %s without dropping text application requests",
+  async (type) => {
+    const frame = {};
+    let handler;
+    const policy = new PublisherPolicy();
+    const before = vi.spyOn(policy, "before");
+    const page = {
+      mainFrame: () => frame,
+      route: async (_pattern, callback) => { handler = callback; },
+    };
+    await guardPage(page, policy, Date.now() + 5000, {});
+    const route = {
+      request: () => ({
+        url: () => articleUrl,
+        isNavigationRequest: () => type === "document",
+        frame: () => frame,
+        resourceType: () => type,
+      }),
+      abort: vi.fn(async () => {}),
+      continue: vi.fn(async () => {}),
+    };
+    await handler(route);
+    const omitted = ["image", "media", "font"].includes(type);
+    expect(route.abort).toHaveBeenCalledTimes(omitted ? 1 : 0);
+    expect(route.continue).toHaveBeenCalledTimes(omitted ? 0 : 1);
+    expect(before).toHaveBeenCalledTimes(type === "document" ? 1 : 0);
+  },
+);
 test("a synthetic saved rate limit is respected after reopening the policy", async () => {
   frozenClock();
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "uro-publisher-policy-test-"));
