@@ -12,6 +12,7 @@ import threading
 import time
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
+from acquisition_quota import AcquisitionDeferred, download_scope, preflight
 
 
 class SourcePaused(RuntimeError):
@@ -218,6 +219,11 @@ def _read_cache(directory, paper):
 
 
 def _acquire_api(paper, cache, deadline, deps, gate, probes=None):
+    with download_scope(paper):
+        return _acquire_api_scoped(paper, cache, deadline, deps, gate, probes)
+
+
+def _acquire_api_scoped(paper, cache, deadline, deps, gate, probes=None):
     """Network and parsing only. No persistence, SQLite, or service-side writes."""
     probes = probes or {}
     updates, stats = [], {"provider_probes": 0, "cached_no_copy": 0, "cached_location": 0, "cached_retry": 0,
@@ -242,6 +248,7 @@ def _acquire_api(paper, cache, deadline, deps, gate, probes=None):
             if deps["cached_paper_matches"](identity, paper):
                 document = deps["verify_cached_body"](saved["document"])
                 return result({"document": document, "persist": kind == "archive"})
+        preflight(paper)
         api_deadline = min(deadline, deps["clock"]() + 120)
         providers = [("oa", deps["fetch_oa"])]
         if deps.get("fetch_pmc_cloud"):
@@ -308,6 +315,8 @@ def _acquire_api(paper, cache, deadline, deps, gate, probes=None):
                 if deps["clock"]() >= deadline:
                     return result({"deferred": True})
         return result({"browser": True})
+    except AcquisitionDeferred as error:
+        return result({"deferred": True, "quota_reason": error.reason})
     except (SourcePaused, TimeoutError):
         return result({"deferred": True})
     except (ValueError, KeyError, TypeError):
@@ -322,11 +331,16 @@ def _acquire_browser(paper, deadline, deps, browser):
             return {"deferred": True}
         if str(paper.get("doi") or "").lower().startswith("10.1016/"):
             return {"status": "unsupported", "reason": "browser_automation_not_permitted"}
+        preflight(paper)
         result = browser.read(paper)
+        if str(result.get("reason", "")).startswith("quota_"):
+            return {"deferred": True, "quota_reason": result["reason"]}
         document = deps["parsed_result"](paper, result)
         if document is None:
             return {"status": result.get("status", "parse_failed"), "reason": result.get("reason", "validation_failed")}
         return {"document": document, "raw": result["html"].encode(), "suffix": ".html", "persist": True}
+    except AcquisitionDeferred as error:
+        return {"deferred": True, "quota_reason": error.reason}
     except SourcePaused:
         return {"deferred": True, "source_paused": True}
     except TimeoutError:

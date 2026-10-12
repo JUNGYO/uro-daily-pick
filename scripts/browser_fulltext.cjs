@@ -4,6 +4,7 @@
 const readline = require('node:readline');
 const fs = require('node:fs');
 const path = require('node:path');
+const { spawnSync } = require('node:child_process');
 let chromium;
 try { ({ chromium } = require('playwright-core')); }
 catch { ({ chromium } = require('../frontend/node_modules/playwright-core')); }
@@ -23,8 +24,36 @@ const publisherGroup = host => ['link.springer.com','nature.com','media.springer
 
 // A denied/rate-limited source stays paused across hourly runs. No session reset
 // or alternate address is used to retry a publisher block.
+class BrowserQuota {
+  constructor(config, python) { this.config = config; this.python = python; }
+  call(action, job = {}, url = '') {
+    if (!this.python) throw Object.assign(new Error('Quota unavailable'), {reason:'quota_ledger_unavailable'});
+    const args = [path.join(__dirname, 'acquisition_quota.py'), '--policy', this.config, action,
+      '--doi', String(job.doi || ''), '--publishers', (job.publishers || []).join(',')];
+    if (url) args.push('--url', url);
+    const process = spawnSync(this.python, args, {encoding:'utf8',timeout:15000,windowsHide:true,maxBuffer:65536});
+    let result;
+    try { result = JSON.parse(process.stdout); } catch {}
+    if (process.error || process.status !== 0 || result?.ok !== true) {
+      const reason = /^quota_[a-z_]+$/.test(result?.reason || '') ? result.reason : 'quota_ledger_unavailable';
+      throw Object.assign(new Error('Acquisition deferred'), {reason});
+    }
+  }
+  before(url, job) {
+    const host = new URL(url).hostname;
+    // DOI resolution is metadata; every redirected publisher Document is
+    // intercepted again at Request stage, before its bytes are requested.
+    if (['doi.org', 'dx.doi.org'].includes(host)) this.call('check', job);
+    else this.call('reserve', job, url);
+  }
+}
+
 class PublisherPolicy {
-  constructor(directory = null) { this.directory = directory; this.pauses = new Map(); this.lastStart = new Map(); }
+  constructor(directory = null, quota = undefined) {
+    this.directory = directory; this.pauses = new Map(); this.lastStart = new Map();
+    this.quota = quota === undefined && process.env.URO_ACQUISITION_POLICY
+      ? new BrowserQuota(process.env.URO_ACQUISITION_POLICY, process.env.URO_QUOTA_PYTHON) : quota;
+  }
   pauseFor(host) {
     const group = publisherGroup(host);
     if (!group) return null;
@@ -76,13 +105,23 @@ async function blockPublisherRequests(context, page, policy, navigation) {
   // Route callbacks do not cover every HTTP redirect hop. Chromium's network
   // block applies before transport, including automatic redirect destinations.
   const session = await context.newCDPSession(page);
-  session.on('Fetch.requestPaused', event => {
+  session.on('Fetch.requestPaused', async event => {
     const host = new URL(event.request.url).hostname;
-    navigation.reason = disabledWebHost(host) ? 'publisher_web_disabled' : 'publisher_paused';
-    void session.send('Fetch.failRequest', {requestId:event.requestId, errorReason:'BlockedByClient'})
-      .catch(() => page.close().catch(() => {}));
+    try {
+      if (disabledWebHost(host)) throw Object.assign(new Error('Disabled'), {reason:'publisher_web_disabled'});
+      if (policy.pauseFor(host)) throw Object.assign(new Error('Paused'), {reason:'publisher_paused'});
+      if (!policy.quota) throw Object.assign(new Error('Paused'), {reason:'publisher_paused'});
+      if (event.resourceType === 'Document') policy.quota.before(event.request.url, navigation.job || {});
+      await session.send('Fetch.continueRequest', {requestId:event.requestId});
+    } catch (error) {
+      navigation.reason = error.reason || 'quota_ledger_unavailable';
+      await session.send('Fetch.failRequest', {requestId:event.requestId, errorReason:'BlockedByClient'})
+        .catch(() => page.close().catch(() => {}));
+    }
   });
-  await session.send('Fetch.enable', {patterns:urls.map(urlPattern => ({urlPattern,requestStage:'Request'}))});
+  const patterns = urls.map(urlPattern => ({urlPattern,requestStage:'Request'}));
+  if (policy.quota) patterns.push({urlPattern:'*',resourceType:'Document',requestStage:'Request'});
+  await session.send('Fetch.enable', {patterns});
   page.on('requestfailed', request => {
     const host = new URL(request.url()).hostname;
     if (disabledWebHost(host)) navigation.reason = 'publisher_web_disabled';
@@ -130,11 +169,13 @@ const allowedImage = value => {
 
 async function readImage(context, job, policy = new PublisherPolicy()) {
   if (!allowedImage(job.url)) return {status:'unsupported'};
+  try { policy.quota?.call('check', job, job.url); }
+  catch (error) { return {status:'unavailable',reason:error.reason}; }
   const page=await context.newPage();
   const budget = Number.isFinite(job.budget_ms) ? Math.max(1,Math.min(30000,job.budget_ms)) : 20000;
   const deadline = Date.now() + budget;
   const timer=setTimeout(()=>void page.close().catch(()=>{}),budget);
-  const navigation = {};
+  const navigation = {job};
   try {
     await blockPublisherRequests(context, page, policy, navigation);
     await page.route('**/*', async route => {
@@ -155,7 +196,7 @@ async function readImage(context, job, policy = new PublisherPolicy()) {
     const bytes=await response.body();
     if (bytes.length>20*1024*1024) return {status:'unsupported'};
     return {status:'downloaded',data:bytes.toString('base64')};
-  } catch { return {status:'unavailable'}; }
+  } catch { return {status:'unavailable', ...(navigation.reason ? {reason:navigation.reason} : {})}; }
   finally { clearTimeout(timer);await page.close().catch(()=>{}); }
 }
 const selectorsFor = (host) => disabledWebHost(host) ? []
@@ -170,10 +211,12 @@ async function readArticle(context, job, policy = new PublisherPolicy()) {
   // Known Elsevier DOI routing can be rejected without contacting a resolver.
   // Chromium's network block also covers other DOI redirect destinations.
   if (/^10\.1016\//i.test(doi)) return {status:'unsupported',reason:'publisher_web_disabled'};
+  try { policy.quota?.call('check', job); }
+  catch (error) { return {status:'access_required',reason:error.reason}; }
   const page = await context.newPage();
   const pages = new Set([page]);
   let timedOut = false;
-  const navigation = {};
+  const navigation = {job};
   const budget = Number.isFinite(job.budget_ms) ? Math.max(1000, Math.min(240000, job.budget_ms)) : 240000;
   const deadline = Date.now() + budget;
   const timer = setTimeout(() => {
@@ -286,4 +329,4 @@ async function main() {
   } finally { await context.close(); }
 }
 if (require.main === module) main().catch(() => { console.error('Browser worker failed'); process.exitCode=1; });
-module.exports={allowedHost,disabledWebHost,selectorsFor,readArticle,allowedImage,readImage,PublisherPolicy,guardPage,blockPublisherRequests};
+module.exports={allowedHost,disabledWebHost,selectorsFor,readArticle,allowedImage,readImage,PublisherPolicy,BrowserQuota,guardPage,blockPublisherRequests};

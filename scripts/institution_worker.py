@@ -216,7 +216,9 @@ class Browser:
         self.process = subprocess.Popen([str(node), str(Path(__file__).with_name("browser_fulltext.cjs"))],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True, encoding="utf-8", env={**os.environ, "URO_BROWSER_PROFILE": str(directory / profile),
-                "URO_PUBLISHER_STATE": str(directory / "publisher-pauses")},
+                "URO_PUBLISHER_STATE": str(directory / "publisher-pauses"),
+                "URO_ACQUISITION_POLICY": str(directory / "acquisition-policy.json"),
+                "URO_QUOTA_PYTHON": sys.executable},
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         self.responses = queue.Queue()
         def receive():
@@ -250,6 +252,8 @@ class Browser:
         self.process.wait(timeout=10)
 
     def read(self, paper, budget_ms=240000):
+        from acquisition_quota import preflight
+        preflight(paper)
         self.process.stdin.write(json.dumps({"pmid":paper["pmid"], "doi":paper["doi"], "budget_ms":budget_ms}) + "\n")
         self.process.stdin.flush()
         return self.response(budget_ms)
@@ -263,7 +267,9 @@ class Browser:
             self.kill()
 
     def image(self, url, budget_ms=20000):
-        self.process.stdin.write(json.dumps({"operation":"image","url":url,"budget_ms":budget_ms}) + "\n")
+        from acquisition_quota import current_publishers
+        self.process.stdin.write(json.dumps({"operation":"image","url":url,"budget_ms":budget_ms,
+                                             "publishers":current_publishers()}) + "\n")
         self.process.stdin.flush()
         return self.response(budget_ms)
 
@@ -509,7 +515,9 @@ def run(directory, node, seconds, phase="all", requested_pmid=None):
                         document=parsed_result(paper,result)
                     else:
                         try:
-                            content,source_url=fetch_oa(pmid)
+                            from acquisition_quota import download_scope
+                            with download_scope(paper):
+                                content,source_url=fetch_oa(pmid)
                             document={**parse_document(content),"source_url":source_url}
                             if len(document["content_text"]) < 2000 or len(document["sections"]) < 2:
                                 raise ValueError("Incomplete OA body")
@@ -593,6 +601,7 @@ def main():
         return
     if not args.node or not 60 <= args.max_seconds <= 3600:
         parser.error("A Node executable and 60..3600 second runtime are required")
+    os.environ["URO_ACQUISITION_POLICY"] = str(args.state_dir / "acquisition-policy.json")
     try:
         if args.phase=="research":
             from research_extraction import run_research_queue

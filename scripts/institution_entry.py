@@ -66,6 +66,13 @@ def main():
         # No cloud call precedes local work: a full or unavailable database must
         # never prevent durable discovery, acquisition or inference from starting.
         for phase in ("catalog", "sync", "collect", "summarize", "figures", "research", "knowledge"):
+            if phase in {"collect", "figures"}:
+                from acquisition_quota import AcquisitionDeferred, Quota
+                try:
+                    Quota(state / "acquisition-policy.json").active()
+                except AcquisitionDeferred as error:
+                    print(f"{phase}: deferred, {error.reason}", flush=True)
+                    continue
             output = (state / (phase + ".log")).open("a", encoding="utf-8", buffering=1)
             logs.append(output)
             output.write(f"\n{datetime.now(timezone.utc).isoformat()} {phase} started\n")
@@ -82,6 +89,7 @@ def main():
                     "--phase", phase, "--max-seconds", "3300"]
             process = subprocess.Popen(command, cwd=release,
                 stdout=output, stderr=output, stdin=subprocess.DEVNULL,
+                env={**os.environ, "URO_ACQUISITION_POLICY": str(state / "acquisition-policy.json")},
                 creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
             processes.append((phase, process))
         results = []

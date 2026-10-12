@@ -55,6 +55,8 @@ def download(url, headers=None, *, deadline=None, request_gate=None):
     opener = build_opener(HTTPSHandler(context=ssl.create_default_context()), NoRedirect())
     if request_gate is not None:
         request_gate(url, deadline)
+    from acquisition_quota import before_download
+    before_download(url)
     # Gate waits consume the same article budget; recompute immediately before I/O.
     with opener.open(request, timeout=_download_timeout(deadline)) as response:
         content = bytearray()

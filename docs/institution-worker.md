@@ -1,5 +1,42 @@
 # Z8 collection and Spark summaries
 
+## Daily acquisition limit
+
+Scheduled collection and figure acquisition require `acquisition-policy.json`
+in the selected local state directory. Missing or invalid policy/ledger blocks
+downloads. Other phases can continue. Example policy:
+
+```json
+{"version":1,"timezone":"Asia/Seoul","starts_at":"2026-10-13T00:00:00+09:00","daily_limit":30,"manual_reserve":0}
+```
+
+Initialize once with `python acquisition_quota.py --policy <path> initialize`.
+The adjacent `acquisition-quota.sqlite3` ledger is shared by API, browser and
+figure workers. Back it up with the state directory; never delete it to recover
+capacity. Initialization refuses an existing ledger. Quota records stay local.
+
+The limit is at most 30 attempts per publisher per Korean calendar day. Charges
+are committed before transport and are not refunded after failure. Full-text,
+linked-table and figure requests consume the same budget, so fewer than 30
+complete papers may be acquired. Concurrent workers and restarts share an atomic
+ledger. Chromium intercepts redirect destinations before transport. Publisher
+domain aliases are grouped; known DOI prefixes add a conservative charge when
+the actual destination differs. Repository content without a recognized
+publisher is deferred. Metadata discovery and existing local reading, summaries
+and knowledge processing do not consume download capacity. Existing publisher
+access blocks, licensing checks and request pacing still apply; a quota is not
+permission to automate a source.
+
+Use `python acquisition_quota.py --policy <path> status` to inspect today's
+counts. Manual downloads in another browser cannot be detected. Before making
+them, reserve capacity with `python acquisition_quota.py --policy <path> manual
+--publishers <group> --count <n>`; the command refuses excess capacity. Supported
+groups are `springer-nature`, `wiley`, `elsevier`, `jama`, `bmj`, and
+`wolters-kluwer`. Alternatively, `manual_reserve` keeps that many daily slots
+outside automatic collection. Set `paused` to `true` to stop new source requests.
+Do not raise `daily_limit` above the institution's allowance; values above 30
+are rejected. Review source-specific authorization separately.
+
 Z8 collects full articles through the hospital network and stores originals outside OneDrive. The existing Spark API at http://127.0.0.1:18000/v1, model nvidia/Qwen3.8-27B-NVFP4, generates three-line Korean summaries. Only summaries, structured findings, QA and provenance metadata reach Supabase. Abstracts never substitute for missing bodies.
 
 The client checks the existing model and sends its own paper messages directly, one inference request at a time. It does not install models, start servers, change the SSH tunnel or submit tasks to another application. Spark outages preserve pending documents for retry; model API fallback is not automatic.

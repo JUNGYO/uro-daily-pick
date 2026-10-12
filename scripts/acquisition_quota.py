@@ -1,0 +1,253 @@
+"""Durable, shared daily acquisition limits. A reservation is never refunded.
+
+Only explicit initialization creates the ledger. Missing/corrupt state blocks
+downloads; process restarts and failed requests cannot reset the daily count.
+"""
+import argparse
+from contextlib import contextmanager, closing
+from contextvars import ContextVar
+from datetime import datetime, timedelta, timezone
+import json
+import os
+from pathlib import Path
+import re
+import sqlite3
+import sys
+from urllib.parse import urlsplit
+
+KST = timezone(timedelta(hours=9))
+PUBLISHERS = {"springer-nature", "wiley", "elsevier", "jama", "bmj", "wolters-kluwer"}
+PREFIXES = {"10.1007": "springer-nature", "10.1038": "springer-nature",
+            "10.1002": "wiley", "10.1111": "wiley", "10.1016": "elsevier",
+            "10.1001": "jama", "10.1136": "bmj", "10.1097": "wolters-kluwer"}
+_scope = ContextVar("acquisition_publisher_scope", default=())
+
+
+class AcquisitionDeferred(RuntimeError):
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def publisher_for_host(host):
+    host = host.lower().rstrip(".")
+    for group, domains in {
+        "springer-nature": ("springer.com", "nature.com", "springernature.com", "springer-cdn.com"),
+        "wiley": ("wiley.com",), "elsevier": ("elsevier.com", "sciencedirect.com", "els-cdn.com"),
+        "jama": ("jamanetwork.com",), "bmj": ("bmj.com",),
+        "wolters-kluwer": ("lww.com", "wolterskluwer.com"),
+    }.items():
+        if any(host == domain or host.endswith("." + domain) for domain in domains):
+            return group
+    return None
+
+
+def paper_publishers(paper, source_url=""):
+    # Prefixes are only additional conservative charging hints. Browser transport
+    # also charges the actual destination, including redirects and CDN domains.
+    doi = str(paper.get("doi") or "").strip().lower()
+    groups = {PREFIXES.get(doi.split("/", 1)[0]), publisher_for_host(urlsplit(source_url).hostname or "")}
+    return sorted(group for group in groups if group)
+
+
+@contextmanager
+def download_scope(paper, source_url=""):
+    token = _scope.set(tuple(paper_publishers(paper, source_url)))
+    try:
+        yield
+    finally:
+        _scope.reset(token)
+
+
+def current_publishers():
+    return list(_scope.get())
+
+
+def policy_path():
+    return os.environ.get("URO_ACQUISITION_POLICY")
+
+
+def metadata_url(url):
+    u = urlsplit(url)
+    return (u.scheme == "https" and not u.username and not u.password and u.port in (None, 443) and (
+        (u.hostname == "www.ebi.ac.uk" and u.path == "/europepmc/webservices/rest/search") or
+        (u.hostname == "pmc-oa-opendata.s3.amazonaws.com" and
+         (u.path == "/" or re.fullmatch(r"/PMC\d+\.\d+/PMC\d+\.\d+\.json", u.path)))))
+
+
+def groups_for_url(url, expected=()):
+    u = urlsplit(url)
+    if u.scheme != "https" or u.username or u.password or u.port not in (None, 443):
+        raise AcquisitionDeferred("quota_unsupported_source")
+    actual = publisher_for_host(u.hostname or "")
+    groups = set(expected)
+    if not groups.issubset(PUBLISHERS):
+        raise AcquisitionDeferred("quota_unknown_publisher")
+    if actual:
+        groups.add(actual)
+    elif u.hostname in {"www.ebi.ac.uk", "europepmc.org", "pmc.ncbi.nlm.nih.gov",
+                        "cdn.ncbi.nlm.nih.gov", "www.ncbi.nlm.nih.gov", "pmc-oa-opendata.s3.amazonaws.com"}:
+        if not groups:
+            raise AcquisitionDeferred("quota_unknown_publisher")
+    else:
+        raise AcquisitionDeferred("quota_unknown_publisher")
+    return sorted(groups)
+
+
+class Quota:
+    def __init__(self, config_path, *, now=None):
+        self.config_path = Path(config_path)
+        self.now = now or (lambda: datetime.now(timezone.utc))
+
+    def config(self):
+        try:
+            config = json.loads(self.config_path.read_text(encoding="utf-8"))
+            start = datetime.fromisoformat(config["starts_at"])
+            if (config.get("version") != 1 or config.get("timezone") != "Asia/Seoul"
+                    or start.utcoffset() != timedelta(hours=9)
+                    or type(config.get("daily_limit")) is not int or not 1 <= config["daily_limit"] <= 30
+                    or type(config.get("manual_reserve", 0)) is not int
+                    or not 0 <= config.get("manual_reserve", 0) <= config["daily_limit"]):
+                raise ValueError("Invalid policy")
+            return config, start
+        except (OSError, ValueError, KeyError, TypeError):
+            raise AcquisitionDeferred("quota_policy_unavailable") from None
+
+    def _db(self):
+        # mode=rw is intentional: losing the ledger must never grant 30 more.
+        path = self.config_path.with_name("acquisition-quota.sqlite3").resolve()
+        db = sqlite3.connect(path.as_uri() + "?mode=rw", uri=True, timeout=10)
+        try:
+            db.execute("PRAGMA synchronous=FULL")
+        except sqlite3.Error:
+            db.close()
+            raise
+        return db
+
+    def reserve(self, groups, *, amount=1, manual=False):
+        groups = sorted(set(groups))
+        if not groups or not set(groups).issubset(PUBLISHERS) or type(amount) is not int or amount < 0:
+            raise AcquisitionDeferred("quota_unknown_publisher")
+        config, start = self.config()
+        now = self.now()
+        if now < start or config.get("paused", False):
+            raise AcquisitionDeferred("quota_not_started")
+        day = now.astimezone(KST).date().isoformat()
+        db = None
+        try:
+            db = self._db()
+            db.execute("BEGIN IMMEDIATE")
+            last_day = db.execute("SELECT value FROM metadata WHERE key='last_day'").fetchone()
+            if last_day is None or day < last_day[0]:
+                raise AcquisitionDeferred("quota_clock_rollback")
+            rows = {}
+            for group in groups:
+                row = db.execute("SELECT automatic,manual FROM usage WHERE day=? AND publisher=?", (day, group)).fetchone()
+                automatic, used_manual = row or (0, 0)
+                # Reserved manual capacity remains available to manual entries.
+                used = automatic + (used_manual if manual else max(used_manual, config.get("manual_reserve", 0)))
+                if used + (amount or 1) > config["daily_limit"]:
+                    raise AcquisitionDeferred("quota_daily_limit")
+                rows[group] = (automatic, used_manual)
+            if amount:
+                for group, (automatic, used_manual) in rows.items():
+                    db.execute("INSERT OR REPLACE INTO usage VALUES(?,?,?,?)",
+                               (day, group, automatic + (0 if manual else amount), used_manual + (amount if manual else 0)))
+                db.execute("UPDATE metadata SET value=? WHERE key='last_day'", (day,))
+            db.commit()
+            return {"day": day, "publishers": groups, "charged": amount}
+        except (OSError, sqlite3.Error):
+            raise AcquisitionDeferred("quota_ledger_unavailable") from None
+        finally:
+            if db is not None:
+                db.close()
+
+    def active(self):
+        config, start = self.config()
+        if self.now() < start or config.get("paused", False):
+            raise AcquisitionDeferred("quota_not_started")
+
+    def status(self):
+        config, _ = self.config()
+        day = self.now().astimezone(KST).date().isoformat()
+        try:
+            with closing(self._db()) as db:
+                rows = dict((group, (automatic, manual)) for group, automatic, manual in
+                            db.execute("SELECT publisher,automatic,manual FROM usage WHERE day=?", (day,)))
+            return {"day": day, **config, "publishers": {
+                group: {"automatic": rows.get(group, (0, 0))[0], "manual": rows.get(group, (0, 0))[1],
+                        "remaining": max(0, config["daily_limit"] - rows.get(group, (0, 0))[0]
+                                         - max(config.get("manual_reserve", 0), rows.get(group, (0, 0))[1]))}
+                for group in sorted(PUBLISHERS)}}
+        except (OSError, sqlite3.Error):
+            raise AcquisitionDeferred("quota_ledger_unavailable") from None
+
+
+def before_download(url):
+    selected = policy_path()
+    if not selected or metadata_url(url):
+        return
+    Quota(selected).reserve(groups_for_url(url, current_publishers()))
+
+
+def preflight(paper):
+    selected = policy_path()
+    if not selected:
+        return
+    quota = Quota(selected)
+    quota.active()
+    groups = paper_publishers(paper)
+    if groups:
+        quota.reserve(groups, amount=0)
+
+
+def initialize(config_path):
+    """Operator-only setup; deliberately refuse to overwrite a previous ledger."""
+    quota = Quota(config_path)
+    quota.config()
+    path = Path(config_path).with_name("acquisition-quota.sqlite3")
+    with path.open("xb"):
+        pass
+    with closing(sqlite3.connect(path)) as db, db:
+        db.execute("CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT NOT NULL)")
+        db.execute("INSERT INTO metadata VALUES('last_day','')")
+        db.execute("CREATE TABLE usage(day TEXT NOT NULL,publisher TEXT NOT NULL,automatic INTEGER NOT NULL CHECK(automatic>=0),"
+                   "manual INTEGER NOT NULL CHECK(manual>=0),PRIMARY KEY(day,publisher))")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--policy", required=True)
+    parser.add_argument("action", choices=("initialize", "status", "reserve", "check", "manual"))
+    parser.add_argument("--url", default="")
+    parser.add_argument("--publishers", default="")
+    parser.add_argument("--doi", default="")
+    parser.add_argument("--count", type=int, default=1)
+    args = parser.parse_args()
+    quota = Quota(args.policy)
+    try:
+        if args.action == "initialize":
+            initialize(args.policy)
+            result = {"initialized": True}
+        elif args.action == "status":
+            result = quota.status()
+        else:
+            groups = [g for g in args.publishers.split(",") if g]
+            groups = sorted(set(groups + paper_publishers({"doi": args.doi})))
+            if args.url:
+                groups = groups_for_url(args.url, groups)
+            if args.action == "check" and not groups:
+                quota.active()
+                result = {"charged": 0}
+            else:
+                result = quota.reserve(groups, amount=0 if args.action == "check" else args.count,
+                                       manual=args.action == "manual")
+        print(json.dumps({"ok": True, **result}))
+    except AcquisitionDeferred as error:
+        print(json.dumps({"ok": False, "reason": error.reason}))
+        return 2
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
