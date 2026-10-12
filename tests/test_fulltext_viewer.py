@@ -176,12 +176,45 @@ class IdentityTests(unittest.TestCase):
         request = self.identity.opener.open.call_args.args[0]
         self.assertEqual(request.full_url, "https://project.supabase.co/auth/v1/user")
         self.assertEqual(request.get_header("Authorization"), "Bearer " + TOKEN)
-        for changes in ({"email": "someone@example.test"}, {"id": "another-id"},
-                        {"email_confirmed_at": None}, {"is_anonymous": True}):
+        for changes in ({"email_confirmed_at": None}, {"is_anonymous": True}):
             self.user(**changes)
             with self.assertRaises(ViewerError) as result:
                 self.identity.authorize(TOKEN)
             self.assertEqual(result.exception.status, 403)
+
+    def test_member_grant_is_checked_on_every_request_and_revocation_takes_effect(self):
+        member = {"id": "member-id", "email": "member@example.test", "email_confirmed_at": "2026-01-01"}
+        self.identity.opener.open.side_effect = [
+            io.BytesIO(json.dumps(member).encode()), io.BytesIO(b'true'),
+            io.BytesIO(json.dumps(member).encode()), io.BytesIO(b'false')]
+        self.identity.authorize(TOKEN)
+        request = self.identity.opener.open.call_args.args[0]
+        self.assertEqual(request.full_url, "https://project.supabase.co/rest/v1/rpc/reader_original_access")
+        self.assertEqual(request.data, b'{}')
+        self.assertEqual(request.get_header('Authorization'), 'Bearer ' + TOKEN)
+        with self.assertRaises(ViewerError) as denied:
+            self.identity.authorize(TOKEN)
+        self.assertEqual(denied.exception.status, 403)
+        self.assertEqual(self.identity.opener.open.call_count, 4)
+
+    def test_owner_email_or_id_alone_cannot_bypass_grants(self):
+        for changes in ({"email": "another@example.test"}, {"id": "another-id"}):
+            user = {"id": "owner-id", "email": "owner@example.test", "email_confirmed_at": "2026-01-01", **changes}
+            self.identity.opener.open.side_effect = [io.BytesIO(json.dumps(user).encode()), io.BytesIO(b'false')]
+            with self.assertRaises(ViewerError) as denied:
+                self.identity.authorize(TOKEN)
+            self.assertEqual(denied.exception.status, 403)
+
+    def test_member_rpc_failure_metadata_and_non_boolean_results_fail_closed(self):
+        member = {"id": "member", "email_confirmed_at": "2026-01-01", "user_metadata": {"original_access_enabled": True}}
+        for response, status in [(b'false',403),(b'"true"',403),(b'1',403),(b'{"enabled":true}',403),(b'null',403),(b'bad-json',503),
+                                 (URLError('secret detail'),503),(HTTPError('private',503,'unavailable',{},None),503)]:
+            value = response if isinstance(response, Exception) else io.BytesIO(response)
+            self.identity.opener.open.side_effect = [io.BytesIO(json.dumps(member).encode()), value]
+            with self.assertRaises(ViewerError) as denied:
+                self.identity.authorize(TOKEN)
+            self.assertEqual(denied.exception.status, status)
+            self.assertNotIn('secret', denied.exception.code)
 
     def test_identity_errors_fail_closed_without_leaking_details(self):
         for error, status in [(URLError("private detail"), 503),

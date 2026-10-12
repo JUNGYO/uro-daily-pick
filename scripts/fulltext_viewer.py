@@ -54,6 +54,7 @@ def https_origin(value):
 class SupabaseIdentity:
     def __init__(self, url, public_key, owner_email, owner_id):
         self.url = https_origin(url) + "/auth/v1/user"
+        self.access_url = https_origin(url) + "/rest/v1/rpc/reader_original_access"
         if not public_key.startswith("sb_publishable_"):
             raise ValueError("Only a Supabase public publishable key is accepted")
         if not owner_email or not owner_id:
@@ -77,9 +78,27 @@ class SupabaseIdentity:
             raise ViewerError(503, "identity_unavailable") from None
         except (URLError, OSError, ValueError):
             raise ViewerError(503, "identity_unavailable") from None
-        if (not isinstance(user, dict) or user.get("id") != self.owner_id
-                or str(user.get("email", "")).strip().lower() != self.email
+        if (not isinstance(user, dict) or not user.get("id")
                 or not user.get("email_confirmed_at") or user.get("is_anonymous")):
+            raise ViewerError(403, "access_denied")
+        # Keep the pinned operator identity. Every other reader needs a fresh grant.
+        if (user.get("id") == self.owner_id
+                and str(user.get("email", "")).strip().lower() == self.email):
+            return
+        request = Request(self.access_url, data=b"{}", method="POST", headers={
+            "apikey": self.key, "Authorization": "Bearer " + token,
+            "Content-Type": "application/json"})
+        try:
+            with self.opener.open(request, timeout=10) as response:
+                allowed = json.loads(response.read(1025))
+        except HTTPError as error:
+            if error.code in (401, 403):
+                raise ViewerError(error.code, "access_denied") from None
+            raise ViewerError(503, "identity_unavailable") from None
+        except (URLError, OSError, ValueError):
+            raise ViewerError(503, "identity_unavailable") from None
+        # No JWT metadata, supplied user IDs, positive cache or permissive fallback.
+        if allowed is not True:
             raise ViewerError(403, "access_denied")
 
 

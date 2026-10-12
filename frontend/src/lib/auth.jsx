@@ -149,6 +149,19 @@ export function AuthProvider({ children }) {
     };
   }, [user?.id, revision, loadProfile]);
 
+  useEffect(() => {
+    if (!user?.id || user.offline) return;
+    const refresh = () => {
+      if (!document.hidden && navigator.onLine) void loadProfile(user.id).catch(() => {});
+    };
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", refresh);
+    return () => {
+      window.removeEventListener("focus", refresh);
+      document.removeEventListener("visibilitychange", refresh);
+    };
+  }, [user?.id, user?.offline, loadProfile]);
+
   const ownProfile = profile?.id === user?.id ? profile : null;
   return (
     <AuthContext.Provider

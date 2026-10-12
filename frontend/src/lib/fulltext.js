@@ -20,11 +20,15 @@ export function fulltextOrigin() {
   }
 }
 
-export function canReadOriginal(user, paper) {
+export function canReadOriginal(user, paper, profile) {
   // Only a display rule. Z8 independently authorizes every request.
   return Boolean(
     fulltextOrigin() &&
-    user?.email?.toLowerCase() === "crazyslime@gmail.com" &&
+    (user?.email?.toLowerCase() === "crazyslime@gmail.com" ||
+      (user?.id &&
+        profile?.id === user.id &&
+        profile.access_status === "approved" &&
+        profile.original_access_enabled === true)) &&
     paper?.fulltext_storage === "z8" &&
     /^[1-9][0-9]{0,11}$/.test(paper?.pmid),
   );
