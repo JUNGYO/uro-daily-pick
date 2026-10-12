@@ -107,6 +107,11 @@ async function guardPage(page, policy, deadline, state) {
       if (request.isNavigationRequest() && request.frame() === page.mainFrame()) state.reason = 'publisher_web_disabled';
       return route.abort();
     }
+    // Text acquisition needs the DOM, styles and application requests, not a
+    // second download of figures, video or web fonts. Keep their DOM URLs for
+    // the existing figure worker; readImage deliberately uses a separate route.
+    if (!request.isNavigationRequest() && ['image', 'media', 'font'].includes(request.resourceType()))
+      return route.abort();
     if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
       if (!allowedHost(host)) { state.reason = 'unsupported_publisher'; return route.abort(); }
       try { await policy.before(host, deadline); }

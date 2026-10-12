@@ -414,6 +414,7 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
     started_at = deps["clock"]()
     print(f"Collection workers: api={max(1, min(3, max_workers))}, browser=1; publisher navigation serialized", flush=True)
     seen, pending = set(), {}
+    browser_started, browser_timings = {}, {}
     iterator = deque(papers)
     exhausted = False
     browser_backlog, browser_pending, browser_enqueued = deque(), {}, set()
@@ -628,7 +629,9 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
                 if browser_backlog and not browser_pending and deps["clock"]() < deadline:
                     paper = browser_backlog.popleft()
                     stats["browser_attempts"] += 1
-                    browser_pending[browser_pool.submit(_acquire_browser, paper, deadline, deps, browser)] = paper
+                    future = browser_pool.submit(_acquire_browser, paper, deadline, deps, browser)
+                    browser_pending[future] = paper
+                    browser_started[future] = deps["clock"]()
                 if not pending and not browser_pending:
                     if prepared or browser_backlog or not exhausted:
                         continue
@@ -641,6 +644,19 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
                         outcome = future.result()
                     except Exception:
                         outcome = {"status": "retryable_error", "reason": "collection_unavailable"}
+                    if browser_attempt:
+                        # Bounded source/status aggregates contain no URLs,
+                        # titles or article bodies. This includes coordinator
+                        # delay and is request-to-settlement time, not HTTP time.
+                        status = "ready" if "document" in outcome else "deferred" if outcome.get("deferred") else outcome.get("status")
+                        if status not in {"ready", "deferred", "access_required", "challenge", "unsupported", "parse_failed", "retryable_error"}:
+                            status = "parse_failed"
+                        key = source_key(_browser_source(paper)) + ":" + status
+                        timing = browser_timings.setdefault(key, {"count": 0, "seconds": 0, "max_seconds": 0})
+                        elapsed = max(0, deps["clock"]() - browser_started.pop(future))
+                        timing["count"] += 1
+                        timing["seconds"] += elapsed
+                        timing["max_seconds"] = max(timing["max_seconds"], elapsed)
                     record_probes(paper, outcome.get("probe_updates", []))
                     for key, value in outcome.get("probe_stats", {}).items():
                         stats[key] += value
@@ -662,5 +678,8 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
         stats["elapsed_seconds"] = round(max(0, deps["clock"]() - started_at), 3)
         stats["new_originals"] = counts["completed"]
         stats["browser_pending"] = db.execute("SELECT count(*) FROM collection_browser_pending").fetchone()[0]
+        stats["browser_settlement_by_source_status"] = {
+            key: {name: round(value, 3) if name != "count" else value for name, value in timing.items()}
+            for key, timing in sorted(browser_timings.items())}
         print("Collection telemetry: " + json.dumps(stats, sort_keys=True), flush=True)
     return counts
