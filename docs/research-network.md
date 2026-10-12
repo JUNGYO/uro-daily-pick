@@ -76,6 +76,21 @@ within the node limit, starting with selected endpoints and commonly referenced 
 The reference counts describe this indexed source corpus, not global citation counts.
 Arrows are derived only from actual reference identifiers, never inferred similarity.
 
+The default **Connections** view fits the selected graph into the viewport, so
+both ends of each displayed citation are visible. Binary reference links attract
+papers; disconnected components occupy separate regions allocated by paper count.
+Those regions are navigation groups, not scientific clusters. A shared radius
+scale preserves circle area proportional to `1 + scoped incoming citations`,
+capped at 20. Position encodes neither date, similarity nor evidence strength.
+Numbered nodes correspond to the full-title paper list; selecting a paper fits
+its direct references and citing papers. Zoom enlarges both dimensions without
+rearranging this map, and selecting a new paper resets the view.
+
+**Publication timeline** retains the linear catalog publication-year axis and
+separate unknown-year lane. Dense timelines can scroll; same-year papers are
+never moved to invented dates. The JSON export records the active layout and
+displayed selection. Both views use exactly the same supplied nodes and links.
+
 Current original hashes, publication status and the existing confirmed-reader
 guard constrain the index. Bibliographic filters are applied before aggregation.
 Publication-year charts count indexed papers; they are not population-level
