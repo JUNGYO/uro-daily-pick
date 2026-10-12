@@ -34,6 +34,7 @@ def main():
         required.extend(['/rpc/project_documents', '/rpc/workspace_paper_context', '/rpc/record_reader_visit', '/rpc/record_reader_open', '/rpc/record_reader_content', '/rpc/record_reference_export', '/rpc/admin_reader_usage'])
         required.extend('/rpc/'+name for name in ('reader_access_allowed','admin_memberships','admin_review_membership','admin_membership_count'))
         required.extend('/rpc/'+name for name in ('reader_original_access','admin_set_original_access'))
+        required.append('/rpc/admin_security_status')
         missing = [path for path in required if path not in paths]
         missing.extend('/rpc/'+name for name in ('knowledge_search','knowledge_page','knowledge_graph','publish_knowledge','knowledge_atlas','knowledge_network','knowledge_paper','publish_scientific_knowledge') if '/rpc/'+name not in paths)
         if missing:

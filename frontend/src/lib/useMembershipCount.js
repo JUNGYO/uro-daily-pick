@@ -25,11 +25,13 @@ export function useMembershipCount(user) {
     const timer = setInterval(refresh, 30000);
     document.addEventListener("visibilitychange", refresh);
     window.addEventListener("uro-membership-reviewed", refresh);
+    window.addEventListener("uro-admin-verified", refresh);
     return () => {
       active = false;
       clearInterval(timer);
       document.removeEventListener("visibilitychange", refresh);
       window.removeEventListener("uro-membership-reviewed", refresh);
+      window.removeEventListener("uro-admin-verified", refresh);
     };
   }, [user?.id, user?.email, user?.offline]);
   return count;

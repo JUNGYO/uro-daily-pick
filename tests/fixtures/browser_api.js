@@ -12,7 +12,10 @@ let user =
           ? "crazyslime@gmail.com"
           : "reader@example.test",
       };
-let listener = () => {};
+const authListeners = new Set();
+const listener = (...args) => { for (const callback of authListeners) callback(...args); };
+let assurance = scenario.startsWith("admin-mfa-") ? "aal1" : "aal2";
+let mfaFactors = scenario === "admin-mfa-enroll" ? [] : [{id:"fixture-factor",factor_type:"totp",status:"verified"}];
 const membershipRequests = scenario === "admin-membership" ? [
   { id: "new-reader", email: "new@example.test", name: "신규 연구자", institution: "Urology Research Center", access_status: "pending", access_revision: 0, created_at: "2026-10-12T00:00:00Z", email_confirmed_at: "2026-10-12T00:01:00Z" },
   { id: "unverified", email: "unverified@example.test", name: "인증 전 연구자", institution: "", access_status: "pending", access_revision: 0, created_at: "2026-10-12T00:00:00Z", email_confirmed_at: null },
@@ -707,12 +710,12 @@ export const supabase = {
       },
     }),
     onAuthStateChange(fn) {
-      listener = fn;
+      authListeners.add(fn);
       return {
         data: {
           subscription: {
             unsubscribe() {
-              listener = () => {};
+              authListeners.delete(fn);
             },
           },
         },
@@ -745,9 +748,27 @@ export const supabase = {
       ? { error: { code: "email_address_not_authorized" } }
       : { error: null },
     updateUser: async () => ({}),
+    mfa: {
+      getAuthenticatorAssuranceLevel: async () => ({ data: { currentLevel: assurance } }),
+      listFactors: async () => ({ data: { all: mfaFactors.map(f => ({...f})) } }),
+      enroll: async () => {
+        mfaFactors.push({id:"fixture-new-factor",factor_type:"totp",status:"unverified"});
+        return {data:{id:"fixture-new-factor",totp:{secret:"SYNTHETIC-TEST-ONLY",qr_code:'<svg xmlns="http://www.w3.org/2000/svg" width="224" height="224"><rect width="224" height="224" fill="white"/><text x="20" y="110">Synthetic QR fixture</text></svg>'}}};
+      },
+      unenroll: async ({factorId}) => {mfaFactors=mfaFactors.filter(f=>f.id!==factorId);return {data:{}};},
+      challengeAndVerify: async ({factorId,code}) => {
+        if(code!=="222222") return {error:{code:"mfa_verification_failed"}};
+        mfaFactors.find(f=>f.id===factorId).status="verified";
+        assurance="aal2";
+        listener("MFA_CHALLENGE_VERIFIED",{user,access_token:"fixture.access.token"});
+        return {data:{}};
+      },
+    },
   },
   rpc(name, args = {}) {
     const result = (async () => {
+      if(name.startsWith("admin_") && (assurance!=="aal2" || scenario==="admin-mfa-server-denied")) return {error:{code:"42501"}};
+      if(name==="admin_security_status") return {data:{verified:true}};
       if (name === "admin_membership_count") return { data: membershipRequests.filter(p => p.access_status === "pending").length };
       if (name === "admin_memberships") {
         const matching = membershipRequests.filter(p => p.access_status === args.p_status && `${p.name} ${p.email} ${p.institution}`.includes(args.p_query || ""));

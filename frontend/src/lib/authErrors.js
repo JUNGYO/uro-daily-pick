@@ -8,7 +8,12 @@ export function authErrorMessage(error) {
     return "이메일 인증이 필요합니다. 가입 안내 메일의 인증 링크를 확인해 주세요.";
   if (code === "user_already_exists" || /already registered/i.test(message))
     return "이미 가입된 이메일입니다. Sign in으로 로그인하거나 비밀번호를 재설정해 주세요.";
-  if (code === "weak_password") return "더 안전한 비밀번호를 입력해 주세요. 8자 이상으로 설정해 주세요.";
+  if (code === "weak_password") {
+    const reasons = error?.reasons || error?.weak_password?.reasons || [];
+    if (reasons.includes("pwned"))
+      return "유출 이력이 있는 비밀번호는 사용할 수 없습니다. 다른 서비스에서 쓰지 않는 새로운 비밀번호를 설정해 주세요.";
+    return "더 안전한 비밀번호를 입력해 주세요. 8자 이상이며 추측하기 어려운 새 비밀번호를 사용해 주세요.";
+  }
   if (code === "email_address_invalid") return "이메일 주소를 확인해 주세요.";
   if (code === "signup_disabled")
     return "현재 서버에서 회원가입을 허용하지 않고 있습니다. 잠시 후 다시 시도해 주세요.";
