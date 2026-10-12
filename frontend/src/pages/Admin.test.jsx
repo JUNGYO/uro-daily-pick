@@ -3,6 +3,8 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 const mock = vi.hoisted(() => ({ user: null, rpc: vi.fn(), signals: [] }));
 vi.mock("../lib/auth", () => ({ useAuth: () => ({ user: mock.user }) }));
 vi.mock("../lib/supabase", () => ({ supabase: { rpc: mock.rpc } }));
+// Dashboard panels are tested separately from the real MFA gate's security tests.
+vi.mock("../components/AdminMfaGate", () => ({ default: ({ children }) => children }));
 import Admin from "./Admin";
 import AdminPanel from "../components/AdminPanel";
 

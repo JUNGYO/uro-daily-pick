@@ -1,3 +1,4 @@
+import AdminMfaGate from "../components/AdminMfaGate";
 import IntegrityReview from "../components/IntegrityReview";
 import IssueReview from "../components/IssueReview";
 import { useState } from "react";
@@ -52,7 +53,6 @@ function StatCard({ icon: Icon, label, value, sub, color }) {
 
 export default function Admin() {
   const { user } = useAuth();
-  const [retry, setRetry] = useState(0);
   const isAdmin = ADMIN_EMAILS.includes(user?.email?.trim().toLowerCase());
 
   if (!isAdmin)
@@ -62,6 +62,16 @@ export default function Admin() {
       </div>
     );
 
+  return (
+    <AdminMfaGate key={user.id}>
+      <AdminDashboard />
+    </AdminMfaGate>
+  );
+}
+
+function AdminDashboard() {
+  const { user } = useAuth();
+  const [retry, setRetry] = useState(0);
   return (
     <div tabIndex={0} role="region" aria-label="Admin content" className="h-full overflow-y-auto">
       <div key={user.id} className="max-w-[960px] mx-auto p-4 sm:p-6">
