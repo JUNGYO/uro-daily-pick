@@ -33,11 +33,12 @@ def main():
         required.extend('/rpc/'+name for name in ('review_workspace','review_list','review_save_protocol','review_save_search','review_import_records','review_save_report','review_save_study','review_save_observation','review_save_assessment','review_start_analysis','review_analysis','claim_review_analysis','finish_review_analysis'))
         required.extend(['/rpc/project_documents', '/rpc/workspace_paper_context', '/rpc/record_reader_visit', '/rpc/record_reader_open', '/rpc/record_reader_content', '/rpc/record_reference_export', '/rpc/admin_reader_usage'])
         required.extend('/rpc/'+name for name in ('reader_access_allowed','admin_memberships','admin_review_membership','admin_membership_count'))
+        required.extend('/rpc/'+name for name in ('reader_original_access','admin_set_original_access'))
         missing = [path for path in required if path not in paths]
         missing.extend('/rpc/'+name for name in ('knowledge_search','knowledge_page','knowledge_graph','publish_knowledge','knowledge_atlas','knowledge_network','knowledge_paper','publish_scientific_knowledge') if '/rpc/'+name not in paths)
         if missing:
             raise SystemExit("Missing database contracts: " + ", ".join(missing))
-        for table, columns in [("reader_states", "read_at,saved_at"), ("profiles", "personalization_enabled,access_status,access_revision"), ("catalog_backfill_jobs", "journal_id,query_version,registry_version,priority")]:
+        for table, columns in [("reader_states", "read_at,saved_at"), ("profiles", "personalization_enabled,access_status,access_revision,original_access_enabled,original_access_revision"), ("catalog_backfill_jobs", "journal_id,query_version,registry_version,priority")]:
             contract = requests.get(f"{url}/rest/v1/{table}", headers=headers,
                                     params={"select":columns,"limit":"0"}, timeout=30)
             contract.raise_for_status()

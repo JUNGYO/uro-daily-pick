@@ -18,6 +18,7 @@ export default function MembershipReview({ refresh = 0 }) {
   const [notes, setNotes] = useState({});
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [originalDecision, setOriginalDecision] = useState(null);
   const parameters = useMemo(
     () => ({ p_status: status, p_query: search, p_page: page }),
     [status, search, page],
@@ -51,6 +52,38 @@ export default function MembershipReview({ refresh = 0 }) {
       setBusy(null);
     }
   };
+  const setOriginalAccess = async () => {
+    if (busy || !originalDecision) return;
+    const person = originalDecision;
+    const enabled = !person.original_access_enabled;
+    setBusy(person.id);
+    setError("");
+    setMessage("");
+    try {
+      await withTimeout(
+        checked(
+          supabase.rpc("admin_set_original_access", {
+            p_user_id: person.id,
+            p_enabled: enabled,
+            p_revision: person.original_access_revision,
+          }),
+        ),
+      );
+      setMessage(`${person.email}: 원문 열람 권한을 ${enabled ? "부여했습니다" : "회수했습니다"}.`);
+      setOriginalDecision(null);
+      setRevision((n) => n + 1);
+    } catch (e) {
+      setOriginalDecision(null);
+      setRevision((n) => n + 1);
+      setError(
+        e.code === "40001"
+          ? "원문 권한이 다른 화면에서 변경됐습니다. 갱신된 상태를 확인해 주세요."
+          : "원문 권한을 변경하지 못했습니다. 상태를 확인한 후 다시 시도해 주세요.",
+      );
+    } finally {
+      setBusy(null);
+    }
+  };
   return (
     <div id="membership-review" className="mb-5">
       <div className="flex flex-wrap gap-2 mb-3" aria-label="가입 상태 필터">
@@ -65,6 +98,7 @@ export default function MembershipReview({ refresh = 0 }) {
             disabled={!!busy}
             onClick={() => {
               setStatus(value);
+              setOriginalDecision(null);
               setPage(0);
               setError("");
             }}
@@ -79,6 +113,7 @@ export default function MembershipReview({ refresh = 0 }) {
         onSubmit={(e) => {
           e.preventDefault();
           setSearch(query.trim());
+          setOriginalDecision(null);
           setPage(0);
         }}
       >
@@ -128,6 +163,58 @@ export default function MembershipReview({ refresh = 0 }) {
                     {person.email_confirmed_at ? "이메일 인증 완료" : "이메일 인증 대기"}
                   </p>
                   {person.access_note && <p className="text-sm">이전 안내: {person.access_note}</p>}
+                  {status === "approved" && (
+                    <div className="space-y-2 border-t border-border pt-3">
+                      <p className="text-sm">
+                        원문 열람: {person.original_access_enabled ? "허용" : "차단"}
+                        {person.original_access_locked ? " · 운영자 권한 유지" : ""}
+                      </p>
+                      {!person.original_access_locked &&
+                        (originalDecision?.id === person.id ? (
+                          <div
+                            className="space-y-2"
+                            role="group"
+                            aria-label={`${person.email} 원문 권한 변경 확인`}
+                          >
+                            <p className="text-sm break-all">
+                              {person.email} 계정의 보관된 원문·표·그림 열람 권한을
+                              {originalDecision.original_access_enabled
+                                ? " 회수합니다. 다음 요청부터 차단되며 이미 열린 내용은 회수할 수 없습니다."
+                                : " 부여합니다. 가입 승인과 별도로 적용됩니다."}
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                disabled={!!busy}
+                                onClick={setOriginalAccess}
+                                className="min-h-11 px-4 bg-accent text-white rounded-lg disabled:opacity-50"
+                              >
+                                변경 확인
+                              </button>
+                              <button
+                                disabled={!!busy}
+                                onClick={() => setOriginalDecision(null)}
+                                className="min-h-11 px-4 border border-border rounded-lg"
+                              >
+                                취소
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <button
+                            disabled={
+                              !!busy || (!person.original_access_enabled && !person.email_confirmed_at)
+                            }
+                            onClick={() => {
+                              setOriginalDecision(person);
+                              setError("");
+                            }}
+                            className="min-h-11 px-4 border border-border rounded-lg disabled:opacity-50"
+                          >
+                            {person.original_access_enabled ? "원문 권한 회수" : "원문 권한 부여"}
+                          </button>
+                        ))}
+                    </div>
+                  )}
                   {status !== "approved" && (
                     <>
                       <input

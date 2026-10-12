@@ -55,6 +55,18 @@ test("session must belong to current user; token stays in Authorization header",
   );
 });
 
+test("only the matching approved profile grant enables a member's original link", () => {
+  vi.stubEnv("VITE_FULLTEXT_ORIGIN", "https://articles.example.test");
+  const user = { id: "member", email: "member@example.test" };
+  const paper = { pmid: "12345", fulltext_storage: "z8" };
+  const profile = { id: "member", access_status: "approved", original_access_enabled: true };
+  expect(canReadOriginal(user, paper, profile)).toBe(true);
+  for (const change of [{ id: "other" }, { access_status: "pending" }, { original_access_enabled: false }])
+    expect(canReadOriginal(user, paper, { ...profile, ...change })).toBe(false);
+  expect(canReadOriginal(user, paper)).toBe(false);
+  expect(canReadOriginal(user, { ...paper, fulltext_storage: null }, profile)).toBe(false);
+});
+
 test("denied account and missing originals show honest errors", async () => {
   vi.stubEnv("VITE_FULLTEXT_ORIGIN", "https://articles.example.test");
   supabase.auth.getSession.mockResolvedValue({

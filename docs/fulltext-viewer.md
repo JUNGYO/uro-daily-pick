@@ -11,8 +11,28 @@ are never placed in links. An email typed into a request does not confer access.
 `scripts/fulltext_viewer.py` binds only to `127.0.0.1:18451`. It exposes a minimal
 health response, `GET /v1/fulltext/{numeric_pmid}`, and the corresponding
 `/images/{sha256}` route. Every article and image request verifies
-the session with Supabase Auth, and requires both the configured confirmed email
-and immutable user ID. The service returns hash-verified plain text from the two
+the session with Supabase Auth. The configured operator keeps access only when both
+the confirmed email and immutable user ID match. Other readers require an explicit
+administrator grant, approved membership and a confirmed email. The viewer calls
+`reader_original_access()` with that reader's token on every article and image
+request, without caching positive permissions. RPC errors deny access. Revocation
+blocks subsequent requests; it cannot retract content already delivered.
+
+Administrators manage grants under **Admin → Membership approval → Approved**.
+Each member has a separate original-access grant/revoke action with a confirmation
+showing the target email. Membership approval alone does not grant original access.
+Existing members start without a grant; the configured operator retains access.
+Grant changes use a revision check and a private audit record. Members cannot edit
+their own grant through profile updates or signup metadata. The permission covers
+all available original articles and their figures, not selected papers.
+
+Roll out the `original_access_grants` migration first, then update the existing
+viewer runtime, and finally deploy the web application. The old viewer continues
+to deny other members until updated, even if the database already holds a grant.
+After a grant, readers returning to the application refresh their profile access;
+the viewer always checks the current server permission independently of the button.
+
+The service returns hash-verified plain text from the two
 configured archive directories. It does not serve files by path or forward requests
 to other services. Responses are not cached; publisher HTML is never executed.
 

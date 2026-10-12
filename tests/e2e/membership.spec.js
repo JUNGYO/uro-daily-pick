@@ -29,6 +29,23 @@ for (const width of [1440, 320]) {
     await page.getByRole("button", { name: "승인 완료", exact: true }).click();
     await expect(panel.getByText(/신규 연구자/)).toBeVisible();
     await expect(panel.getByRole("button", { name: "승인", exact: true })).toHaveCount(0);
+    await expect(panel.getByText("원문 열람: 차단")).toBeVisible();
+    await panel.getByRole("button", { name: "원문 권한 부여" }).click();
+    await expect(panel.getByRole("group", { name: "new@example.test 원문 권한 변경 확인" })).toContainText("가입 승인과 별도로 적용됩니다");
+    await panel.getByRole("button", { name: "취소", exact: true }).click();
+    await expect(panel.getByText("원문 열람: 차단")).toBeVisible();
+    await panel.getByRole("button", { name: "원문 권한 부여" }).click();
+    await panel.getByRole("button", { name: "변경 확인" }).click();
+    await expect(panel.getByText("원문 열람: 허용")).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "new@example.test: 원문 열람 권한을 부여했습니다." })).toBeVisible();
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    expect((await new AxeBuilder({ page }).include("#membership-review").withTags(["wcag2a", "wcag2aa", "wcag21aa"]).analyze()).violations).toEqual([]);
+    await page.screenshot({ path: testInfo.outputPath(`original-access-${width}.png`) });
+    await panel.getByRole("button", { name: "원문 권한 회수" }).click();
+    await expect(panel.getByText(/이미 열린 내용은 회수할 수 없습니다/)).toBeVisible();
+    await panel.getByRole("button", { name: "변경 확인" }).click();
+    await expect(panel.getByText("원문 열람: 차단")).toBeVisible();
+    await expect(page.getByRole("status").filter({ hasText: "new@example.test: 원문 열람 권한을 회수했습니다." })).toBeVisible();
   });
 }
 

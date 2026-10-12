@@ -18,6 +18,7 @@ const membershipRequests = scenario === "admin-membership" ? [
   { id: "unverified", email: "unverified@example.test", name: "인증 전 연구자", institution: "", access_status: "pending", access_revision: 0, created_at: "2026-10-12T00:00:00Z", email_confirmed_at: null },
 ] : [];
 let catalogAttempt = 0;
+membershipRequests.forEach(p => Object.assign(p, { original_access_enabled: false, original_access_revision: 0, original_access_locked: false }));
 let detailFailed = false,
   stateFailed = false;
 const papers = Array.from({ length: 5 }, (_, i) => ({
@@ -751,6 +752,12 @@ export const supabase = {
       if (name === "admin_memberships") {
         const matching = membershipRequests.filter(p => p.access_status === args.p_status && `${p.name} ${p.email} ${p.institution}`.includes(args.p_query || ""));
         return { data: { pending_count: membershipRequests.filter(p => p.access_status === "pending").length, total: matching.length, items: matching.slice(args.p_page * 20, args.p_page * 20 + 20) } };
+      }
+      if (name === "admin_set_original_access") {
+        const person = membershipRequests.find(p => p.id === args.p_user_id);
+        if (!person || person.original_access_revision !== args.p_revision) return { error: { code: "40001" } };
+        Object.assign(person, { original_access_enabled: args.p_enabled, original_access_revision: person.original_access_revision + 1 });
+        return { data: { id: person.id, enabled: person.original_access_enabled } };
       }
       if (name === "admin_review_membership") {
         const person = membershipRequests.find(p => p.id === args.p_user_id);
