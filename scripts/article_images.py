@@ -17,7 +17,7 @@ import zipfile
 from bs4 import BeautifulSoup
 from defusedxml import ElementTree as ET
 from fulltext import NoRedirect
-from acquisition_quota import AcquisitionDeferred, before_download, download_scope
+from acquisition_quota import AcquisitionDeferred, download_request, download_scope
 
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 MAX_PACKAGE_BYTES = 100 * 1024 * 1024
@@ -69,8 +69,7 @@ def fetch_bytes(url, maximum=MAX_IMAGE_BYTES, timeout=20):
     if not allowed_image_url(url): raise ValueError('Image host is not supported')
     opener = build_opener(HTTPSHandler(context=ssl.create_default_context()), NoRedirect())
     req = Request(url, headers={'User-Agent':'UroDailyPick/1.0', 'Accept':'image/*,application/zip'})
-    before_download(url)
-    with opener.open(req, timeout=timeout) as response:
+    with download_request(url), opener.open(req, timeout=timeout) as response:
         data = response.read(maximum + 1)
     if not data or len(data) > maximum: raise ValueError('Image/package size limit')
     return data

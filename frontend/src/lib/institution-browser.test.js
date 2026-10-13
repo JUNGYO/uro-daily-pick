@@ -14,6 +14,62 @@ const {
 } = require("../../../scripts/browser_fulltext.cjs");
 const articleUrl = "https://link.springer.com/article/10.1000/fixture";
 const temporaryDirectories = [];
+
+async function quotaTransport() {
+  const handlers = new Map();
+  const session = {on: (event, fn) => handlers.set(event, fn), send:vi.fn(async()=>{})};
+  const quota = {before:vi.fn(()=> 'a'.repeat(32)), call:vi.fn(()=>({ok:true}))};
+  const policy = new PublisherPolicy(null, quota);
+  const navigation = {job:{doi:'10.1007/synthetic'}};
+  const page = {on:vi.fn(), close:vi.fn(async()=>{})};
+  await blockPublisherRequests({newCDPSession:async()=>session}, page, policy, navigation);
+  const event = {requestId:'fetch-1',networkId:'network-1',resourceType:'Document',
+    request:{url:articleUrl}};
+  return {handlers,session,quota,policy,navigation,event,
+    paused: value=>handlers.get('Fetch.requestPaused')(value)};
+}
+
+test('403 releases its reservation once and preserves the publisher pause',async()=>{
+  const h=await quotaTransport();
+  await h.paused(h.event);
+  await h.paused({...h.event,responseStatusCode:403});
+  h.handlers.get('Network.loadingFailed')({requestId:h.event.networkId});
+  expect(h.quota.call).toHaveBeenCalledExactlyOnceWith('failed',{},'',{requestId:'a'.repeat(32),reason:'http_403'});
+  expect(h.policy.pauseFor('link.springer.com').reason).toBe('http_403');
+  await h.paused({...h.event,requestId:'fetch-2',networkId:'network-2'});
+  expect(h.quota.before).toHaveBeenCalledTimes(1);
+  expect(h.navigation.reason).toBe('publisher_paused');
+});
+
+test('completed response remains charged when subsequent browser work fails',async()=>{
+  const h=await quotaTransport();
+  await h.paused(h.event);
+  await h.paused({...h.event,responseStatusCode:200});
+  expect(h.quota.call).not.toHaveBeenCalled();
+  h.handlers.get('Network.loadingFinished')({requestId:h.event.networkId});
+  h.handlers.get('Network.loadingFailed')({requestId:h.event.networkId});
+  expect(h.quota.call).toHaveBeenCalledExactlyOnceWith('downloaded',{},'',{requestId:'a'.repeat(32),reason:undefined});
+});
+
+test('network failure releases a pending browser reservation',async()=>{
+  const h=await quotaTransport();
+  await h.paused(h.event);
+  h.handlers.get('Network.loadingFailed')({requestId:h.event.networkId});
+  expect(h.quota.call).toHaveBeenCalledExactlyOnceWith('failed',{},'',{requestId:'a'.repeat(32),reason:'transport_error'});
+});
+
+test('redirect releases its own hop and charges the destination independently',async()=>{
+  const h=await quotaTransport();
+  await h.paused(h.event);
+  await h.paused({...h.event,responseStatusCode:302});
+  h.quota.before.mockReturnValue('b'.repeat(32));
+  const next={...h.event,requestId:'fetch-2',redirectedRequestId:'fetch-1'};
+  await h.paused(next);
+  await h.paused({...next,responseStatusCode:200});
+  h.handlers.get('Network.loadingFinished')({requestId:next.networkId});
+  expect(h.quota.call.mock.calls.map(call=>[call[0],call[3].requestId])).toEqual([
+    ['failed','a'.repeat(32)],['downloaded','b'.repeat(32)]]);
+});
 afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();

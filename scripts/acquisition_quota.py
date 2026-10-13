@@ -1,7 +1,8 @@
-"""Durable, shared daily acquisition limits. A reservation is never refunded.
+"""Durable, shared download limits with individually settled reservations.
 
 Only explicit initialization creates the ledger. Missing/corrupt state blocks
-downloads; process restarts and failed requests cannot reset the daily count.
+downloads; restarts never reset usage. Only a recorded, confirmed failed request
+can release its own reservation. Legacy or interrupted reservations stay charged.
 """
 import argparse
 from contextlib import contextmanager, closing
@@ -13,6 +14,9 @@ from pathlib import Path
 import re
 import sqlite3
 import sys
+import uuid
+from http.client import IncompleteRead
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 
 KST = timezone(timedelta(hours=9))
@@ -124,10 +128,12 @@ class Quota:
             raise
         return db
 
-    def reserve(self, groups, *, amount=1, manual=False):
+    def reserve(self, groups, *, amount=1, manual=False, tracked=False):
         groups = sorted(set(groups))
         if not groups or not set(groups).issubset(PUBLISHERS) or type(amount) is not int or amount < 0:
             raise AcquisitionDeferred("quota_unknown_publisher")
+        if tracked and (amount != 1 or manual):
+            raise AcquisitionDeferred("quota_invalid_request")
         config, start = self.config()
         now = self.now()
         if now < start or config.get("paused", False):
@@ -140,6 +146,11 @@ class Quota:
             last_day = db.execute("SELECT value FROM metadata WHERE key='last_day'").fetchone()
             if last_day is None or day < last_day[0]:
                 raise AcquisitionDeferred("quota_clock_rollback")
+            if not manual and db.execute("SELECT 1 FROM sqlite_master WHERE name='quota_pauses'").fetchone():
+                for group in groups:
+                    pause = db.execute('SELECT until FROM quota_pauses WHERE publisher=?', (group,)).fetchone()
+                    if pause and pause[0] > now.timestamp():
+                        raise AcquisitionDeferred('quota_source_paused')
             rows = {}
             for group in groups:
                 row = db.execute("SELECT automatic,manual FROM usage WHERE day=? AND publisher=?", (day, group)).fetchone()
@@ -154,10 +165,62 @@ class Quota:
                     db.execute("INSERT OR REPLACE INTO usage VALUES(?,?,?,?)",
                                (day, group, automatic + (0 if manual else amount), used_manual + (amount if manual else 0)))
                 db.execute("UPDATE metadata SET value=? WHERE key='last_day'", (day,))
+            request_id = None
+            if tracked:
+                db.execute("""CREATE TABLE IF NOT EXISTS quota_requests(
+                    id TEXT PRIMARY KEY,day TEXT NOT NULL,publishers TEXT NOT NULL,
+                    state TEXT NOT NULL CHECK(state IN ('pending','downloaded','failed')),
+                    reason TEXT,created_at TEXT NOT NULL,settled_at TEXT)""")
+                request_id = uuid.uuid4().hex
+                db.execute("INSERT INTO quota_requests VALUES(?,?,?,'pending',NULL,?,NULL)",
+                           (request_id, day, json.dumps(groups), now.isoformat()))
             db.commit()
-            return {"day": day, "publishers": groups, "charged": amount}
+            return {"day": day, "publishers": groups, "charged": amount, "request_id": request_id}
         except (OSError, sqlite3.Error):
             raise AcquisitionDeferred("quota_ledger_unavailable") from None
+        finally:
+            if db is not None:
+                db.close()
+
+    def settle(self, request_id, *, failed=False, reason=None):
+        """Settle once on the original day; pauses do not prevent completion.
+
+        Missing receipts, crashes and parsing failures never imply a refund.
+        """
+        if not isinstance(request_id, str) or not re.fullmatch(r'[a-f0-9]{32}', request_id):
+            raise AcquisitionDeferred('quota_invalid_request')
+        if reason is not None and not re.fullmatch(r'[a-z0-9_]{1,60}', reason):
+            raise AcquisitionDeferred('quota_invalid_request')
+        db = None
+        try:
+            db = self._db()
+            db.execute('BEGIN IMMEDIATE')
+            row = db.execute('SELECT day,publishers,state FROM quota_requests WHERE id=?', (request_id,)).fetchone()
+            if row is None:
+                raise AcquisitionDeferred('quota_unknown_request')
+            day, encoded, state = row
+            if state == 'pending':
+                groups = json.loads(encoded)
+                if not groups or not set(groups).issubset(PUBLISHERS):
+                    raise AcquisitionDeferred('quota_ledger_unavailable')
+                if failed:
+                    for group in groups:
+                        changed = db.execute('UPDATE usage SET automatic=automatic-1 WHERE day=? AND publisher=? AND automatic>=1', (day, group))
+                        if changed.rowcount != 1:
+                            raise AcquisitionDeferred('quota_ledger_unavailable')
+                    if reason in ('http_401', 'http_403', 'http_429'):
+                        db.execute('CREATE TABLE IF NOT EXISTS quota_pauses(publisher TEXT PRIMARY KEY,until REAL NOT NULL,reason TEXT NOT NULL)')
+                        until = self.now().timestamp() + (3600 if reason == 'http_429' else 86400)
+                        for group in groups:
+                            db.execute('''INSERT INTO quota_pauses VALUES(?,?,?) ON CONFLICT(publisher)
+                                DO UPDATE SET until=max(until,excluded.until),reason=excluded.reason''', (group, until, reason))
+                state = 'failed' if failed else 'downloaded'
+                db.execute('UPDATE quota_requests SET state=?,reason=?,settled_at=? WHERE id=?',
+                           (state, reason, self.now().isoformat(), request_id))
+            db.commit()
+            return {'request_id': request_id, 'state': state, 'day': day}
+        except (OSError, sqlite3.Error, ValueError, TypeError):
+            raise AcquisitionDeferred('quota_ledger_unavailable') from None
         finally:
             if db is not None:
                 db.close()
@@ -190,6 +253,26 @@ def before_download(url):
     Quota(selected).reserve(groups_for_url(url, current_publishers()))
 
 
+@contextmanager
+def download_request(url):
+    """Reserve before I/O; release only confirmed HTTP/transport failures."""
+    selected = policy_path()
+    quota, reservation = None, None
+    if selected and not metadata_url(url):
+        quota = Quota(selected)
+        reservation = quota.reserve(groups_for_url(url, current_publishers()), tracked=True)
+    try:
+        yield
+    except (HTTPError, URLError, OSError, IncompleteRead) as error:
+        if reservation:
+            reason = 'http_' + str(error.code) if isinstance(error, HTTPError) else 'transport_error'
+            quota.settle(reservation['request_id'], failed=True, reason=reason)
+        raise
+    else:
+        if reservation:
+            quota.settle(reservation['request_id'])
+
+
 def preflight(paper):
     selected = policy_path()
     if not selected:
@@ -218,11 +301,13 @@ def initialize(config_path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--policy", required=True)
-    parser.add_argument("action", choices=("initialize", "status", "reserve", "check", "manual"))
+    parser.add_argument("action", choices=("initialize", "status", "reserve", "begin", "downloaded", "failed", "check", "manual"))
     parser.add_argument("--url", default="")
     parser.add_argument("--publishers", default="")
     parser.add_argument("--doi", default="")
     parser.add_argument("--count", type=int, default=1)
+    parser.add_argument("--request-id")
+    parser.add_argument("--reason")
     args = parser.parse_args()
     quota = Quota(args.policy)
     try:
@@ -231,6 +316,8 @@ def main():
             result = {"initialized": True}
         elif args.action == "status":
             result = quota.status()
+        elif args.action in ('downloaded', 'failed'):
+            result = quota.settle(args.request_id, failed=args.action == 'failed', reason=args.reason)
         else:
             groups = [g for g in args.publishers.split(",") if g]
             groups = sorted(set(groups + paper_publishers({"doi": args.doi})))
@@ -241,7 +328,7 @@ def main():
                 result = {"charged": 0}
             else:
                 result = quota.reserve(groups, amount=0 if args.action == "check" else args.count,
-                                       manual=args.action == "manual")
+                                       manual=args.action == "manual", tracked=args.action == "begin")
         print(json.dumps({"ok": True, **result}))
     except AcquisitionDeferred as error:
         print(json.dumps({"ok": False, "reason": error.reason}))

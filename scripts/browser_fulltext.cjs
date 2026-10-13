@@ -26,11 +26,13 @@ const publisherGroup = host => ['link.springer.com','nature.com','media.springer
 // or alternate address is used to retry a publisher block.
 class BrowserQuota {
   constructor(config, python) { this.config = config; this.python = python; }
-  call(action, job = {}, url = '') {
+  call(action, job = {}, url = '', receipt = {}) {
     if (!this.python) throw Object.assign(new Error('Quota unavailable'), {reason:'quota_ledger_unavailable'});
     const args = [path.join(__dirname, 'acquisition_quota.py'), '--policy', this.config, action,
       '--doi', String(job.doi || ''), '--publishers', (job.publishers || []).join(',')];
     if (url) args.push('--url', url);
+    if (receipt.requestId) args.push('--request-id', receipt.requestId);
+    if (receipt.reason) args.push('--reason', receipt.reason);
     const process = spawnSync(this.python, args, {encoding:'utf8',timeout:15000,windowsHide:true,maxBuffer:65536});
     let result;
     try { result = JSON.parse(process.stdout); } catch {}
@@ -38,13 +40,14 @@ class BrowserQuota {
       const reason = /^quota_[a-z_]+$/.test(result?.reason || '') ? result.reason : 'quota_ledger_unavailable';
       throw Object.assign(new Error('Acquisition deferred'), {reason});
     }
+    return result;
   }
   before(url, job) {
     const host = new URL(url).hostname;
     // DOI resolution is metadata; every redirected publisher Document is
     // intercepted again at Request stage, before its bytes are requested.
-    if (['doi.org', 'dx.doi.org'].includes(host)) this.call('check', job);
-    else this.call('reserve', job, url);
+    if (['doi.org', 'dx.doi.org'].includes(host)) { this.call('check', job); return null; }
+    return this.call('begin', job, url).request_id;
   }
 }
 
@@ -105,13 +108,50 @@ async function blockPublisherRequests(context, page, policy, navigation) {
   // Route callbacks do not cover every HTTP redirect hop. Chromium's network
   // block applies before transport, including automatic redirect destinations.
   const session = await context.newCDPSession(page);
+  const byFetch = new Map(), byNetwork = new Map();
+  function settle(entry, failed, reason) {
+    if (!entry) return;
+    policy.quota.call(failed ? 'failed' : 'downloaded', {}, '', {requestId:entry.token, reason});
+    byFetch.delete(entry.fetchId);
+    if (byNetwork.get(entry.networkId) === entry) byNetwork.delete(entry.networkId);
+  }
+  if (policy.quota) {
+    session.on('Network.loadingFinished', event => {
+      try { settle(byNetwork.get(event.requestId), false); }
+      catch (error) { navigation.reason = error.reason || 'quota_ledger_unavailable'; }
+    });
+    session.on('Network.loadingFailed', event => {
+      try { settle(byNetwork.get(event.requestId), true, 'transport_error'); }
+      catch (error) { navigation.reason = error.reason || 'quota_ledger_unavailable'; }
+    });
+    await session.send('Network.enable');
+  }
   session.on('Fetch.requestPaused', async event => {
     const host = new URL(event.request.url).hostname;
     try {
+      if (event.responseStatusCode !== undefined || event.responseErrorReason !== undefined) {
+        const entry = byFetch.get(event.requestId);
+        const status = event.responseStatusCode;
+        policy.observe(host, status);
+        if (event.responseErrorReason || status < 200 || status >= 300)
+          settle(entry, true, event.responseErrorReason ? 'transport_error' : 'http_' + status);
+        else if (entry && !entry.networkId)
+          settle(entry, false); // No completion correlation: conservatively charge.
+        // Preserve access pauses even though the rejected request is uncharged.
+        await session.send('Fetch.continueRequest', {requestId:event.requestId});
+        return;
+      }
       if (disabledWebHost(host)) throw Object.assign(new Error('Disabled'), {reason:'publisher_web_disabled'});
       if (policy.pauseFor(host)) throw Object.assign(new Error('Paused'), {reason:'publisher_paused'});
       if (!policy.quota) throw Object.assign(new Error('Paused'), {reason:'publisher_paused'});
-      if (event.resourceType === 'Document') policy.quota.before(event.request.url, navigation.job || {});
+      if (event.resourceType === 'Document' && !byFetch.has(event.requestId)) {
+        const token = policy.quota.before(event.request.url, navigation.job || {});
+        if (token) {
+          const entry = {token, fetchId:event.requestId, networkId:event.networkId};
+          byFetch.set(event.requestId, entry);
+          if (event.networkId) byNetwork.set(event.networkId, entry);
+        }
+      }
       await session.send('Fetch.continueRequest', {requestId:event.requestId});
     } catch (error) {
       navigation.reason = error.reason || 'quota_ledger_unavailable';
@@ -120,7 +160,8 @@ async function blockPublisherRequests(context, page, policy, navigation) {
     }
   });
   const patterns = urls.map(urlPattern => ({urlPattern,requestStage:'Request'}));
-  if (policy.quota) patterns.push({urlPattern:'*',resourceType:'Document',requestStage:'Request'});
+  if (policy.quota) for (const requestStage of ['Request','Response'])
+    patterns.push({urlPattern:'*',resourceType:'Document',requestStage});
   await session.send('Fetch.enable', {patterns});
   page.on('requestfailed', request => {
     const host = new URL(request.url()).hostname;

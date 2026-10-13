@@ -1,5 +1,6 @@
 """Synthetic quota boundaries; never contact a publisher or touch real state."""
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import closing
 from datetime import datetime
 import json
 import os
@@ -10,6 +11,7 @@ import sys
 import tempfile
 import unittest
 from unittest.mock import MagicMock, patch
+from urllib.error import HTTPError
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts"))
 from acquisition_quota import (AcquisitionDeferred, Quota, before_download, download_scope,
@@ -120,7 +122,7 @@ print(accepted)
         self.assertDenied("quota_daily_limit", lambda: self.quota.reserve(["springer-nature", "wiley"]))
         self.assertEqual(self.quota.status()["publishers"]["springer-nature"]["automatic"], 0)
 
-    def test_failed_http_attempt_consumes_budget_and_image_shares_it(self):
+    def test_failed_transport_does_not_consume_budget_and_image_shares_it(self):
         import fulltext
         import article_images
         def actual_quota(path):
@@ -137,10 +139,70 @@ print(accepted)
                     image_opener.return_value.open.side_effect = OSError("synthetic transport failure")
                     with self.assertRaises(OSError):
                         article_images.fetch_bytes("https://onlinelibrary.wiley.com/image.png")
-                    image_opener.return_value.open.reset_mock()
-                    self.assertDenied("quota_daily_limit", lambda: article_images.fetch_bytes("https://onlinelibrary.wiley.com/image.png"))
-                    image_opener.return_value.open.assert_not_called()
-            self.assertEqual(self.quota.status()["publishers"]["wiley"]["automatic"], 30)
+            self.assertEqual(self.quota.status()["publishers"]["wiley"]["automatic"], 28)
+
+    def test_confirmed_failure_releases_only_its_own_reservation_once(self):
+        self.quota.reserve(['wiley'], amount=29)
+        receipt = self.quota.reserve(['wiley'], tracked=True)['request_id']
+        self.assertDenied('quota_daily_limit', lambda: self.quota.reserve(['wiley']))
+        self.quota.settle(receipt, failed=True, reason='transport_error')
+        self.quota.settle(receipt, failed=True, reason='transport_error')
+        self.assertEqual(self.quota.status()['publishers']['wiley']['automatic'], 29)
+        self.assertDenied('quota_unknown_request', lambda: self.quota.settle('a'*32, failed=True))
+        self.assertEqual(self.quota.status()['publishers']['wiley']['automatic'], 29)
+
+    def test_downloaded_request_cannot_later_be_refunded(self):
+        receipt = self.quota.reserve(['wiley','springer-nature'], tracked=True)['request_id']
+        self.quota.settle(receipt)
+        self.quota.settle(receipt, failed=True, reason='transport_error')
+        self.assertEqual(self.quota.status()['publishers']['wiley']['automatic'], 1)
+        self.assertEqual(self.quota.status()['publishers']['springer-nature']['automatic'], 1)
+
+    def test_crashed_or_unsettled_request_stays_reserved(self):
+        self.quota.reserve(['jama'], tracked=True)
+        restarted = Quota(self.policy, now=lambda:self.now)
+        self.assertEqual(restarted.status()['publishers']['jama']['automatic'], 1)
+
+    def test_failure_after_midnight_changes_original_day_only(self):
+        receipt = self.quota.reserve(['wiley'], tracked=True)['request_id']
+        self.now = datetime.fromisoformat('2026-10-14T00:00:01+09:00')
+        self.quota.reserve(['wiley'])
+        self.quota.settle(receipt, failed=True, reason='transport_error')
+        self.assertEqual(self.quota.status()['publishers']['wiley']['automatic'], 1)
+        with closing(sqlite3.connect(self.root/'acquisition-quota.sqlite3')) as db:
+            self.assertEqual(db.execute("SELECT automatic FROM usage WHERE day='2026-10-13' AND publisher='wiley'").fetchone()[0], 0)
+
+    def test_concurrent_failure_settlement_cannot_double_refund(self):
+        self.quota.reserve(['wiley'], amount=29)
+        receipt = self.quota.reserve(['wiley'], tracked=True)['request_id']
+        with ThreadPoolExecutor(max_workers=8) as pool:
+            list(pool.map(lambda _:self.quota.settle(receipt, failed=True), range(16)))
+        self.assertEqual(self.quota.status()['publishers']['wiley']['automatic'], 29)
+
+    def test_403_is_uncharged_but_pauses_publisher_across_processes(self):
+        import fulltext
+        with patch.dict(os.environ, {'URO_ACQUISITION_POLICY':str(self.policy)}), \
+             patch('acquisition_quota.Quota', return_value=self.quota), \
+             download_scope({'doi':'10.1001/example'}), patch.object(fulltext,'build_opener') as opener:
+            opener.return_value.open.side_effect = HTTPError('https://jamanetwork.com/article',403,'Forbidden',{},None)
+            with self.assertRaises(HTTPError):fulltext.download('https://jamanetwork.com/article')
+            self.assertEqual(self.quota.status()['publishers']['jama']['automatic'], 0)
+            opener.return_value.open.reset_mock()
+            self.assertDenied('quota_source_paused', lambda:fulltext.download('https://jamanetwork.com/another'))
+            opener.return_value.open.assert_not_called()
+        restarted = Quota(self.policy, now=lambda:self.now)
+        self.assertDenied('quota_source_paused',lambda:restarted.reserve(['jama']))
+        restarted.reserve(['bmj'])
+
+    def test_received_body_counts_even_when_later_parsing_fails(self):
+        import article_images
+        with patch.dict(os.environ, {'URO_ACQUISITION_POLICY':str(self.policy)}), \
+             patch('acquisition_quota.Quota',return_value=self.quota), \
+             download_scope({'doi':'10.1111/example'}), patch.object(article_images,'build_opener') as opener:
+            opener.return_value.open.return_value.__enter__.return_value.read.return_value=b'not an image'
+            body=article_images.fetch_bytes('https://onlinelibrary.wiley.com/image.png')
+            with self.assertRaises(ValueError):article_images.image_type(body)
+        self.assertEqual(self.quota.status()['publishers']['wiley']['automatic'],1)
 
     def test_metadata_and_local_work_do_not_consume_quota(self):
         with patch.dict(os.environ, {"URO_ACQUISITION_POLICY": str(self.policy)}):

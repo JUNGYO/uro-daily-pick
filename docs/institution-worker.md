@@ -15,8 +15,14 @@ The adjacent `acquisition-quota.sqlite3` ledger is shared by API, browser and
 figure workers. Back it up with the state directory; never delete it to recover
 capacity. Initialization refuses an existing ledger. Quota records stay local.
 
-The limit is at most 30 attempts per publisher per Korean calendar day. Charges
-are committed before transport and are not refunded after failure. Full-text,
+The limit is at most 30 downloaded responses or unresolved reservations per
+publisher per Korean calendar day. Each request reserves capacity before
+transport. Confirmed HTTP/transport failures release only that request's
+reservation, once, on its original day. Browser redirects do not retain a charge;
+the destination is reserved separately. Completed downloads still count if
+subsequent parsing fails. Crashes, uncertain outcomes and legacy aggregate usage
+are not refunded. HTTP 401/403/429 also pause the publisher across workers, so
+releasing a failed reservation does not authorize another blocked request. Full-text,
 linked-table and figure requests consume the same budget, so fewer than 30
 complete papers may be acquired. Concurrent workers and restarts share an atomic
 ledger. Chromium intercepts redirect destinations before transport. Publisher
@@ -72,7 +78,8 @@ budget is limited to the remainder of the existing hourly run (normally about
 three minutes after a full 55-minute collection phase). A failed or timed-out
 collection, exhausted quota, insufficient time, a new pause, or a change of the
 Korean calendar day defers figures until a later collection run. It never resets
-or refunds reservations. This gives new originals the first opportunity to use
+the daily count. Only confirmed individual transport failures release their own
+reservation. This gives new originals the first opportunity to use
 the daily quota; access and validation failures can still prevent acquisition.
 
 The figure queue scans all retained originals, including legacy
