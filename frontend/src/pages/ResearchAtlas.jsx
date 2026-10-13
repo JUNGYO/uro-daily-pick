@@ -22,6 +22,7 @@ import { ENGLISH_RESOURCE, KnowledgeNarrative, ScientificPaper } from "../compon
 import "../knowledge.css";
 import ResearchNetwork from "../components/ResearchNetwork";
 import CitationNetwork from "../components/CitationNetwork";
+import LiteratureLandscape from "./LiteratureLandscape";
 import { CATEGORY_LABELS, categoryColor } from "../lib/researchNetwork";
 
 const num = (n) => Number(n || 0).toLocaleString("en-US");
@@ -129,6 +130,16 @@ function Timeline({ years, choose }) {
 }
 
 export default function ResearchAtlas() {
+  const [params] = useSearchParams();
+  // Whole-catalog overview first. Preserve explicit concept / paper deep links.
+  return params.get("relation") === "concepts" || params.has("concept") ? (
+    <IndexedResearchAtlas />
+  ) : (
+    <LiteratureLandscape />
+  );
+}
+
+function IndexedResearchAtlas() {
   const { user } = useAuth();
   const [params, setParams] = useSearchParams();
   const selected = params.get("concept") || null,
@@ -186,7 +197,9 @@ export default function ResearchAtlas() {
           <div>
             <span className="atlas-eyebrow">KNOWLEDGE & CONNECTIONS</span>
             <h1>Research atlas</h1>
-            <p>Concepts, papers and research over time.</p>
+            <p>
+              Concepts extracted from indexed originals. <Link to="/insights">Explore the whole catalog</Link>
+            </p>
           </div>
           <nav className="atlas-tabs" aria-label="Insights views">
             <Link aria-current="page" to="/insights">
@@ -285,7 +298,7 @@ export default function ResearchAtlas() {
               {query ? ` · “${query}”` : ""}
               {selected ? " · Selected concept" : ""}
             </span>
-            <button onClick={() => setParams({})}>
+            <button onClick={() => setParams({ relation: "concepts" })}>
               <X size={14} />
               Clear filters
             </button>
@@ -325,13 +338,15 @@ export default function ResearchAtlas() {
                     <div className="atlas-segment" aria-label="Network relationship">
                       <button
                         aria-pressed={relation === "concepts"}
-                        onClick={() => update({ relation: null, concept: null, with: null })}
+                        onClick={() => update({ relation: "concepts", concept: null, with: null })}
                       >
                         Concepts
                       </button>
                       <button
                         aria-pressed={relation === "citations"}
-                        onClick={() => update({ relation: "citations", concept: null, with: null })}
+                        onClick={() =>
+                          update({ relation: "citations", landscape: "citations", concept: null, with: null })
+                        }
                       >
                         Citations
                       </button>
@@ -379,7 +394,9 @@ export default function ResearchAtlas() {
                           ? "Broaden your search or clear the filters."
                           : "Concepts and connections will appear as full texts are processed."}
                       </p>
-                      {activeFilters && <button onClick={() => setParams({})}>Clear filters</button>}
+                      {activeFilters && (
+                        <button onClick={() => setParams({ relation: "concepts" })}>Clear filters</button>
+                      )}
                     </div>
                   )}
                 </section>

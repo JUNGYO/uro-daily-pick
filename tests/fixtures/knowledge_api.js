@@ -1,3 +1,4 @@
+import { landscapeFixture } from './landscape_api';
 const nodes = [
   {
     id: "a".repeat(24),
@@ -31,6 +32,7 @@ let liveAtlasCalls = 0;
 export function knowledgeRpc(name, args, scenario, papers) {
   if (scenario === "knowledge-error")
     return { error: { message: "Simulated knowledge outage" } };
+  if (name === "knowledge_landscape") return landscapeFixture(args.p_filters, scenario, papers);
   if (name === "knowledge_network") {
     const f=args.p_filters;
     const old=knowledgeRpc('knowledge_atlas',{p_query:f.q,p_from:f.from,p_to:f.to,p_journal:f.journal,p_design:f.design,p_relation:f.relation},scenario,papers).data;
