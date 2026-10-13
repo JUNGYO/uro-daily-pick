@@ -1314,3 +1314,6 @@
  .citation-list-heading,.citation-selection { padding:16px; }
  .citation-legend { padding:12px 12px 0; }
 }
+
+.atlas-research-context { display:flex; flex-wrap:wrap; gap:8px 18px; align-items:center; margin:0 0 18px; padding:12px 16px; background:#f0f5fc; border:1px solid #dae5f2; border-radius:8px; color:#315575; font-size:12px; }
+.atlas-research-context a { text-decoration:underline; }

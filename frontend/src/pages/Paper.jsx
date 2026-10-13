@@ -1,3 +1,4 @@
+import { paperAtlasLink } from "../lib/researchNavigation";
 import { useEffect, useState } from "react";
 import { Link, useLocation, useParams, useSearchParams } from "react-router-dom";
 import { useAuth } from "../lib/auth";
@@ -95,9 +96,10 @@ export default function Paper() {
   }
   const p = r.data?.paper ? normalizePaper(r.data.paper) : null;
   const s = r.data?.state || {};
+  const back = safeReturn(params.get("returnTo") || location.state?.returnTo || "/discover");
   return (
     <ReaderPage title={p?.title || "논문 상세"}>
-      <Link className="text-accent underline" to={safeReturn(location.state?.returnTo || "/discover")}>
+      <Link className="text-accent underline" to={back}>
         ← 목록으로
       </Link>
       <Resource resource={r}>
@@ -119,6 +121,14 @@ export default function Paper() {
             <IntegrityNotice paper={p} />
             {!r.data.offline && <KnowledgeLinks pmid={p.pmid} />}
             <div className="reader-actions">
+              {!r.data.offline && (
+                <Link
+                  className="btn-secondary"
+                  to={paperAtlasLink(p.pmid, back, location.pathname + location.search)}
+                >
+                  인용 지도에서 탐색
+                </Link>
+              )}
               <button
                 className={s.saved ? "btn-primary" : "btn-secondary"}
                 disabled={busy || r.data.offline}
@@ -186,7 +196,11 @@ export default function Paper() {
                   key={id}
                   className={tab === id ? "btn-primary" : "btn-secondary"}
                   aria-pressed={tab === id}
-                  onClick={() => setParams({ tab: id })}
+                  onClick={() => {
+                    const next = new URLSearchParams(params);
+                    next.set("tab", id);
+                    setParams(next, { state: location.state });
+                  }}
                 >
                   {label}
                 </button>

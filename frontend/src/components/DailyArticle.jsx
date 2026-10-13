@@ -1,3 +1,4 @@
+import { atlasLink } from "../lib/researchNavigation";
 import { Link } from "react-router-dom";
 import { Tag, User2, BookOpen, FlaskConical, Clock, Star, TrendingUp, Zap } from "lucide-react";
 import { keywordPattern } from "../lib/keywords";
@@ -117,6 +118,9 @@ export default function DailyArticle({ rec, reason, returnTo, titleRef, studyOpe
           <p className="today-caption">추천 이유 · {reason || "선정된 오늘의 문헌"}</p>
         )}
       </div>
+      <p className="today-caption">
+        <Link to={atlasLink({ paper: p.pmid, returnTo })}>인용 지도에서 관련 연구 탐색</Link>
+      </p>
       <IntegrityNotice paper={p} />
       <SummaryContent paper={p} abstract={false} facts={false} />
       {(facts.length > 0 || qa.length > 0) && (

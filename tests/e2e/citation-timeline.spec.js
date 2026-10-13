@@ -3,7 +3,7 @@ import AxeBuilder from '../../frontend/node_modules/@axe-core/playwright/dist/in
 test.beforeEach(async({page})=>{await page.route(/https?:\/\//,r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());});
 for(const width of [1440,830,390,320]) test(`citation timeline reads and follows real directions at ${width}px`,async({page},info)=>{
  await page.setViewportSize({width,height:1000});
- await page.goto('/uro-daily-pick/insights?scenario=citation-timeline&relation=citations');
+ await page.goto('/uro-daily-pick/insights?scenario=citation-timeline&relation=citations&q=prostate');
  await expect(page.getByRole('heading',{name:'Citation map',exact:true})).toBeVisible();
  await expect(page.locator('.citation-node')).toHaveCount(60);
  await expect(page.locator('.citation-reading-panel .citation-paper-list li')).toHaveCount(60);

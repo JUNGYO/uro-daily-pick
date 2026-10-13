@@ -1,6 +1,7 @@
+import { paperFromAtlas } from "../lib/researchNavigation";
 import { useState } from "react";
-import { Link } from "react-router-dom";
-import { rpc } from "../lib/workspace";
+import { Link, useLocation } from "react-router-dom";
+import { rpc, safeReturn } from "../lib/workspace";
 import { Resource, useResource } from "./ReaderUI";
 
 export const ENGLISH_RESOURCE = {
@@ -10,9 +11,12 @@ export const ENGLISH_RESOURCE = {
 };
 const formatDate = (value) => (value ? new Date(value).toLocaleDateString("en-US") : "Not recorded");
 export function SourceLink({ pmid, hash, locations, children = "View source" }) {
+  const location = useLocation();
+  const returnTo = location.pathname + location.search;
   return (
     <Link
-      to={`/fulltext/${pmid}?source=${encodeURIComponent(hash)}#${encodeURIComponent(locations?.[0] || "")}`}
+      to={`/fulltext/${pmid}?${new URLSearchParams({ returnTo, source: hash })}#${encodeURIComponent(locations?.[0] || "")}`}
+      state={{ returnTo }}
     >
       {children}
     </Link>
@@ -296,7 +300,7 @@ function ScientificRecord({ pmid }) {
   );
 }
 
-export function ScientificPaper({ paper }) {
+export function ScientificPaper({ paper, returnTo, onCitations }) {
   const [open, setOpen] = useState(false);
   return (
     <article className="atlas-paper">
@@ -306,13 +310,27 @@ export function ScientificPaper({ paper }) {
         {paper.study_type && <span>{paper.study_type.replaceAll("_", " ")}</span>}
       </div>
       <h3>
-        <Link to={`/papers/${paper.pmid}`}>{paper.title}</Link>
+        <Link
+          to={returnTo ? paperFromAtlas(paper.pmid, returnTo) : `/papers/${paper.pmid}`}
+          state={returnTo ? { returnTo } : undefined}
+        >
+          {paper.title}
+        </Link>
       </h3>
       <div className="atlas-paper-actions">
+        {onCitations && <button onClick={onCitations}>Explore citations</button>}
         <button aria-expanded={open} onClick={() => setOpen(!open)}>
           {open ? "Hide research record" : "Research record"}
         </button>
-        <Link to={`/fulltext/${paper.pmid}`}>Read full text ↗</Link>
+        <Link
+          to={
+            `/fulltext/${paper.pmid}` +
+            (returnTo ? "?" + new URLSearchParams({ returnTo: safeReturn(returnTo) }) : "")
+          }
+          state={returnTo ? { returnTo } : undefined}
+        >
+          Read full text ↗
+        </Link>
         <span>PMID {paper.pmid}</span>
       </div>
       {open && <ScientificRecord pmid={paper.pmid} />}

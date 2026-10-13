@@ -16,7 +16,7 @@ for(const width of [1440,390,320]) test(`reading and successful use remain disti
  await page.locator('a.today-original[href*="/fulltext/"]').click();
  await expect(page.getByRole('article')).toBeVisible();await page.clock.runFor(64000);
  await expect.poll(async()=>Math.max(0,...(await sessions()).filter(s=>s.kind==='original').map(s=>s.seconds))).toBeGreaterThanOrEqual(60);
- await page.getByRole('link',{name:'논문 상세로 돌아가기',exact:true}).click();
+ await page.getByRole('link',{name:'이전 연구 화면으로 돌아가기',exact:true}).click();
  // The explicit route is retained in fixture state; use the existing detail path for a real save.
  await page.getByRole('link',{name:/Personalized treatment strategies/}).filter({visible:true}).first().click();
  await page.getByRole('button',{name:'내 서재에 저장',exact:true}).click();

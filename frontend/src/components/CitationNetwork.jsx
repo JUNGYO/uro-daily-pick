@@ -8,12 +8,13 @@ import {
   citationNeighborhood,
   citationTimeline,
 } from "../lib/citationNetwork";
+import { paperFromAtlas } from "../lib/researchNavigation";
 import { networkSnapshot } from "../lib/researchNetwork";
 
-function PaperLink({ paper }) {
+function PaperLink({ paper, returnTo }) {
   if (paper.in_catalog && paper.pmid)
     return (
-      <Link to={`/papers/${paper.pmid}`}>
+      <Link to={paperFromAtlas(paper.pmid, returnTo)} state={{ returnTo }}>
         Open paper <ArrowUpRight size={14} />
       </Link>
     );
@@ -34,6 +35,13 @@ function PaperLink({ paper }) {
 
 export default function CitationNetwork({
   data,
+  returnTo,
+  view = "connections",
+  setView,
+  citationPage = 0,
+  setCitationPage,
+  direction = "all",
+  setDirection,
   selected,
   peer,
   select,
@@ -47,10 +55,8 @@ export default function CitationNetwork({
   const [width, setWidth] = useState(760),
     [zoom, setZoom] = useState(1),
     [hover, setHover] = useState(null);
-  const [direction, setDirection] = useState("all"),
-    [focusOnly, setFocusOnly] = useState(true);
+  const [focusOnly, setFocusOnly] = useState(true);
   const [showUnlinked, setShowUnlinked] = useState(false);
-  const [view, setView] = useState("connections");
   const isTimeline = view === "timeline";
   const canvas = useRef(null),
     marker = useId().replaceAll(":", "");
@@ -63,9 +69,6 @@ export default function CitationNetwork({
     observer.observe(el);
     return () => observer.disconnect();
   }, []);
-  useEffect(() => {
-    setDirection("all");
-  }, [selected]);
   useEffect(() => {
     setZoom(1);
     setHover(null);
@@ -88,12 +91,17 @@ export default function CitationNetwork({
     ? data.citation_selection
     : papers.filter((p) => p.id === selected || p.id === peer);
   const focal = selection.find((n) => n.id === selected);
-  const visibleList =
+  const legacyList =
     selected && direction !== "all"
       ? citationNeighborhood(papers, links, selected, direction)
       : selected && focusOnly
         ? neighborhood
         : papers;
+  const paged = Array.isArray(data.citation_papers);
+  const visibleList = paged
+    ? data.citation_papers.map((n) => ({ ...n, number: papers.find((p) => p.id === n.id)?.number }))
+    : legacyList;
+  const totalPapers = paged ? data.citation_paper_count : visibleList.length;
   const refs =
     focal?.identified_references ?? citationNeighborhood(papers, links, selected, "references").length;
   const cited = focal?.incoming_citations ?? citationNeighborhood(papers, links, selected, "cited-by").length;
@@ -128,7 +136,7 @@ export default function CitationNetwork({
   const row = (n, unlinked = false) => (
     <li key={n.id}>
       <button className="citation-paper-button" aria-pressed={selected === n.id} onClick={() => select(n.id)}>
-        <span className="citation-paper-number">{unlinked ? "—" : n.number}</span>
+        <span className="citation-paper-number">{unlinked || !n.number ? "—" : n.number}</span>
         <span className="citation-paper-copy">
           <strong>{n.label}</strong>
           <span>
@@ -136,8 +144,10 @@ export default function CitationNetwork({
             {n.journal ? ` · ${n.journal}` : ""}
           </span>
           <small>
-            {selected && links.some((e) => e.source === selected && e.target === n.id) ? "Reference · " : ""}
-            {selected && links.some((e) => e.target === selected && e.source === n.id)
+            {selected && (n.is_reference || links.some((e) => e.source === selected && e.target === n.id))
+              ? "Reference · "
+              : ""}
+            {selected && (n.is_citing || links.some((e) => e.target === selected && e.source === n.id))
               ? "Cites selected paper · "
               : ""}
             {n.incoming_citations ?? n.incomingShown ?? 0} citations in filtered corpus
@@ -151,7 +161,7 @@ export default function CitationNetwork({
       <div className="citation-main">
         <div className="network-options">
           <label>
-            Paper limit{" "}
+            Papers visible on map{" "}
             <select value={limit} onChange={(e) => setLimit(Number(e.target.value))}>
               {[30, 60, 100].map((n) => (
                 <option key={n}>{n}</option>
@@ -472,11 +482,20 @@ export default function CitationNetwork({
                   {p.journal ? ` · ${p.journal}` : ""}
                 </p>
                 <p>
-                  {p.matching_source === false
-                    ? "Reference metadata · Outside the matching indexed papers"
-                    : "Indexed full text"}
+                  {p.indexed === false
+                    ? "Reference metadata · Original not indexed · Bibliographic information only"
+                    : p.matching_source === false
+                      ? "Reference metadata · Outside the matching indexed papers"
+                      : "Indexed full text"}
                 </p>
-                <PaperLink paper={p} />
+                <PaperLink paper={p} returnTo={returnTo} />
+                {p.in_catalog && p.pmid && (
+                  <p>
+                    <Link to={paperFromAtlas(p.pmid, returnTo) + "&tab=notes"} state={{ returnTo }}>
+                      Save, annotate or add to a project
+                    </Link>
+                  </p>
+                )}
                 {p.integrity_status && p.integrity_status !== "current" && (
                   <p>Publication status: {p.integrity_status}</p>
                 )}
@@ -501,7 +520,7 @@ export default function CitationNetwork({
         ) : (
           <div className="citation-list-heading">
             <span className="atlas-eyebrow">FOLLOW THE LITERATURE</span>
-            <h3>Papers on the map</h3>
+            <h3>{paged ? "Connected literature" : "Papers on the map"}</h3>
             <p>Select a paper to follow its references and the indexed papers that cite it.</p>
           </div>
         )}
@@ -519,16 +538,33 @@ export default function CitationNetwork({
           </div>
         )}
         <p className="citation-list-count">
-          {visibleList.length} papers listed
-          {selected ? " from the displayed selection" : " · Most cited in filtered corpus first"}
+          {paged
+            ? `${totalPapers ? citationPage * 20 + 1 : 0}–${Math.min((citationPage + 1) * 20, totalPapers)} of ${totalPapers} papers`
+            : `${visibleList.length} papers listed`}
+          {selected ? " connected to the selected paper" : " · Most cited in filtered corpus first"}
+          {paged && " · Includes connections outside the map. Select any paper to bring it into view."}
         </p>
         {!visibleList.length && (
           <p className="citation-list-empty">
-            No papers shown for this direction. Increase the paper limit or broaden the filters. Coverage is
-            incomplete.
+            No identified connections for this direction within the selected sources. Coverage is incomplete;
+            this does not establish that the paper has no references or citations.
           </p>
         )}
         <ul className="citation-paper-list">{visibleList.map((n) => row(n))}</ul>
+        {paged && totalPapers > 20 && (
+          <nav className="citation-unlinked-pages" aria-label="Connected paper pages">
+            <button disabled={!citationPage} onClick={() => setCitationPage(citationPage - 1)}>
+              Previous connections
+            </button>
+            <span>Page {citationPage + 1}</span>
+            <button
+              disabled={(citationPage + 1) * 20 >= totalPapers}
+              onClick={() => setCitationPage(citationPage + 1)}
+            >
+              More connections
+            </button>
+          </nav>
+        )}
       </aside>
     </div>
   );

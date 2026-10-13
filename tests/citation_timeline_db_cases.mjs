@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {researchNavigationCases} from './research_navigation_db_cases.mjs';
 export async function citationTimelineCases(db,{publish,scalar,source,worker,hash}) {
  const get=f=>scalar('SELECT public.knowledge_network($1) v',[{relation:'citations',...f}]);
  await db.exec(`RESET ROLE;
@@ -35,6 +36,7 @@ export async function citationTimelineCases(db,{publish,scalar,source,worker,has
  d=await get({limit:10,journal:'Fixture journal',focus:'800026'});
  assert(d.nodes.some(n=>n.id==='800026'),'An explicitly selected unlinked paper stays inspectable');
  assert.equal(d.citation_selection[0].identified_references,0);
+ await researchNavigationCases(db,{publish,scalar,source,hash});
  await db.exec('RESET ROLE;DELETE FROM public.papers WHERE id BETWEEN 8001 AND 8026;SET ROLE authenticated');
  console.log('Citation timeline DB passed: paired endpoints, scope-correct counts, bibliography, focused retention, unlinked list and edge cap.');
 }

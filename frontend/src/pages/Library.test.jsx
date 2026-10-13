@@ -18,7 +18,8 @@ vi.mock("../lib/supabase", () => ({
     },
   },
 }));
-vi.mock("../lib/workspace", () => ({
+vi.mock("../lib/workspace", async (importOriginal) => ({
+  ...(await importOriginal()),
   rpc: mocks.rpc,
   cachedPapers: () => [],
   removeCached: vi.fn(),
