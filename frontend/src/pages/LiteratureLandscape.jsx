@@ -115,8 +115,8 @@ export default function LiteratureLandscape() {
       <div className="atlas-container landscape">
         <header className="atlas-header">
           <div>
-            <span className="atlas-eyebrow">THE ACCUMULATED LITERATURE</span>
-            <h1>Research atlas</h1>
+            <span className="atlas-eyebrow">CITATION MAP</span>
+            <h1>Citation map</h1>
             <p>Explore subjects over time, then follow the papers and their identified references.</p>
           </div>
           <nav className="atlas-tabs" aria-label="Insights views">
@@ -126,15 +126,15 @@ export default function LiteratureLandscape() {
             <Link to="/insights?view=activity">My activity</Link>
           </nav>
         </header>
-        <nav className="landscape-views" aria-label="Research views">
+        <nav className="landscape-views" aria-label="Citation views">
           <button aria-pressed={mode === "topics"} onClick={() => update({ landscape: null })}>
             Topics over time
           </button>
           <button aria-pressed={mode === "citations"} onClick={() => update({ landscape: "citations" })}>
             Citation flows
           </button>
-          <Link to="/insights?relation=concepts">
-            Extracted concepts <ArrowUpRight size={14} />
+          <Link to="/insights">
+            Concepts <ArrowUpRight size={14} />
           </Link>
         </nav>
         <form

@@ -131,11 +131,12 @@ function Timeline({ years, choose }) {
 
 export default function ResearchAtlas() {
   const [params] = useSearchParams();
-  // Whole-catalog overview first. Preserve explicit concept / paper deep links.
-  return params.get("relation") === "concepts" || params.has("concept") ? (
-    <IndexedResearchAtlas />
-  ) : (
+  // Only the citation overview uses the catalog landscape. The default concept
+  // graph and explicit paper/concept deep links retain their existing view.
+  return params.get("relation") === "citations" && !params.get("concept") ? (
     <LiteratureLandscape />
+  ) : (
+    <IndexedResearchAtlas />
   );
 }
 
@@ -197,9 +198,7 @@ function IndexedResearchAtlas() {
           <div>
             <span className="atlas-eyebrow">KNOWLEDGE & CONNECTIONS</span>
             <h1>Research atlas</h1>
-            <p>
-              Concepts extracted from indexed originals. <Link to="/insights">Explore the whole catalog</Link>
-            </p>
+            <p>Concepts, papers and research over time.</p>
           </div>
           <nav className="atlas-tabs" aria-label="Insights views">
             <Link aria-current="page" to="/insights">
@@ -298,7 +297,7 @@ function IndexedResearchAtlas() {
               {query ? ` · “${query}”` : ""}
               {selected ? " · Selected concept" : ""}
             </span>
-            <button onClick={() => setParams({ relation: "concepts" })}>
+            <button onClick={() => setParams({})}>
               <X size={14} />
               Clear filters
             </button>
@@ -338,7 +337,7 @@ function IndexedResearchAtlas() {
                     <div className="atlas-segment" aria-label="Network relationship">
                       <button
                         aria-pressed={relation === "concepts"}
-                        onClick={() => update({ relation: "concepts", concept: null, with: null })}
+                        onClick={() => update({ relation: null, concept: null, with: null })}
                       >
                         Concepts
                       </button>
@@ -394,9 +393,7 @@ function IndexedResearchAtlas() {
                           ? "Broaden your search or clear the filters."
                           : "Concepts and connections will appear as full texts are processed."}
                       </p>
-                      {activeFilters && (
-                        <button onClick={() => setParams({ relation: "concepts" })}>Clear filters</button>
-                      )}
+                      {activeFilters && <button onClick={() => setParams({})}>Clear filters</button>}
                     </div>
                   )}
                 </section>

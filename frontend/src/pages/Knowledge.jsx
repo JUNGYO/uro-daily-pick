@@ -54,7 +54,7 @@ function KnowledgeDetail({ id }) {
     <ReaderPage lang="en" title={data?.concept?.label || "Knowledge page"}>
       <nav className="knowledge-nav">
         <Link to="/knowledge">Knowledge Explorer</Link>
-        <Link to="/insights?relation=concepts">Literature Map</Link>
+        <Link to="/insights?view=knowledge">Literature Map</Link>
         <Link to="/discover">Discover</Link>
       </nav>
       <Resource
@@ -177,7 +177,7 @@ function KnowledgeBrowse() {
     >
       <nav className="knowledge-nav">
         <Link to="/discover">Discover</Link>
-        <Link to="/insights?relation=concepts">Literature Map</Link>
+        <Link to="/insights?view=knowledge">Literature Map</Link>
       </nav>
       <form
         className="knowledge-search"

@@ -1,11 +1,17 @@
 # Research network: counting and interpretation
 
-The atlas opens with a **whole-catalog literature landscape**. It counts every
-current catalog paper, including records without acquired or indexed originals.
-It is not a systematic-review evidence grade, a causal graph or a complete citation
-index. The separate Extracted concepts view describes only indexed originals.
+The atlas opens with the existing **concept node graph** from indexed originals.
+Its layout, node counts, filters, selection and Knowledge Explorer links are
+unchanged. `/insights` and `/insights?view=knowledge` retain this default.
 
-## Whole-catalog landscape
+Only the **Citations** view opens the whole-catalog subject/year and citation-flow
+explorer (`relation=citations`, without an explicit focused paper). This overview
+counts every current catalog paper, including records without acquired or indexed
+originals. It is not a systematic-review evidence grade, a causal graph or a
+complete citation index. The Concepts link returns to the original node view.
+Explicit citation-paper deep links retain the connected paper graph.
+
+## Citation overview: whole-catalog landscape
 
 The subject-by-publication-year table aggregates catalog MeSH labels. Every paper
 in the year/journal scope contributes, with no paper/node limit. Subject rows are
@@ -26,7 +32,7 @@ years and collection coverage can be incomplete.
 Selecting a subject reveals its exact paper membership. Paper lists use catalog-ID
 keyset pagination, with newest catalog records first; list ordering is explicitly
 distinct from publication-year counting. Original-derived concept pages remain
-available through Extracted concepts and existing concept deep links.
+available through the original Concepts view and existing concept deep links.
 
 Citation flows aggregate every identified directed link from the selected subject's
 indexed papers by citing year and referenced year. Reference data from matching-hash

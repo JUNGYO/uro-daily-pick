@@ -61,9 +61,11 @@ test('indexed concepts without findings offer originals without promising a pend
 });
 
 for(const width of [1440,830,390,320]) test(`atlas opens with visible graph and connected scientific records at ${width}px`,async({page},info)=>{
- await page.setViewportSize({width,height:1000});await page.goto('/uro-daily-pick/insights?relation=concepts');
+ await page.setViewportSize({width,height:1000});await page.goto('/uro-daily-pick/insights');
  await expect(page.getByRole('heading',{name:'Research atlas',exact:true})).toBeVisible();
  await expect(page.getByRole('group',{name:'Concept map from full texts'})).toBeVisible();
+ await expect(page.locator('.landscape')).toHaveCount(0);
+ const originalNodes=await page.locator('.atlas-node').evaluateAll(nodes=>nodes.map(n=>n.outerHTML));
  await expect(page.getByRole('link',{name:'My activity',exact:true})).toBeVisible();
  await page.screenshot({path:info.outputPath(`atlas-initial-${width}.png`)});
  await page.getByRole('button',{name:'prostate cancer, 28 papers, Disease',exact:true}).click();
@@ -85,23 +87,28 @@ for(const width of [1440,830,390,320]) test(`atlas opens with visible graph and 
  await page.screenshot({path:info.outputPath(`atlas-record-${width}.png`)});
  await page.getByRole('button',{name:'Clear filters',exact:true}).click();
  await page.getByRole('button',{name:'Citations',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Citation map',exact:true})).toBeVisible();
  await expect(page.getByRole('heading',{name:'Identified citation flows'})).toBeVisible();
+ await page.getByRole('link',{name:'Concepts',exact:true}).click();
+ await expect(page.getByRole('group',{name:'Concept map from full texts'})).toBeVisible();
+ await expect(page.locator('.landscape')).toHaveCount(0);
+ expect(await page.locator('.atlas-node').evaluateAll(nodes=>nodes.map(n=>n.outerHTML))).toEqual(originalNodes);
  const audit=await new AxeBuilder({page}).include('main').withTags(['wcag2a','wcag2aa','wcag21aa']).analyze();expect(audit.violations).toEqual([]);
  await english(page);
  await page.getByRole('link',{name:'My activity',exact:true}).click();await expect(page.getByRole('heading',{name:'Research Insights'})).toBeVisible();
 });
 
 test('atlas filters survive reload, empty results and failures remain actionable',async({page})=>{
- await page.goto('/uro-daily-pick/insights?relation=concepts&from=2024&to=2024&journal=European%20urology');
+ await page.goto('/uro-daily-pick/insights?from=2024&to=2024&journal=European%20urology');
  await expect(page.locator('.atlas-status')).toContainText('1 matching papers');await page.reload();await expect(page.locator('.atlas-status')).toContainText('1 matching papers');
  await page.getByLabel('Search concepts, papers or identifiers').fill('no-such-concept');await page.getByRole('button',{name:'Search',exact:true}).click();
  await expect(page.getByText('No indexed papers match these filters.',{exact:true})).toBeVisible();
  await page.getByRole('button',{name:'Clear filters',exact:true}).first().click();await expect(page.getByRole('group',{name:'Concept map from full texts'})).toBeVisible();
- await page.goto('/uro-daily-pick/insights?relation=concepts&scenario=knowledge-error');await expect(page.getByRole('alert')).toContainText('Unable to load research');
+ await page.goto('/uro-daily-pick/insights?scenario=knowledge-error');await expect(page.getByRole('alert')).toContainText('Unable to load research');
 });
 
 test('dense atlas keeps labels separate on desktop and exposes all concepts on mobile',async({page},info)=>{
- await page.setViewportSize({width:1440,height:1000});await page.goto('/uro-daily-pick/insights?relation=concepts&scenario=atlas-dense');
+ await page.setViewportSize({width:1440,height:1000});await page.goto('/uro-daily-pick/insights?scenario=atlas-dense');
  await expect(page.locator('.atlas-node')).toHaveCount(24);
  await page.locator('.atlas-graph').scrollIntoViewIfNeeded();
  const bounds=await page.locator('.atlas-node text').evaluateAll(nodes=>nodes.map(n=>{const r=n.getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom};}));
@@ -114,7 +121,7 @@ test('dense atlas keeps labels separate on desktop and exposes all concepts on m
 });
 
 test('connection selection shows its papers and exports reproducible data',async({page})=>{
- await page.goto('/uro-daily-pick/insights?relation=concepts');
+ await page.goto('/uro-daily-pick/insights');
  const link=page.getByRole('button',{name:'prostate cancer and active surveillance: 12 shared papers',exact:true});
  await link.focus();await page.keyboard.press('Enter');
  await expect(page.getByRole('complementary',{name:'Selected research'})).toContainText('Jaccard overlap');

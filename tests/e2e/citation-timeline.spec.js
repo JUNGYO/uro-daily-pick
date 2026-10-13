@@ -3,7 +3,7 @@ import AxeBuilder from '../../frontend/node_modules/@axe-core/playwright/dist/in
 test.beforeEach(async({page})=>{await page.route(/https?:\/\//,r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());});
 for(const width of [1440,830,390,320]) test(`whole literature overview and citation evidence at ${width}px`,async({page},info)=>{
  await page.setViewportSize({width,height:1000});
- await page.goto('/uro-daily-pick/insights');
+ await page.goto('/uro-daily-pick/insights?relation=citations');
  await expect(page.getByRole('heading',{name:'Subjects across publication years'})).toBeVisible();
  await expect(page.getByLabel('Catalog coverage')).toContainText('163');
  await expect(page.getByLabel('Catalog coverage')).toContainText('3 / 163');
@@ -47,10 +47,10 @@ for(const width of [1440,830,390,320]) test(`whole literature overview and citat
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 });
 test('catalog initialization, subject search and unknown metadata remain explicit',async({page})=>{
- await page.goto('/uro-daily-pick/insights?scenario=landscape-building');
+ await page.goto('/uro-daily-pick/insights?relation=citations&scenario=landscape-building');
  await expect(page.getByRole('heading',{name:'Preparing the catalog overview'})).toBeVisible();
  await expect(page.getByLabel('Catalog coverage')).toHaveCount(0);
- await page.goto('/uro-daily-pick/insights');
+ await page.goto('/uro-daily-pick/insights?relation=citations');
  await page.getByLabel('Find a MeSH subject').fill('no subject metadata');
  await page.getByRole('button',{name:'Find subject',exact:true}).click();
  await page.getByRole('button',{name:'No subject metadata',exact:true}).click();
