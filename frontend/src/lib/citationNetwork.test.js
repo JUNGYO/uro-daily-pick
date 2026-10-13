@@ -5,6 +5,7 @@ import {
   citationTimeline,
   citationRadius,
   citationLabel,
+  citationConnections,
 } from "./citationNetwork";
 import { networkSnapshot } from "./researchNetwork";
 const nodes = [
@@ -17,6 +18,46 @@ const edges = [
   { source: "a", target: "c" },
 ];
 describe("citation timeline", () => {
+  it("fits every endpoint of a dense same-year graph without using years as map coordinates", () => {
+    const papers = Array.from({ length: 100 }, (_, i) => ({
+      id: String(i),
+      year: 2024,
+      incoming_citations: i === 0 ? 20 : 0,
+    }));
+    const links = papers.slice(1).map((p) => ({ source: p.id, target: "0" }));
+    const m = citationModel(papers, links);
+    for (const width of [480, 900]) {
+      const graph = citationConnections(m.papers, m.links, width);
+      expect(graph.points).toHaveLength(100);
+      for (const p of graph.points) {
+        expect(p.x - p.r).toBeGreaterThan(0);
+        expect(p.x + p.r).toBeLessThan(width);
+        expect(p.y - p.r - 16).toBeGreaterThan(0);
+        expect(p.y + p.r).toBeLessThan(graph.height);
+      }
+      const hub = graph.points.find((p) => p.id === "0"),
+        leaf = graph.points.find((p) => p.id === "1");
+      expect(hub.r ** 2 / leaf.r ** 2).toBeCloseTo(21);
+      expect(new Set(graph.points.map((p) => p.x)).size).toBeGreaterThan(1);
+      expect(citationConnections([...m.papers].reverse(), [...m.links].reverse(), width)).toEqual(graph);
+    }
+  });
+  it("uses actual links to bring related papers together and handles empty/single-node maps", () => {
+    const papers = Array.from({ length: 12 }, (_, i) => ({ id: String(i), incoming_citations: 0 }));
+    const links = papers
+      .filter((_, i) => i % 4)
+      .map((p) => ({ source: p.id, target: String(Math.floor(Number(p.id) / 4) * 4) }));
+    const graph = citationConnections(papers, links);
+    const index = new Map(graph.points.map((p) => [p.id, p]));
+    const distance = (a, b) => Math.hypot(index.get(a).x - index.get(b).x, index.get(a).y - index.get(b).y);
+    const linked = links.reduce((sum, e) => sum + distance(e.source, e.target), 0) / links.length;
+    const unrelated = papers.flatMap((a) =>
+      papers.filter((b) => Math.floor(+a.id / 4) !== Math.floor(+b.id / 4)).map((b) => distance(a.id, b.id)),
+    );
+    expect(linked).toBeLessThan(unrelated.reduce((a, b) => a + b, 0) / unrelated.length);
+    expect(citationConnections([], []).points).toEqual([]);
+    expect(citationConnections([papers[0]], []).points[0].x).toBe(450);
+  });
   it("keeps directed references distinct from incoming citations", () => {
     const m = citationModel(nodes, [...edges, edges[0], { source: "missing", target: "a" }]);
     expect(m.links).toHaveLength(2);

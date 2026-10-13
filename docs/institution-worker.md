@@ -65,8 +65,17 @@ The worker now includes every catalog paper with a missing/stale summary or a mo
 
 ## Figure preservation
 
-The existing controller starts independent `collect`, `summarize` and `figures`
-subprocesses. The figure queue scans all retained originals, including legacy
+The controller starts collection, summaries, knowledge and synchronization
+independently. Figure supplementation starts only after the original collection
+phase exits successfully, using the same remaining publisher quota. Its time
+budget is limited to the remainder of the existing hourly run (normally about
+three minutes after a full 55-minute collection phase). A failed or timed-out
+collection, exhausted quota, insufficient time, a new pause, or a change of the
+Korean calendar day defers figures until a later collection run. It never resets
+or refunds reservations. This gives new originals the first opportunity to use
+the daily quota; access and validation failures can still prevent acquisition.
+
+The figure queue scans all retained originals, including legacy
 archives, without a date filter or model requests. Publisher HTML supplies figure
 captions and high-resolution image links. JATS figures use the current official
 [PMC media dataset](https://pmc.ncbi.nlm.nih.gov/tools/pmcaws/) with article identity

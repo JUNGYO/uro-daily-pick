@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link, useLocation, useSearchParams } from "react-router-dom";
 import {
   Network,
   Search,
@@ -14,19 +14,20 @@ import {
   ChevronRight,
 } from "lucide-react";
 import { useAuth } from "../lib/auth";
-import { rpc } from "../lib/workspace";
+import { rpc, safeReturn } from "../lib/workspace";
 import { Resource } from "../components/ReaderUI";
 import { useRefreshingResource as useResource } from "../lib/useRefreshingResource";
 import KnowledgeRefresh from "../components/KnowledgeRefresh";
 import { ENGLISH_RESOURCE, KnowledgeNarrative, ScientificPaper } from "../components/KnowledgeEvidence";
 import "../knowledge.css";
+import { switchRelationship } from "../lib/researchNavigation";
 import ResearchNetwork from "../components/ResearchNetwork";
 import CitationNetwork from "../components/CitationNetwork";
 import { CATEGORY_LABELS, categoryColor } from "../lib/researchNetwork";
 
 const num = (n) => Number(n || 0).toLocaleString("en-US");
 const THIS_YEAR = new Date().getFullYear();
-function ConceptPreview({ data }) {
+function ConceptPreview({ data, returnTo }) {
   const item = data.selection,
     peer = data.selection_peer;
   if (!item) return <p>This concept has no papers under the current filters.</p>;
@@ -82,8 +83,15 @@ function ConceptPreview({ data }) {
         data.notes.map((n) => (
           <section className="network-note" key={n.concept_id}>
             {data.notes.length > 1 && <h3>{n.label}</h3>}
+            <p className="atlas-footnote">
+              Knowledge narrative from the indexed corpus. The paper list and year chart below follow your
+              current research scope.
+            </p>
             <KnowledgeNarrative wiki={n.wiki} />
-            <Link className="atlas-text-link" to={`/knowledge/${n.concept_id}`}>
+            <Link
+              className="atlas-text-link"
+              to={`/knowledge/${n.concept_id}?${new URLSearchParams({ returnTo })}`}
+            >
               Open full knowledge page <ArrowUpRight size={16} />
             </Link>
           </section>
@@ -103,7 +111,7 @@ function Timeline({ years, choose }) {
     <section className="atlas-timeline" aria-label="Indexed papers by publication year">
       <div>
         <h2>Indexed papers over time</h2>
-        <p>Indexed papers by catalog publication year</p>
+        <p>Publication years of the indexed papers in the current selection</p>
       </div>
       {!years.length ? (
         <p className="atlas-empty">No papers match this period.</p>
@@ -130,6 +138,8 @@ function Timeline({ years, choose }) {
 
 export default function ResearchAtlas() {
   const { user } = useAuth();
+  const location = useLocation();
+  const returnTo = location.pathname + location.search;
   const [params, setParams] = useSearchParams();
   const selected = params.get("concept") || null,
     query = params.get("q") || "",
@@ -143,6 +153,28 @@ export default function ResearchAtlas() {
   const [draft, setDraft] = useState(query),
     [filters, setFilters] = useState(false);
   const peer = params.get("with") || null;
+  const topic = params.get("scopeConcept") || null,
+    topicPeer = params.get("scopePeer") || null;
+  const project = params.get("project") || null,
+    library = params.get("library") || null;
+  const scopeQuery = params.get("scope_q") || "";
+  const citationPage = Math.max(0, Number(params.get("citationPage")) || 0);
+  const direction = ["all", "references", "cited-by"].includes(params.get("direction"))
+    ? params.get("direction")
+    : "all";
+  const needsStart =
+    relation === "citations" &&
+    !(
+      selected ||
+      topic ||
+      project ||
+      library ||
+      query ||
+      journal ||
+      design ||
+      params.has("from") ||
+      params.has("to")
+    );
   const minimum = [1, 2, 3, 5, 10].includes(Number(params.get("min"))) ? Number(params.get("min")) : 1;
   const limit = [30, 60, 100].includes(Number(params.get("limit"))) ? Number(params.get("limit")) : 60;
   useEffect(() => setDraft(query), [query]);
@@ -150,6 +182,8 @@ export default function ResearchAtlas() {
     const next = new URLSearchParams(params);
     next.delete("page");
     next.delete("unlinkedPage");
+    next.delete("citationPage");
+    if ("concept" in fields) next.delete("direction");
     next.delete("view");
     for (const [k, v] of Object.entries(fields)) {
       if (v === null || v === "") next.delete(k);
@@ -170,12 +204,40 @@ export default function ResearchAtlas() {
           peer,
           page,
           unlinked_page: unlinkedPage,
-          relation,
+          relation: needsStart ? "concepts" : relation,
+          ...(topic ? { scope_concept: topic } : {}),
+          ...(topicPeer ? { scope_peer: topicPeer } : {}),
+          ...(project ? { project: Number(project) } : {}),
+          ...(library ? { library, scope_q: scopeQuery } : {}),
+          citation_page: citationPage,
+          direction,
           min_shared: minimum,
           limit,
         },
       }),
-    [user.id, query, from, to, journal, design, selected, peer, page, unlinkedPage, relation, minimum, limit],
+    [
+      user.id,
+      query,
+      from,
+      to,
+      journal,
+      design,
+      selected,
+      peer,
+      page,
+      unlinkedPage,
+      relation,
+      minimum,
+      limit,
+      topic,
+      topicPeer,
+      project,
+      library,
+      scopeQuery,
+      citationPage,
+      direction,
+      needsStart,
+    ],
   );
   const d = r.data;
   const activeFilters = !!(query || journal || design || from !== 2000 || to !== THIS_YEAR || selected);
@@ -196,6 +258,30 @@ export default function ResearchAtlas() {
             <Link to="/insights?view=activity">My activity</Link>
           </nav>
         </header>
+        {(project || library || topic || params.get("returnTo")) && (
+          <nav className="atlas-research-context" aria-label="Research context">
+            {params.get("returnTo") && (
+              <Link to={safeReturn(params.get("returnTo"))}>← Back to reading workspace</Link>
+            )}
+            <span>
+              {d?.context?.project_name
+                ? `Project: ${d.context.project_name}`
+                : project
+                  ? "Project literature"
+                  : library
+                    ? `My library · ${library}`
+                    : "Research atlas"}
+            </span>
+            {topic && (
+              <span>
+                Topic: {d?.context?.topic_label || "Selected concept"}
+                {d?.context?.topic_peer_label ? ` × ${d.context.topic_peer_label}` : ""}
+              </span>
+            )}
+            {scopeQuery && <span>Library search: {scopeQuery}</span>}
+            {(project || library || topic) && <Link to="/insights">Explore all indexed literature</Link>}
+          </nav>
+        )}
         <div className="atlas-controls">
           <form
             onSubmit={(e) => {
@@ -283,9 +369,27 @@ export default function ResearchAtlas() {
               {journal ? ` · ${journal}` : ""}
               {design ? ` · ${design.replaceAll("_", " ")}` : ""}
               {query ? ` · “${query}”` : ""}
-              {selected ? " · Selected concept" : ""}
+              {selected ? (relation === "citations" ? " · Selected paper" : " · Selected concept") : ""}
             </span>
-            <button onClick={() => setParams({})}>
+            <button
+              onClick={() => {
+                const next = new URLSearchParams(params);
+                [
+                  "q",
+                  "journal",
+                  "design",
+                  "from",
+                  "to",
+                  "concept",
+                  "with",
+                  "page",
+                  "unlinkedPage",
+                  "citationPage",
+                  "direction",
+                ].forEach((key) => next.delete(key));
+                setParams(next);
+              }}
+            >
               <X size={14} />
               Clear filters
             </button>
@@ -308,6 +412,16 @@ export default function ResearchAtlas() {
                   Search all literature <ArrowUpRight size={14} />
                 </Link>
               </div>
+              {d.context?.scope_papers != null && (
+                <p className="atlas-footnote">
+                  {num(d.matched_documents)} indexed papers within the current filters ·{" "}
+                  {num(d.context.scope_papers)} catalog-linked papers in this workspace
+                  {d.context.unlinked_project_records > 0
+                    ? ` · ${num(d.context.unlinked_project_records)} project records not linked to the catalog`
+                    : ""}
+                  . Papers without an indexed original remain in your workspace.
+                </p>
+              )}
               <KnowledgeRefresh resource={r} />
               <div
                 className={`atlas-workbench${relation === "citations" ? " atlas-citation-workbench" : ""}`}
@@ -325,21 +439,48 @@ export default function ResearchAtlas() {
                     <div className="atlas-segment" aria-label="Network relationship">
                       <button
                         aria-pressed={relation === "concepts"}
-                        onClick={() => update({ relation: null, concept: null, with: null })}
+                        onClick={() => setParams(switchRelationship(params, "concepts"))}
                       >
                         Concepts
                       </button>
                       <button
                         aria-pressed={relation === "citations"}
-                        onClick={() => update({ relation: "citations", concept: null, with: null })}
+                        onClick={() => setParams(switchRelationship(params, "citations"))}
                       >
                         Citations
                       </button>
                     </div>
                   </div>
-                  {relation === "citations" ? (
+                  {needsStart ? (
+                    <div className="atlas-no-network">
+                      <Network size={36} />
+                      <h3>Choose a starting point for citations</h3>
+                      <p>
+                        Search for a paper or topic above, choose a paper below, or select a concept before
+                        opening Citations. Your library and project maps keep their own literature scope.
+                      </p>
+                      <button onClick={() => setParams(switchRelationship(params, "concepts"))}>
+                        Choose a concept
+                      </button>
+                    </div>
+                  ) : relation === "citations" ? (
                     <CitationNetwork
                       data={d}
+                      returnTo={returnTo}
+                      view={params.get("citationView") === "timeline" ? "timeline" : "connections"}
+                      setView={(value) => {
+                        const next = new URLSearchParams(params);
+                        next.set("citationView", value);
+                        setParams(next);
+                      }}
+                      citationPage={citationPage}
+                      setCitationPage={(value) => {
+                        const next = new URLSearchParams(params);
+                        next.set("citationPage", String(value));
+                        setParams(next);
+                      }}
+                      direction={direction}
+                      setDirection={(value) => update({ direction: value })}
                       selected={d.focus || selected}
                       peer={d.peer || peer}
                       select={(id) => update({ concept: id, with: null })}
@@ -372,21 +513,47 @@ export default function ResearchAtlas() {
                       <h3>
                         {activeFilters
                           ? "No indexed papers match these filters."
-                          : "The corpus is being indexed."}
+                          : project || library
+                            ? "No indexed originals in this workspace yet."
+                            : "The corpus is being indexed."}
                       </h3>
                       <p>
                         {activeFilters
                           ? "Broaden your search or clear the filters."
-                          : "Concepts and connections will appear as full texts are processed."}
+                          : project || library
+                            ? "Your saved papers remain available in the workspace. Connections appear when their originals are indexed."
+                            : "Concepts and connections will appear as full texts are processed."}
                       </p>
-                      {activeFilters && <button onClick={() => setParams({})}>Clear filters</button>}
+                      {activeFilters && (
+                        <button
+                          onClick={() => {
+                            const next = new URLSearchParams(params);
+                            [
+                              "q",
+                              "journal",
+                              "design",
+                              "from",
+                              "to",
+                              "concept",
+                              "with",
+                              "page",
+                              "unlinkedPage",
+                              "citationPage",
+                              "direction",
+                            ].forEach((key) => next.delete(key));
+                            setParams(next);
+                          }}
+                        >
+                          Clear filters
+                        </button>
+                      )}
                     </div>
                   )}
                 </section>
                 {relation !== "citations" && (
                   <aside className="atlas-detail" aria-label="Selected research" aria-live="polite">
                     {relation === "concepts" && selected ? (
-                      <ConceptPreview data={d} />
+                      <ConceptPreview data={d} returnTo={returnTo} />
                     ) : (
                       <>
                         <span className="atlas-eyebrow">START EXPLORING</span>
@@ -438,7 +605,21 @@ export default function ResearchAtlas() {
                 </p>
                 {!d.papers.length && <p className="atlas-empty">No indexed papers match this selection.</p>}
                 {d.papers.slice(0, 20).map((p) => (
-                  <ScientificPaper key={p.pmid} paper={p} />
+                  <ScientificPaper
+                    key={p.pmid}
+                    paper={p}
+                    returnTo={returnTo}
+                    onCitations={() => {
+                      const next =
+                        relation === "concepts"
+                          ? switchRelationship(params, "citations")
+                          : new URLSearchParams(params);
+                      next.set("relation", "citations");
+                      next.set("concept", p.pmid);
+                      ["with", "citationPage", "direction", "page"].forEach((key) => next.delete(key));
+                      setParams(next);
+                    }}
+                  />
                 ))}
                 <nav className="atlas-pagination" aria-label="Paper pages">
                   <button disabled={!page} onClick={() => update({ page: page - 1 })}>

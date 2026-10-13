@@ -76,11 +76,63 @@ within the node limit, starting with selected endpoints and commonly referenced 
 The reference counts describe this indexed source corpus, not global citation counts.
 Arrows are derived only from actual reference identifiers, never inferred similarity.
 
+The default **Connections** view fits the selected graph into the viewport, so
+both ends of each displayed citation are visible. Binary reference links attract
+papers; disconnected components occupy separate regions allocated by paper count.
+Those regions are navigation groups, not scientific clusters. A shared radius
+scale preserves circle area proportional to `1 + scoped incoming citations`,
+capped at 20. Position encodes neither date, similarity nor evidence strength.
+Numbered nodes correspond to the full-title paper list; selecting a paper fits
+its direct references and citing papers. Zoom enlarges both dimensions without
+rearranging this map, and selecting a new paper resets the view.
+
+**Publication timeline** retains the linear catalog publication-year axis and
+separate unknown-year lane. Dense timelines can scroll; same-year papers are
+never moved to invented dates. The JSON export records the active layout and
+displayed selection. Both views use exactly the same supplied nodes and links.
+
 Current original hashes, publication status and the existing confirmed-reader
 guard constrain the index. Bibliographic filters are applied before aggregation.
 Publication-year charts count indexed papers; they are not population-level
 publication trends. Selection, extraction and full-text availability introduce
 coverage bias. The atlas must not be described as clinically validated.
+
+## Connected research workflow
+
+The existing Concepts, Connections and Publication timeline designs form one
+navigation flow. Switching to Citations carries the selected concept or pair as
+a source-paper scope. Returning to Concepts restores that selection. Year bars
+count the selected indexed papers, not unrelated papers from the whole corpus.
+Knowledge narratives remain corpus-wide and are labeled separately from the
+filtered reading list.
+
+Today, paper details and knowledge pages offer citation entry points. A library
+map uses the signed-in reader's tab and memo/tag search; a project map includes
+all catalog-linked collection papers and review reports, independently of the
+workspace's visible page. The database verifies project ownership or accepted
+membership before returning scope data. Catalog-linked but unindexed papers and
+unlinked project records remain explicitly counted; they are not fabricated
+knowledge nodes. A deliberately selected catalog paper can remain a seed even
+before its original is indexed.
+
+An unscoped citation entry asks for a topic, paper or literature filter instead
+of automatically presenting an arbitrary initial graph. The 30/60/100 control
+limits map rendering only. The separate reading list pages through all identified
+connections, with References and Cited by kept distinct. Selecting a paper beyond
+the displayed map brings it into focus. Reference targets may be outside the
+workspace; only the citing source papers are scope-limited. Unlinked papers have
+their own list and are not evidence of no citations.
+
+Paper links carry a durable return URL, including filters, scope, focus, citation
+direction, reading-list page and layout choice. Existing paper actions save,
+annotate and add the paper to a project; returning restores the research context.
+There is no new inferred evidence, model, original download, or bulk acquisition
+in this navigation flow.
+
+Deploy `20261013020723_integrated_research_navigation.sql` before this frontend.
+The service-only `research_navigation_contract` marker is required by deployment
+preflight; anonymous and reader roles cannot execute it. The network RPC retains
+its confirmed/approved-reader check, empty search path and eight-second timeout.
 
 ## Sources
 

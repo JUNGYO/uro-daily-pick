@@ -3,15 +3,25 @@ import AxeBuilder from '../../frontend/node_modules/@axe-core/playwright/dist/in
 test.beforeEach(async({page})=>{await page.route(/https?:\/\//,r=>new URL(r.request().url()).hostname==='127.0.0.1'?r.continue():r.abort());});
 for(const width of [1440,830,390,320]) test(`citation timeline reads and follows real directions at ${width}px`,async({page},info)=>{
  await page.setViewportSize({width,height:1000});
- await page.goto('/uro-daily-pick/insights?scenario=citation-timeline&relation=citations');
- await expect(page.getByRole('heading',{name:'Citation timeline',exact:true})).toBeVisible();
+ await page.goto('/uro-daily-pick/insights?scenario=citation-timeline&relation=citations&q=prostate');
+ await expect(page.getByRole('heading',{name:'Citation map',exact:true})).toBeVisible();
  await expect(page.locator('.citation-node')).toHaveCount(60);
  await expect(page.locator('.citation-reading-panel .citation-paper-list li')).toHaveCount(60);
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
  const canvas=await page.locator('.citation-canvas').evaluate(el=>({width:el.clientWidth,scroll:el.scrollWidth}));
  expect(canvas.scroll).toBeLessThanOrEqual(canvas.width+1);
+ const fitted=await page.locator('.citation-canvas').evaluate(el=>{
+   const r=el.getBoundingClientRect();
+   return {height:el.clientHeight,scroll:el.scrollHeight,clipped:[...el.querySelectorAll('.citation-disc,.network-edge path:first-of-type,.citation-number')].filter(n=>{const b=n.getBoundingClientRect();return b.left<r.left||b.right>r.right||b.top<r.top||b.bottom>r.bottom;}).length};
+ });
+ expect(fitted.scroll).toBeLessThanOrEqual(fitted.height+1);
+ expect(fitted.clipped).toBe(0);
+ await page.getByRole('button',{name:'Publication timeline',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Citation timeline',exact:true})).toBeVisible();
  const ticks=await page.locator('.citation-axis').evaluateAll(ns=>ns.map(n=>{const r=n.getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom};}));
  for(let i=0;i<ticks.length;i++)for(let j=i+1;j<ticks.length;j++) { const a=ticks[i],b=ticks[j]; expect(a.right<=b.x||b.right<=a.x||a.bottom<=b.y||b.bottom<=a.y).toBe(true); }
+ expect(ticks.length).toBeGreaterThan(0);
+ await page.getByRole('button',{name:'Connections',exact:true}).click();
  await page.locator('.citation-workspace').scrollIntoViewIfNeeded();
  await page.screenshot({path:info.outputPath(`citation-timeline-${width}.png`)});
  await page.locator('.citation-reading-panel .citation-paper-button').filter({hasText:'Radical prostatectomy and long-term'}).click();
@@ -24,7 +34,7 @@ for(const width of [1440,830,390,320]) test(`citation timeline reads and follows
  await expect(page.locator('.citation-list-empty')).toContainText('Coverage is incomplete');
  const download=page.waitForEvent('download');await page.getByRole('button',{name:'Export data'}).click();
  const file=await download,stream=await file.createReadStream(),parts=[];for await(const p of stream)parts.push(p);
- const exported=JSON.parse(Buffer.concat(parts));expect(exported.display.node_ids).toHaveLength(10);expect(exported.method.overlap).toBeNull();
+ const exported=JSON.parse(Buffer.concat(parts));expect(exported.display.node_ids).toHaveLength(10);expect(exported.method.overlap).toBeNull();expect(exported.display.view).toBe('connections');expect(exported.method.layout).toContain('binary identified references');
  await page.getByRole('button',{name:'Connected',exact:true}).click();
  await page.locator('.network-edge').first().focus();await page.keyboard.press('Enter');
  await expect(page.locator('.citation-selection')).toContainText('IDENTIFIED CITATION');

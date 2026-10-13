@@ -11,6 +11,9 @@ import { useContentReading } from "../lib/contentReading";
 export default function FullText() {
   const { pmid } = useParams();
   const location = useLocation();
+  const back = safeReturn(
+    new URLSearchParams(location.search).get("returnTo") || location.state?.returnTo || "/papers/" + pmid,
+  );
   const expectedHash = new URLSearchParams(location.search).get("source");
   const [locatorError, setLocatorError] = useState("");
   const { user } = useAuth();
@@ -74,11 +77,8 @@ export default function FullText() {
   return (
     <div className="h-full overflow-y-auto" data-original-scroll>
       <div className="page-shell max-w-4xl">
-        <Link
-          to={safeReturn(location.state?.returnTo || "/papers/" + pmid)}
-          className="text-accent underline text-sm"
-        >
-          논문 상세로 돌아가기
+        <Link to={back} className="text-accent underline text-sm">
+          {back.startsWith("/papers/") ? "논문 상세로 돌아가기" : "이전 연구 화면으로 돌아가기"}
         </Link>
         <h1 className="page-title mt-5 break-words">{article?.title || "원문 보기"}</h1>
         <p className="help-text mt-3 mb-5">PMID {pmid}</p>

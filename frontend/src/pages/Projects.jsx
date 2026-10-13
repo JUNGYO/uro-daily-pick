@@ -1,3 +1,4 @@
+import { atlasLink } from "../lib/researchNavigation";
 import { lazy, Suspense, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "../lib/auth";
@@ -100,6 +101,17 @@ export default function Projects() {
         <div className="reader-actions">
           <Link to={scopedLink("/discover", id)}>문헌 추가</Link>
           <Link to={scopedLink("/library", id)}>서재에서 선택</Link>
+          {id && (
+            <Link
+              to={atlasLink({ project: id, returnTo: "/projects?" + params })}
+              onClick={(event) => {
+                if (reviewDirty && !window.confirm("저장하지 않은 입력을 닫고 이동할까요?"))
+                  event.preventDefault();
+              }}
+            >
+              프로젝트 연구 지도
+            </Link>
+          )}
         </div>
       </div>
       {r.error && <p role="alert">{r.error}</p>}

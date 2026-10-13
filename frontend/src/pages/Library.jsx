@@ -1,3 +1,4 @@
+import { atlasLink } from "../lib/researchNavigation";
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import ReviewTransfer from "../components/ReviewTransfer";
@@ -62,13 +63,21 @@ export default function Library() {
   return (
     <ReaderPage title="내 서재" description="저장한 문헌과 메모를 다시 열고, 연구에 활용하세요.">
       <div className="reader-actions">
+        {!["offline", "searches"].includes(tab) && (
+          <Link
+            className="btn-secondary"
+            to={atlasLink({ library: tab, query, returnTo: "/library?" + params })}
+          >
+            이 서재의 연구 지도
+          </Link>
+        )}
         <Link
           className="btn-secondary"
           to={params.get("project") ? `/projects?project=${params.get("project")}` : "/projects"}
         >
           프로젝트·공동 서재
         </Link>
-        <Link className="btn-secondary" to="/insights">
+        <Link className="btn-secondary" to="/insights?view=activity">
           읽기 통계
         </Link>
         <Link to={params.get("project") ? `/discover?project=${params.get("project")}` : "/discover"}>

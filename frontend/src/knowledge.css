@@ -1239,7 +1239,7 @@
  .atlas-graph.scientific-network { min-width:760px; }
  .network-method { margin-inline:15px; }
 }
-/* Citation maps use chronological lanes and a permanent reading list. */
+/* Citation maps fit connected endpoints; chronology remains a separate view. */
 .atlas-workbench.atlas-citation-workbench { grid-template-columns: minmax(0,1fr); }
 .citation-workspace { display:grid; grid-template-columns:minmax(0,1fr) 340px; }
 .citation-main { min-width:0; }
@@ -1249,8 +1249,13 @@
 .citation-zoom { display:flex; gap:3px; }
 .citation-zoom button { display:grid; place-items:center; border:1px solid #dce4ee; border-radius:7px; width:34px; height:34px; background:white; color:#325573; }
 .citation-zoom button:disabled { opacity:.4; }
+.citation-view-controls { display:flex; flex-wrap:wrap; align-items:center; gap:6px; padding:0 20px 12px; }
+.citation-view-controls button { border:1px solid #cbd9e7; border-radius:7px; padding:7px 10px; background:#fff; color:#355773; font-size:12px; }
+.citation-view-controls button[aria-pressed="true"] { background:#e8f0fb; border-color:#91afd6; color:#204f87; font-weight:650; }
+.citation-view-controls span { flex-basis:100%; font-size:11px; color:#536c84; padding-top:3px; }
 .citation-canvas { width:100%; max-height:520px; overflow:auto; overscroll-behavior:contain; background:#fff; border-top:1px solid #e5edf4; border-bottom:1px solid #e5edf4; }
 .citation-canvas svg { display:block; max-width:none; }
+.citation-connections-canvas { box-sizing:content-box; }
 .citation-axis { font-size:12px; font-weight:650; fill:#4f6479; }
 .citation-number { font-size:11px; font-weight:750; fill:#163d64; paint-order:stroke; stroke:white; stroke-width:3px; }
 .citation-label { font-size:12px; fill:#243e57; paint-order:stroke; stroke:#f8fafc; stroke-width:3px; pointer-events:none; }
@@ -1304,7 +1309,11 @@
  .citation-map-heading { padding:12px; }
  .citation-map-heading h3 { font-size:16px; }
  .citation-focus-controls { padding:0 12px 12px; }
+ .citation-view-controls { padding:0 12px 12px; }
  .citation-paper-list { max-height:480px; }
  .citation-list-heading,.citation-selection { padding:16px; }
  .citation-legend { padding:12px 12px 0; }
 }
+
+.atlas-research-context { display:flex; flex-wrap:wrap; gap:8px 18px; align-items:center; margin:0 0 18px; padding:12px 16px; background:#f0f5fc; border:1px solid #dae5f2; border-radius:8px; color:#315575; font-size:12px; }
+.atlas-research-context a { text-decoration:underline; }
