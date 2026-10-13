@@ -1,70 +1,8 @@
 # Research network: counting and interpretation
 
-The atlas opens with the existing **concept node graph** from indexed originals.
-Its layout, node counts, filters, selection and Knowledge Explorer links are
-unchanged. `/insights` and `/insights?view=knowledge` retain this default.
-
-Only the **Citations** view opens the whole-catalog subject/year and citation-flow
-explorer (`relation=citations`, without an explicit focused paper). This overview
-counts every current catalog paper, including records without acquired or indexed
-originals. It is not a systematic-review evidence grade, a causal graph or a
-complete citation index. The Concepts link returns to the original node view.
-Explicit citation-paper deep links retain the connected paper graph.
-
-## Citation overview: whole-catalog landscape
-
-The subject-by-publication-year table aggregates catalog MeSH labels. Every paper
-in the year/journal scope contributes, with no paper/node limit. Subject rows are
-ordered by paper count and paginated in groups of 20; all subjects remain reachable
-through pagination/search. Changing the page never changes aggregate counts.
-Five-year periods and individual-year views conserve counts, including a separate
-unknown-year column. Rows overlap because papers can have multiple MeSH subjects.
-
-Labels use trimmed, lowercase exact strings. The explicit exclusion list consists
-only of human/animal, sex and age check tags (see `literature_subjects` in the
-landscape migration). It does not guess acronym meanings, map keywords through
-clinical aliases, or invent thematic clusters. Papers with no usable labels retain
-a No subject metadata row. Missing MeSH coverage and unknown dates are counted.
-MeSH subjects, publication volume and catalog growth do not establish scientific
-quality, independent-study counts, field-wide trends or clinical progress. Recent
-years and collection coverage can be incomplete.
-
-Selecting a subject reveals its exact paper membership. Paper lists use catalog-ID
-keyset pagination, with newest catalog records first; list ordering is explicitly
-distinct from publication-year counting. Original-derived concept pages remain
-available through the original Concepts view and existing concept deep links.
-
-Citation flows aggregate every identified directed link from the selected subject's
-indexed papers by citing year and referenced year. Reference data from matching-hash
-metadata and scientific records are unioned. Repeated PMID/DOI identifiers resolving
-to one catalog target count once per citing paper. The interface reports indexed
-papers, reference metadata coverage and unknown target years separately. Reference
-targets can predate the filter, lack catalog metadata, or have a retraction status;
-none is converted to an invented date, title or zero reference count. Year-pair rows
-and evidence lists are paginated without truncating totals. Selecting a year pair
-shows the actual citing/reference paper pairs and source links.
-
-### Query and deployment contract
-
-`knowledge_landscape` reads a narrow private metadata projection, rather than
-scanning the wide papers heap on each request. Catalog insert/update triggers keep
-it current; deletion cascades. No originals, summaries, private projects or notes
-are copied. Both private tables have RLS and no direct reader grants. The RPC
-requires a confirmed account **and** approved membership, with empty search path,
-an eight-second timeout and no anonymous EXECUTE. Refresh is every five minutes
-while visible or on demand, retaining the existing account/race/error protections.
-
-After applying the migration, an operator runs
-`SELECT app_private.backfill_literature_metadata(1000)` in bounded transactions
-until `ready` is true, then analyzes the projection. This operator-only initializer
-uses a durable keyset checkpoint and locks source rows against concurrent metadata
-updates. New catalog writes are maintained throughout initialization. Until it
-finishes, the RPC returns `ready:false`, never partial whole-catalog counts. Before
-web deployment, verify authenticated overview/citation queries and response time
-on the real initialized corpus. Local synthetic performance is not a production SLA.
-The production service preflight requires the new RPC and a service-role-only
-readiness check; incomplete initialization blocks deployment. No collector, inference,
-publisher quota or original-archive change is part of this feature.
+The atlas is an exploratory view of the **indexed full-text corpus**. It is not
+a systematic-review evidence grade, a causal graph or a complete citation index.
+The corpus coverage, current filters and displayed subset are shown together.
 
 ## Entity identity
 
@@ -138,7 +76,7 @@ within the node limit, starting with selected endpoints and commonly referenced 
 The reference counts describe this indexed source corpus, not global citation counts.
 Arrows are derived only from actual reference identifiers, never inferred similarity.
 
-For existing focused-paper deep links, the **Connections** view fits the selected graph into the viewport, so
+The default **Connections** view fits the selected graph into the viewport, so
 both ends of each displayed citation are visible. Binary reference links attract
 papers; disconnected components occupy separate regions allocated by paper count.
 Those regions are navigation groups, not scientific clusters. A shared radius
@@ -155,7 +93,7 @@ displayed selection. Both views use exactly the same supplied nodes and links.
 
 Current original hashes, publication status and the existing confirmed-reader
 guard constrain the index. Bibliographic filters are applied before aggregation.
-The focused graph's publication-year charts count indexed papers; they are not population-level
+Publication-year charts count indexed papers; they are not population-level
 publication trends. Selection, extraction and full-text availability introduce
 coverage bias. The atlas must not be described as clinically validated.
 

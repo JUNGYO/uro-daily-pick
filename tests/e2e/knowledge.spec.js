@@ -64,8 +64,6 @@ for(const width of [1440,830,390,320]) test(`atlas opens with visible graph and 
  await page.setViewportSize({width,height:1000});await page.goto('/uro-daily-pick/insights');
  await expect(page.getByRole('heading',{name:'Research atlas',exact:true})).toBeVisible();
  await expect(page.getByRole('group',{name:'Concept map from full texts'})).toBeVisible();
- await expect(page.locator('.landscape')).toHaveCount(0);
- const originalNodes=await page.locator('.atlas-node').evaluateAll(nodes=>nodes.map(n=>n.outerHTML));
  await expect(page.getByRole('link',{name:'My activity',exact:true})).toBeVisible();
  await page.screenshot({path:info.outputPath(`atlas-initial-${width}.png`)});
  await page.getByRole('button',{name:'prostate cancer, 28 papers, Disease',exact:true}).click();
@@ -87,12 +85,8 @@ for(const width of [1440,830,390,320]) test(`atlas opens with visible graph and 
  await page.screenshot({path:info.outputPath(`atlas-record-${width}.png`)});
  await page.getByRole('button',{name:'Clear filters',exact:true}).click();
  await page.getByRole('button',{name:'Citations',exact:true}).click();
- await expect(page.getByRole('heading',{name:'Citation map',exact:true})).toBeVisible();
- await expect(page.getByRole('heading',{name:'Identified citation flows'})).toBeVisible();
- await page.getByRole('link',{name:'Concepts',exact:true}).click();
- await expect(page.getByRole('group',{name:'Concept map from full texts'})).toBeVisible();
- await expect(page.locator('.landscape')).toHaveCount(0);
- expect(await page.locator('.atlas-node').evaluateAll(nodes=>nodes.map(n=>n.outerHTML))).toEqual(originalNodes);
+ await expect(page.locator('.atlas-graph-note')).toContainText('Arrows follow');
+ await page.getByRole('button',{name:'Zoom in'}).click();await page.getByRole('button',{name:'Reset graph view'}).click();
  const audit=await new AxeBuilder({page}).include('main').withTags(['wcag2a','wcag2aa','wcag21aa']).analyze();expect(audit.violations).toEqual([]);
  await english(page);
  await page.getByRole('link',{name:'My activity',exact:true}).click();await expect(page.getByRole('heading',{name:'Research Insights'})).toBeVisible();
@@ -157,7 +151,7 @@ test('atlas reflects new indexed papers without losing the selected wiki or grap
 
 for(const width of [1440,320]) test(`citation targets remain connected without indexed originals at ${width}px`,async({page},info)=>{
  await page.setViewportSize({width,height:1000});
- await page.goto('/uro-daily-pick/insights?scenario=atlas-reference-targets&relation=citations&concept=12345670');
+ await page.goto('/uro-daily-pick/insights?scenario=atlas-reference-targets&relation=citations');
  await expect(page.locator('.network-coverage')).toContainText('3 / 3 papers and references');
  await expect(page.locator('.network-edge')).toHaveCount(2);
  await page.locator('.network-edge').first().focus();await page.keyboard.press('Enter');

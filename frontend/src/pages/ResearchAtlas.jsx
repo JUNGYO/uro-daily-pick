@@ -22,7 +22,6 @@ import { ENGLISH_RESOURCE, KnowledgeNarrative, ScientificPaper } from "../compon
 import "../knowledge.css";
 import ResearchNetwork from "../components/ResearchNetwork";
 import CitationNetwork from "../components/CitationNetwork";
-import LiteratureLandscape from "./LiteratureLandscape";
 import { CATEGORY_LABELS, categoryColor } from "../lib/researchNetwork";
 
 const num = (n) => Number(n || 0).toLocaleString("en-US");
@@ -130,17 +129,6 @@ function Timeline({ years, choose }) {
 }
 
 export default function ResearchAtlas() {
-  const [params] = useSearchParams();
-  // Only the citation overview uses the catalog landscape. The default concept
-  // graph and explicit paper/concept deep links retain their existing view.
-  return params.get("relation") === "citations" && !params.get("concept") ? (
-    <LiteratureLandscape />
-  ) : (
-    <IndexedResearchAtlas />
-  );
-}
-
-function IndexedResearchAtlas() {
   const { user } = useAuth();
   const [params, setParams] = useSearchParams();
   const selected = params.get("concept") || null,
@@ -343,9 +331,7 @@ function IndexedResearchAtlas() {
                       </button>
                       <button
                         aria-pressed={relation === "citations"}
-                        onClick={() =>
-                          update({ relation: "citations", landscape: "citations", concept: null, with: null })
-                        }
+                        onClick={() => update({ relation: "citations", concept: null, with: null })}
                       >
                         Citations
                       </button>
