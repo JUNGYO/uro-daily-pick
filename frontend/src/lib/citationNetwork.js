@@ -48,6 +48,213 @@ export function citationNeighborhood(papers, links, selected, direction = "all")
   return papers.filter((p) => ids.has(p.id));
 }
 
+// Binary reference links alone attract papers. Positions encode neither time,
+// similarity nor citation strength. Keep this independent of the concept graph's
+// Jaccard weights; citation counts affect disc area only.
+function connectionGroup(papers, links, width, height) {
+  const ordered = [...papers].sort((a, b) => a.id.localeCompare(b.id));
+  const points = ordered.map((p, i) => {
+    const angle = i * Math.PI * (3 - Math.sqrt(5));
+    const radius = 22 * Math.sqrt(i);
+    return {
+      ...p,
+      r: citationRadius(p.incoming_citations ?? p.incomingShown),
+      x: Math.cos(angle) * radius,
+      y: Math.sin(angle) * radius,
+      vx: 0,
+      vy: 0,
+    };
+  });
+  const byId = new Map(points.map((p) => [p.id, p]));
+  const edges = links
+    .filter((e) => byId.has(e.source) && byId.has(e.target) && e.source !== e.target)
+    .slice()
+    .sort((a, b) => a.source.localeCompare(b.source) || a.target.localeCompare(b.target));
+  for (let step = 0; step < 420; step++) {
+    for (const p of points) {
+      p.vx = (p.vx - p.x * 0.004) * 0.65;
+      p.vy = (p.vy - p.y * 0.004) * 0.65;
+    }
+    for (let i = 0; i < points.length; i++)
+      for (let j = i + 1; j < points.length; j++) {
+        const a = points[i],
+          b = points[j];
+        const dx = b.x - a.x || 0.01,
+          dy = b.y - a.y || 0.01;
+        const distance = Math.max(0.1, Math.hypot(dx, dy));
+        const force = Math.min(12, 350 / distance ** 2 + Math.max(0, a.r + b.r + 24 - distance) * 0.45);
+        a.vx -= (dx / distance) * force;
+        a.vy -= (dy / distance) * force;
+        b.vx += (dx / distance) * force;
+        b.vy += (dy / distance) * force;
+      }
+    for (const e of edges) {
+      const a = byId.get(e.source),
+        b = byId.get(e.target);
+      const dx = b.x - a.x,
+        dy = b.y - a.y;
+      const distance = Math.max(1, Math.hypot(dx, dy));
+      const force = (distance - a.r - b.r - 42) * 0.035;
+      a.vx += (dx / distance) * force;
+      a.vy += (dy / distance) * force;
+      b.vx -= (dx / distance) * force;
+      b.vy -= (dy / distance) * force;
+    }
+    const cooling = 1 - step / 500;
+    for (const p of points) {
+      p.x += p.vx * cooling;
+      p.y += p.vy * cooling;
+    }
+  }
+  // Fit the whole selected graph, including disc/number padding. Uniform scaling
+  // preserves relative disc areas and keeps both ends of every link in view.
+  const left = Math.min(0, ...points.map((p) => p.x - p.r - 16));
+  const right = Math.max(0, ...points.map((p) => p.x + p.r + 16));
+  const top = Math.min(0, ...points.map((p) => p.y - p.r - 22));
+  const bottom = Math.max(0, ...points.map((p) => p.y + p.r + 16));
+  const padding = Math.min(24, width * 0.12, height * 0.12);
+  const scale = Math.min(
+    3,
+    (width - padding * 2) / Math.max(1, right - left),
+    (height - padding * 2) / Math.max(1, bottom - top),
+  );
+  return {
+    scale,
+    points: points.map(({ vx, vy, ...p }) => ({
+      ...p,
+      x: width / 2 + (p.x - (left + right) / 2) * scale,
+      y: height / 2 + (p.y - (top + bottom) / 2) * scale,
+      r: p.r * scale,
+    })),
+    width,
+    height,
+    compact: true,
+    lanes: [],
+    ticks: [],
+    unknown: false,
+  };
+}
+
+export function citationConnections(papers, links, width = 900) {
+  const height = 500;
+  const byId = new Map(papers.map((p) => [p.id, p]));
+  const adjacent = new Map(papers.map((p) => [p.id, new Set()]));
+  for (const e of links) {
+    if (!byId.has(e.source) || !byId.has(e.target)) continue;
+    adjacent.get(e.source).add(e.target);
+    adjacent.get(e.target).add(e.source);
+  }
+  const seen = new Set(),
+    groups = [];
+  for (const id of [...byId.keys()].sort()) {
+    if (seen.has(id)) continue;
+    const ids = [id];
+    seen.add(id);
+    for (let i = 0; i < ids.length; i++)
+      for (const next of [...adjacent.get(ids[i])].sort())
+        if (!seen.has(next)) {
+          seen.add(next);
+          ids.push(next);
+        }
+    groups.push(ids);
+  }
+  groups.sort((a, b) => b.length - a.length || a[0].localeCompare(b[0]));
+  const regions = [];
+  // Partition only disconnected components, with area allocated by paper count.
+  // There are no invented connecting lines between these separate sets.
+  const partition = (sets, x, y, w, h) => {
+    if (!sets.length) return;
+    if (sets.length === 1) {
+      regions.push({ ids: sets[0], x, y, width: w, height: h });
+      return;
+    }
+    const total = sets.reduce((sum, ids) => sum + ids.length, 0);
+    let cut = 1,
+      count = sets[0].length;
+    while (
+      cut < sets.length - 1 &&
+      Math.abs(count + sets[cut].length - total / 2) < Math.abs(count - total / 2)
+    )
+      count += sets[cut++].length;
+    const fraction = count / total;
+    if (w >= h) {
+      partition(sets.slice(0, cut), x, y, w * fraction, h);
+      partition(sets.slice(cut), x + w * fraction, y, w * (1 - fraction), h);
+    } else {
+      partition(sets.slice(0, cut), x, y, w, h * fraction);
+      partition(sets.slice(cut), x, y + h * fraction, w, h * (1 - fraction));
+    }
+  };
+  partition(groups, 0, 0, width, height);
+  const layouts = regions.map((region) => {
+    const ids = new Set(region.ids);
+    return connectionGroup(
+      region.ids.map((id) => byId.get(id)),
+      links.filter((e) => ids.has(e.source) && ids.has(e.target)),
+      region.width,
+      region.height,
+    );
+  });
+  // One shared radius multiplier across components preserves the area encoding.
+  const radiusScale = Math.min(1.4, ...layouts.map((g) => g.scale));
+  const points = layouts.flatMap((g, i) =>
+    g.points.map((p) => ({
+      ...p,
+      x: p.x + regions[i].x,
+      y: p.y + regions[i].y,
+      r: citationRadius(p.incoming_citations ?? p.incomingShown) * radiusScale,
+    })),
+  );
+  const compact = width < 580 || points.length > 12;
+  if (!compact) {
+    const boxes = points.map((p) => ({
+      x: p.x - p.r - 5,
+      y: p.y - p.r - 19,
+      w: p.r * 2 + 10,
+      h: p.r * 2 + 24,
+    }));
+    for (const p of [...points].sort(
+      (a, b) => (a.number || 0) - (b.number || 0) || a.id.localeCompare(b.id),
+    )) {
+      const label = citationLabel(p);
+      const text = label.length > 23 ? label.slice(0, 21) + "…" : label;
+      const w = text.length * 7,
+        h = 18;
+      const candidates = [
+        { x: p.x + p.r + 9, y: p.y - 9, w, h },
+        { x: p.x - p.r - 9 - w, y: p.y - 9, w, h },
+        { x: p.x - w / 2, y: p.y + p.r + 8, w, h },
+      ];
+      const box = candidates.find(
+        (b) =>
+          b.x >= 8 &&
+          b.x + b.w <= width - 8 &&
+          b.y >= 8 &&
+          b.y + b.h <= height - 8 &&
+          !boxes.some(
+            (o) => b.x < o.x + o.w + 4 && b.x + b.w + 4 > o.x && b.y < o.y + o.h + 4 && b.y + b.h + 4 > o.y,
+          ),
+      );
+      if (box) {
+        boxes.push(box);
+        p.labelX = box.x;
+        p.labelY = box.y + 13;
+        p.shortLabel = text;
+      }
+    }
+  }
+  return {
+    points,
+    regions: regions.length > 1 ? regions : [],
+    width,
+    height,
+    compact,
+    lanes: [],
+    ticks: [],
+    unknown: false,
+  };
+}
+
 // Horizontal position is publication YEAR on a linear axis, never a fabricated
 // date. Vertical lanes group weakly connected papers solely for navigation.
 export function citationTimeline(papers, links, width = 900) {

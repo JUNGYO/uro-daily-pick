@@ -1,5 +1,6 @@
+import { atlasLink } from "../lib/researchNavigation";
 import { useEffect, useState, useRef } from "react";
-import { Link, Navigate, useLocation } from "react-router-dom";
+import { Link, Navigate, useLocation, useSearchParams } from "react-router-dom";
 import { supabase } from "../lib/supabase";
 import { useAuth } from "../lib/auth";
 import { checked, normalizePaper } from "../lib/data";
@@ -16,9 +17,17 @@ export default function Collections() {
 }
 
 function CollectionList() {
+  const location = useLocation();
+  const [params, setParams] = useSearchParams();
   const { user } = useAuth();
   const [collections, setCollections] = useState([]);
-  const [activeId, setActiveId] = useState(null);
+  const activeId = Number(params.get("collection")) || null;
+  const setActiveId = (id) => {
+    const next = new URLSearchParams(params);
+    if (id) next.set("collection", String(id));
+    else next.delete("collection");
+    setParams(next);
+  };
   const [papers, setPapers] = useState([]);
   const [name, setName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -214,6 +223,9 @@ function CollectionList() {
         {active && (
           <section>
             <h2 className="section-title">{active.name}</h2>
+            <Link to={atlasLink({ project: active.id, returnTo: location.pathname + location.search })}>
+              Explore this collection in the research atlas
+            </Link>
             {!papersLoading && (
               <PaperSearch
                 key={active.id}

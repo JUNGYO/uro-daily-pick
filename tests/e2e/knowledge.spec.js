@@ -85,6 +85,8 @@ for(const width of [1440,830,390,320]) test(`atlas opens with visible graph and 
  await page.screenshot({path:info.outputPath(`atlas-record-${width}.png`)});
  await page.getByRole('button',{name:'Clear filters',exact:true}).click();
  await page.getByRole('button',{name:'Citations',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Choose a starting point for citations'})).toBeVisible();
+ await page.getByRole('button',{name:'Explore citations',exact:true}).first().click();
  await expect(page.locator('.atlas-graph-note')).toContainText('Arrows follow');
  await page.getByRole('button',{name:'Zoom in'}).click();await page.getByRole('button',{name:'Reset graph view'}).click();
  const audit=await new AxeBuilder({page}).include('main').withTags(['wcag2a','wcag2aa','wcag21aa']).analyze();expect(audit.violations).toEqual([]);
@@ -151,7 +153,7 @@ test('atlas reflects new indexed papers without losing the selected wiki or grap
 
 for(const width of [1440,320]) test(`citation targets remain connected without indexed originals at ${width}px`,async({page},info)=>{
  await page.setViewportSize({width,height:1000});
- await page.goto('/uro-daily-pick/insights?scenario=atlas-reference-targets&relation=citations');
+ await page.goto('/uro-daily-pick/insights?scenario=atlas-reference-targets&relation=citations&q=prostate');
  await expect(page.locator('.network-coverage')).toContainText('3 / 3 papers and references');
  await expect(page.locator('.network-edge')).toHaveCount(2);
  await page.locator('.network-edge').first().focus();await page.keyboard.press('Enter');

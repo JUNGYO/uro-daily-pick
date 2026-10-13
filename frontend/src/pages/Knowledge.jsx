@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { Link, useParams, useSearchParams } from "react-router-dom";
+import { Link, useParams, useSearchParams, useLocation, useNavigate } from "react-router-dom";
 import { useAuth } from "../lib/auth";
-import { rpc } from "../lib/workspace";
+import { rpc, safeReturn } from "../lib/workspace";
 import { ReaderPage, Resource, useResource } from "../components/ReaderUI";
 import { ScientificPaper } from "../components/KnowledgeEvidence";
 import "../knowledge.css";
+import { paperAtlasLink } from "../lib/researchNavigation";
 
 import { CATEGORY_LABELS as TYPES, CATEGORY_COLORS as COLORS } from "../lib/researchNetwork";
 const number = (n) => Number(n || 0).toLocaleString("en-US");
@@ -26,6 +27,7 @@ function Pager({ page, more, change }) {
 }
 
 export function KnowledgeLinks({ pmid }) {
+  const location = useLocation();
   const { user } = useAuth();
   const r = useResource(
     () => rpc("knowledge_search", { p_query: "", p_pmid: pmid, p_page: 0 }),
@@ -36,7 +38,10 @@ export function KnowledgeLinks({ pmid }) {
     <div className="knowledge-inline" lang="en">
       <span>Related knowledge</span>
       {r.data.items.slice(0, 4).map((c) => (
-        <Link key={c.id} to={detailUrl(c.id)}>
+        <Link
+          key={c.id}
+          to={detailUrl(c.id) + "?" + new URLSearchParams({ returnTo: location.pathname + location.search })}
+        >
           {c.label}
         </Link>
       ))}
@@ -45,16 +50,23 @@ export function KnowledgeLinks({ pmid }) {
 }
 
 function KnowledgeDetail({ id }) {
+  const location = useLocation(),
+    navigate = useNavigate();
   const { user } = useAuth();
   const [params, setParams] = useSearchParams();
   const page = Math.max(0, Math.min(10000, Number(params.get("page")) || 0));
   const r = useResource(() => rpc("knowledge_page", { p_id: id, p_page: page }), [user.id, id, page]);
   const data = r.data;
+  const returnTo = location.pathname + location.search;
+  const mapTarget = params.get("returnTo")?.startsWith("/insights?")
+    ? safeReturn(params.get("returnTo"))
+    : `/insights?concept=${id}`;
   return (
     <ReaderPage lang="en" title={data?.concept?.label || "Knowledge page"}>
       <nav className="knowledge-nav">
+        {params.get("returnTo") && <Link to={safeReturn(params.get("returnTo"))}>Back to research</Link>}
         <Link to="/knowledge">Knowledge Explorer</Link>
-        <Link to="/insights?view=knowledge">Literature Map</Link>
+        <Link to={mapTarget}>Literature Map</Link>
         <Link to="/discover">Discover</Link>
       </nav>
       <Resource
@@ -139,12 +151,21 @@ function KnowledgeDetail({ id }) {
                 of independent studies.
               </p>
               {data.papers.slice(0, 20).map((p) => (
-                <ScientificPaper key={p.pmid} paper={p} />
+                <ScientificPaper
+                  key={p.pmid}
+                  paper={p}
+                  returnTo={returnTo}
+                  onCitations={() => navigate(paperAtlasLink(p.pmid, mapTarget, returnTo))}
+                />
               ))}
               <Pager
                 page={page}
                 more={data.papers.length > 20}
-                change={(next) => setParams(next ? { page: next } : {})}
+                change={(page) => {
+                  const next = new URLSearchParams(params);
+                  next.set("page", String(page));
+                  setParams(next);
+                }}
               />
             </section>
           </>
