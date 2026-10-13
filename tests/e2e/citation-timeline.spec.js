@@ -18,6 +18,8 @@ for(const width of [1440,830,390,320]) test(`whole literature overview and citat
  await page.getByRole('button',{name:'Previous subjects',exact:true}).click();
  await page.getByRole('button',{name:'prostatic neoplasms',exact:true}).click();
  await expect(page.getByRole('region',{name:'Selected literature'})).toContainText('120 papers');
+ await expect(page.getByRole('region',{name:'Selected literature'})).toBeFocused();
+ const position=await page.locator('.landscape-detail').evaluate(el=>el.getBoundingClientRect().top);expect(position).toBeGreaterThanOrEqual(90);expect(position).toBeLessThan(240);
  await expect(page.locator('.landscape-paper-list li')).toHaveCount(20);
  const first=await page.locator('.landscape-paper-list li').first().innerText();
  await page.getByRole('button',{name:'More papers',exact:true}).click();

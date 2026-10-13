@@ -1373,3 +1373,5 @@
  .landscape th, .landscape td { padding: 9px 8px; min-width: 75px; }
  .landscape-filters label:first-child { flex-basis: 160px; }
 }
+
+.landscape-overview, .landscape-detail { scroll-margin-top: 110px; }

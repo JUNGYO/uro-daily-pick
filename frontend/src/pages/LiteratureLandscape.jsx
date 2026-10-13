@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { Network, ArrowUpRight, X } from "lucide-react";
 import { useAuth } from "../lib/auth";
@@ -44,6 +44,14 @@ export default function LiteratureLandscape() {
   const [draft, setDraft] = useState(query),
     [width, setWidth] = useState(5),
     [flowPage, setFlowPage] = useState(0);
+  const overviewRef = useRef(null),
+    detailRef = useRef(null),
+    pendingSection = useRef(null);
+  const reveal = (section) => {
+    const target = section === "overview" ? overviewRef.current : detailRef.current;
+    target?.focus({ preventScroll: true });
+    target?.scrollIntoView({ block: "start" });
+  };
   const filters = {
     mode,
     subject,
@@ -66,9 +74,24 @@ export default function LiteratureLandscape() {
   );
   const d = r.data,
     c = d?.coverage;
+  useEffect(() => {
+    if (d?.ready && pendingSection.current) {
+      reveal(pendingSection.current);
+      pendingSection.current = null;
+    }
+  }, [d]);
   useEffect(() => setDraft(query), [query]);
   useEffect(() => setFlowPage(0), [subject, filters.from, filters.to, filters.journal]);
   const update = (fields, reset = true) => {
+    const section =
+      "subject_page" in fields || "subject_q" in fields || ("landscape" in fields && !fields.landscape)
+        ? "overview"
+        : "detail";
+    if (Object.entries(fields).every(([key, value]) => String(value ?? "") === (params.get(key) || ""))) {
+      reveal(section);
+      return;
+    }
+    pendingSection.current = section;
     const next = new URLSearchParams(params);
     // Retain fixture/query context, but never reuse old graph node budgets.
     ["concept", "with", "limit", "page", "unlinkedPage", "q", "design", "min"].forEach((key) =>
@@ -221,7 +244,12 @@ export default function LiteratureLandscape() {
               </div>
               <KnowledgeRefresh resource={r} />
               {mode === "topics" && (
-                <section className="landscape-overview" aria-labelledby="landscape-title">
+                <section
+                  ref={overviewRef}
+                  tabIndex={-1}
+                  className="landscape-overview"
+                  aria-labelledby="landscape-title"
+                >
                   <div className="landscape-section-heading">
                     <div>
                       <span className="atlas-eyebrow">ALL MATCHING PAPERS COUNTED</span>
@@ -340,7 +368,12 @@ export default function LiteratureLandscape() {
                   Choose a subject in Topics over time
                 </button>
               )}
-              <section className="landscape-detail" aria-label="Selected literature">
+              <section
+                ref={detailRef}
+                tabIndex={-1}
+                className="landscape-detail"
+                aria-label="Selected literature"
+              >
                 <div className="landscape-section-heading">
                   <div>
                     <span className="atlas-eyebrow">
