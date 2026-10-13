@@ -20,10 +20,12 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 
 KST = timezone(timedelta(hours=9))
-PUBLISHERS = {"springer-nature", "wiley", "elsevier", "jama", "bmj", "wolters-kluwer"}
+PUBLISHERS = {"springer-nature", "wiley", "elsevier", "jama", "bmj", "wolters-kluwer",
+              "brazilian-society-of-urology", "cju-communications", "tech-science-press"}
 PREFIXES = {"10.1007": "springer-nature", "10.1038": "springer-nature",
             "10.1002": "wiley", "10.1111": "wiley", "10.1016": "elsevier",
-            "10.1001": "jama", "10.1136": "bmj", "10.1097": "wolters-kluwer"}
+            "10.1001": "jama", "10.1136": "bmj", "10.1097": "wolters-kluwer",
+            "10.32604": "tech-science-press"}
 _scope = ContextVar("acquisition_publisher_scope", default=())
 
 
@@ -51,6 +53,17 @@ def paper_publishers(paper, source_url=""):
     # also charges the actual destination, including redirects and CDN domains.
     doi = str(paper.get("doi") or "").strip().lower()
     groups = {PREFIXES.get(doi.split("/", 1)[0]), publisher_for_host(urlsplit(source_url).hostname or "")}
+    # 10.1590 is shared by many SciELO publishers, so require IBJU's ISSN.
+    # Publisher: https://www.scielo.br/j/ibju/
+    if re.fullmatch(r"10\.1590/s1677-5538(?:\.|ibju)[.a-z0-9-]+", doi):
+        groups.add("brazilian-society-of-urology")
+    # CJU moved to Tech Science Press in 2025; legacy articles can lack a DOI.
+    # Charge both historical/current publisher buckets conservatively, so an
+    # uncertain publication date or archive transfer cannot grant extra quota.
+    # https://canjurol.com/ ; https://www.techscience.com/CJU/append
+    if str(paper.get("journal") or "").strip().lower() in {
+            "the canadian journal of urology", "canadian journal of urology"}:
+        groups.update(("cju-communications", "tech-science-press"))
     return sorted(group for group in groups if group)
 
 

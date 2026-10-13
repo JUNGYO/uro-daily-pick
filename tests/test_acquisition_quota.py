@@ -49,6 +49,23 @@ class QuotaTests(unittest.TestCase):
         self.assertEqual(status["springer-nature"]["automatic"], 30)
         self.assertEqual(status["wiley"]["automatic"], 1)
 
+    def test_repository_publisher_mappings_keep_shared_daily_limits(self):
+        sbu = paper_publishers({"doi": "10.1590/S1677-5538.IBJU.2026.0023"})
+        self.assertEqual(sbu, ["brazilian-society-of-urology"])
+        self.assertEqual(paper_publishers({"doi": "10.1590/S9999-1234.2026.1"}), [])
+        self.assertEqual(paper_publishers({"doi": "10.1590/S1677-55380.2026.1"}), [])
+        legacy = paper_publishers({"doi": "", "journal": "The Canadian journal of urology"})
+        self.assertEqual(legacy, ["cju-communications", "tech-science-press"])
+        self.assertEqual(paper_publishers({"doi": "", "journal": "Canadian Urological Association journal"}), [])
+        self.assertEqual(paper_publishers({"doi": "10.32604/cju.2026.1"}), ["tech-science-press"])
+        self.quota.reserve(legacy, amount=29)
+        self.quota.reserve(groups_for_url("https://www.ebi.ac.uk/europepmc/webservices/rest/PMC1/fullTextXML", legacy))
+        self.assertDenied("quota_daily_limit", lambda: self.quota.reserve(groups_for_url(
+            "https://pmc-oa-opendata.s3.amazonaws.com/PMC1.1/PMC1.1.xml", legacy)))
+        self.assertDenied("quota_daily_limit", lambda: self.quota.reserve(["tech-science-press"]))
+        self.quota.reserve(sbu, amount=30)
+        self.assertDenied("quota_daily_limit", lambda: self.quota.reserve(sbu))
+
     def test_korean_midnight_and_clock_rollback(self):
         self.now = datetime.fromisoformat("2026-10-12T14:59:59+00:00")
         self.assertDenied("quota_not_started", lambda: self.quota.reserve(["bmj"]))

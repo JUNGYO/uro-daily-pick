@@ -177,10 +177,19 @@ def parse_article(article):
     mesh_terms = [mh.findtext("DescriptorName", "") for mh in article.findall(".//MeshHeading")]
     keywords = [kw.text for kw in article.findall(".//Keyword") if kw.text]
     doi = ""
-    for aid in article.findall(".//ArticleId"):
+    # ReferenceList contains ArticleId elements too. Only the current article's
+    # own identifiers may select its original or its publisher quota.
+    for aid in article.findall("./PubmedData/ArticleIdList/ArticleId"):
         if aid.get("IdType") == "doi":
-            doi = aid.text or ""
-            break
+            doi = (aid.text or "").strip()
+            if doi:
+                break
+    if not doi:
+        for aid in article.findall("./MedlineCitation/Article/ELocationID"):
+            if aid.get("EIdType") == "doi" and aid.get("ValidYN", "Y") == "Y":
+                doi = (aid.text or "").strip()
+                if doi:
+                    break
 
     # PubMed publication types
     pub_types = [pt.text for pt in article.findall(".//PublicationType") if pt.text]

@@ -38,7 +38,13 @@ counts. Manual downloads in another browser cannot be detected. Before making
 them, reserve capacity with `python acquisition_quota.py --policy <path> manual
 --publishers <group> --count <n>`; the command refuses excess capacity. Supported
 groups are `springer-nature`, `wiley`, `elsevier`, `jama`, `bmj`, and
-`wolters-kluwer`. Alternatively, `manual_reserve` keeps that many daily slots
+`wolters-kluwer`, `brazilian-society-of-urology`, `cju-communications`, and
+`tech-science-press`. IBJU is matched by its exact DOI/ISSN family, not the shared
+SciELO DOI prefix. Canadian Journal of Urology articles conservatively charge
+both CJU Communications and Tech Science Press, including DOI-less legacy
+articles, because its publisher changed in 2025. These mappings allow licensed
+repository copies through the same shared quota; publisher website access and
+source identity validation are unchanged. Alternatively, `manual_reserve` keeps that many daily slots
 outside automatic collection. Set `paused` to `true` to stop new source requests.
 Do not raise `daily_limit` above the institution's allowance; values above 30
 are rejected. Review source-specific authorization separately.
