@@ -25,7 +25,7 @@ const publisherGroup = host => ['link.springer.com','nature.com','media.springer
 
 const isAuthHost = host => host === 'wiley.scienceconnect.io';
 const safeNavigation = url => url.protocol === 'https:' && !url.username && !url.password && (!url.port || url.port === '443');
-const isAutomaticCheck = (status, headers = []) => [200,403].includes(status) &&
+const isAutomaticCheck = (status, headers = []) => [200,403,503].includes(status) &&
   headers.some(h => h.name.toLowerCase() === 'cf-mitigated' && h.value.toLowerCase() === 'challenge');
 function noteResponse(policy, navigation, url, status, headers = []) {
   const host = new URL(url).hostname;
@@ -361,7 +361,7 @@ async function readArticle(context, job, policy = new PublisherPolicy()) {
       Object.entries(response.headers?.() || {}).map(([name,value])=>({name,value})));
     if (response && [401,403,429].includes(response.status()) && !navigation.checkPending)
       return {status: response.status() === 429 ? 'retryable_error' : 'access_required', reason:'http_'+response.status()};
-    if (response && response.status() >= 500) return {status:'retryable_error',reason:'publisher_unavailable'};
+    if (response && response.status() >= 500 && !navigation.checkPending) return {status:'retryable_error',reason:'publisher_unavailable'};
     // DOI linking pages can redirect after their own DOM has loaded.
     try { await page.waitForURL(url => selectorsFor(url.hostname).length > 0, {timeout:Math.min(30000, Math.max(1, deadline-Date.now()))}); } catch {}
     const access = await waitForAccessTransition(page, policy, navigation, deadline);

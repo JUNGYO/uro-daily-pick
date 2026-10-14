@@ -124,7 +124,7 @@ test('only a Wiley-initiated exact CONNECT hop is uncharged, and its return arti
   expect(unrelated.quota.before).not.toHaveBeenCalled();
 });
 
-test.each([200,403])('a documented HTTP %i automatic-check document is uncharged and may complete normally',async status=>{
+test.each([200,403,503])('a documented HTTP %i automatic-check document is uncharged and may complete normally',async status=>{
   const h=await quotaTransport();
   await h.paused(h.event);
   await h.paused({...h.event,responseStatusCode:status,responseHeaders:[{name:'cf-mitigated',value:'challenge'}]});
