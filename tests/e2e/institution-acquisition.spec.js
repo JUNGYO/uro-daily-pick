@@ -1,5 +1,60 @@
 const { test, expect } = require("../../frontend/node_modules/@playwright/test");
 const { readArticle } = require("../../scripts/browser_fulltext.cjs");
+const { BrowserQuota, PublisherPolicy, blockPublisherRequests } = require("../../scripts/browser_fulltext.cjs");
+const fs = require("node:fs");
+const os = require("node:os");
+const path = require("node:path");
+const http = require("node:http");
+const { spawnSync } = require("node:child_process");
+
+test("durable quota blocks a browser redirect before transport and shares image capacity", async ({ browser }) => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "uro-browser-quota-"));
+  const policyPath = path.join(directory, "acquisition-policy.json");
+  const python = process.env.URO_TEST_PYTHON || (process.platform === "win32"
+    ? path.resolve(__dirname, "../../.venv/Scripts/python.exe") : "python");
+  const script = path.resolve(__dirname, "../../scripts/acquisition_quota.py");
+  fs.writeFileSync(policyPath, JSON.stringify({ version: 1, timezone: "Asia/Seoul",
+    starts_at: "2020-01-01T00:00:00+09:00", daily_limit: 30, manual_reserve: 0 }));
+  function command(...args) {
+    const result = spawnSync(python, [script, "--policy", policyPath, ...args], { encoding: "utf8", windowsHide: true });
+    expect(result.status, result.stderr).toBe(0);
+    return JSON.parse(result.stdout);
+  }
+  command("initialize");
+  command("reserve", "--publishers", "springer-nature", "--count", "28");
+  const hits = [];
+  const server = http.createServer((req, res) => {
+    hits.push(req.url);
+    if (req.url === "/redirect") { res.writeHead(302, { Location: "/blocked-body" }); res.end(); }
+    else { res.writeHead(200, { "Content-Type": "text/html" }); res.end("Synthetic local transport"); }
+  });
+  await new Promise(resolve => server.listen(0, "127.0.0.1", resolve));
+  const context = await browser.newContext({ serviceWorkers: "block" });
+  const nativeQuota = new BrowserQuota(policyPath, python);
+  const navigation = { job: { doi: "10.1007/synthetic" } };
+  // Only loopback receives transport. Translate that fixture's URL for the
+  // real quota bridge; publisher/domain classification has separate unit tests.
+  const quota = { before: (url, job) => {
+    expect(new URL(url).hostname).toBe("127.0.0.1");
+    nativeQuota.before("https://link.springer.com" + new URL(url).pathname, job);
+  }};
+  try {
+    const page = await context.newPage();
+    await blockPublisherRequests(context, page, new PublisherPolicy(null, quota), navigation);
+    const origin = `http://127.0.0.1:${server.address().port}`;
+    await page.goto(origin + "/article"); // 29th reservation
+    await expect(page.goto(origin + "/redirect")).rejects.toThrow(); // 30th then blocked redirect
+    expect(hits.filter(url => url !== "/favicon.ico")).toEqual(["/article", "/redirect"]);
+    expect(navigation.reason).toBe("quota_daily_limit");
+    const restarted = new BrowserQuota(policyPath, python);
+    expect(() => restarted.before("https://media.springernature.com/image.png", {})).toThrow("Acquisition deferred");
+    expect(command("status").publishers["springer-nature"].automatic).toBe(30);
+  } finally {
+    await context.close();
+    await new Promise(resolve => server.close(resolve));
+    fs.rmSync(directory, { recursive: true });
+  }
+});
 
 // Real browser and extraction, entirely synthetic transport. No institution
 // profile, external request, original document or credential is used.

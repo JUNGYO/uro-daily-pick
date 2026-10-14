@@ -1,6 +1,7 @@
 """Bounded collection concurrency; original persistence and queue writes stay on the caller."""
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from collections import deque
+from datetime import datetime, timedelta
 from http.client import IncompleteRead
 import hashlib
 import json
@@ -11,7 +12,8 @@ import ssl
 import threading
 import time
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
+from acquisition_quota import AcquisitionDeferred, KST, download_scope, paper_publishers, preflight
 
 
 class SourcePaused(RuntimeError):
@@ -38,6 +40,9 @@ def _prepare_probe_state(db, papers):
             pmid TEXT PRIMARY KEY, identity TEXT NOT NULL, queued_at REAL NOT NULL)""")
         db.execute("""CREATE TABLE IF NOT EXISTS collection_source_pauses(
             source TEXT PRIMARY KEY, retry_at REAL NOT NULL)""")
+        db.execute('''CREATE TABLE IF NOT EXISTS collection_probe_details(
+            pmid TEXT NOT NULL,provider TEXT NOT NULL,identity TEXT NOT NULL,
+            reason TEXT NOT NULL,failures INTEGER NOT NULL,PRIMARY KEY(pmid,provider))''')
     identities = {str(paper.get("pmid")): _paper_identity(paper) for paper in papers}
     probes, pending, invalid = {}, [], set()
     for pmid, provider, identity, status, next_probe, checked_at, pmcid in db.execute(
@@ -57,6 +62,23 @@ def _prepare_probe_state(db, papers):
             invalid.add(pmid)
         else:
             pending.append(pmid)
+    for pmid, provider, identity, reason, failures in db.execute('SELECT * FROM collection_probe_details'):
+        if pmid in probes and provider in probes[pmid] and identity == identities.get(pmid):
+            probes[pmid][provider].update(reason=reason, failures=failures)
+    # A newly supported adapter must not inherit the old unsupported verdict.
+    # Only that exact negative capability result expires: access/validation
+    # failures, API probes, quota receipts and publisher pauses remain intact.
+    newly_supported = {str(paper['pmid']) for paper in papers
+        if probes.get(str(paper['pmid']), {}).get('browser', {}).get('reason') == 'browser_adapter_unavailable'
+        and not browser_ineligible_reason(paper)}
+    if newly_supported:
+        with db:
+            for pmid in newly_supported:
+                db.execute("DELETE FROM collection_source_probes WHERE pmid=? AND provider='browser'", (pmid,))
+                db.execute("DELETE FROM collection_probe_details WHERE pmid=? AND provider='browser'", (pmid,))
+                db.execute("DELETE FROM collection_attempts WHERE pmid=? AND EXISTS(SELECT 1 FROM collection_retry_metadata WHERE pmid=? AND reason='browser_adapter_unavailable')", (pmid, pmid))
+                db.execute("DELETE FROM collection_retry_metadata WHERE pmid=? AND reason='browser_adapter_unavailable'", (pmid,))
+                probes[pmid].pop('browser', None)
     if invalid:
         with db:
             for pmid in invalid:
@@ -64,6 +86,7 @@ def _prepare_probe_state(db, papers):
                 db.execute("DELETE FROM collection_browser_pending WHERE pmid=?", (pmid,))
                 db.execute("DELETE FROM collection_attempts WHERE pmid=?", (pmid,))
                 db.execute("DELETE FROM collection_retry_metadata WHERE pmid=?", (pmid,))
+                db.execute('DELETE FROM collection_probe_details WHERE pmid=?', (pmid,))
                 probes.pop(pmid, None)
         pending = [pmid for pmid in pending if pmid not in invalid]
     return probes, pending
@@ -144,7 +167,7 @@ def _browser_source(paper):
     doi = str(paper.get("doi") or "").lower()
     if doi.startswith("10.1016/"):
         return "https://www.sciencedirect.com/"
-    if doi.startswith(("10.1007/", "10.1038/")):
+    if doi.startswith(("10.1007/", "10.1038/", "10.1186/")):
         return "https://link.springer.com/"
     if doi.startswith(("10.1002/", "10.1111/")):
         return "https://onlinelibrary.wiley.com/"
@@ -153,6 +176,88 @@ def _browser_source(paper):
     if doi.startswith("10.1136/"):
         return "https://www.bmj.com/"
     return "https://doi.org/"
+
+
+def browser_ineligible_reason(paper):
+    """Mirror the actual browser adapters before allocating Chrome/IPC work."""
+    doi = str(paper.get('doi') or '').strip().lower()
+    if not re.fullmatch(r'10\.\d{4,9}/[^\s<>"#?]+', doi):
+        return 'invalid_doi'
+    if doi.startswith('10.1016/'):
+        return 'browser_automation_not_permitted'
+    # These former Nature/Wiley identifiers resolve to AsiaAndro, for which
+    # there is no browser adapter. A DOI prefix alone is not a destination.
+    if doi.startswith(('10.1038/aja.', '10.1111/j.1745-7262.')):
+        return 'browser_adapter_unavailable'
+    if _browser_source(paper) == 'https://doi.org/':
+        return 'browser_adapter_unavailable'
+    return None
+
+
+def deferred_retry(reason, now):
+    if reason == 'quota_daily_limit':
+        return (datetime.fromtimestamp(now, KST) + timedelta(days=1)).replace(
+            hour=0, minute=0, second=0, microsecond=0).timestamp()
+    return now + (7 * 86400 if reason in ('quota_unknown_publisher', 'quota_unsupported_source')
+                  else 3600 if reason in ('quota_source_paused', 'source_paused') else 300)
+
+
+class _PublisherBacklog:
+    """Rotate publishers; collect regular papers before known short formats.
+
+    Both tiers retain FIFO order. Short formats remain queued, not discarded.
+    This is an acquisition priority, not a scientific-quality classification.
+    """
+    def __init__(self):
+        self.sources, self.queues, self.size = deque(), {}, 0
+
+    def append(self, paper):
+        key = source_key(_browser_source(paper))
+        if key not in self.queues:
+            self.sources.append(key)
+            self.queues[key] = (deque(), deque())
+        self.queues[key][self._tier(paper)].append(paper)
+        self.size += 1
+
+    def popleft(self):
+        key = self.sources.popleft()
+        paper = self._first(key).popleft()
+        self.size -= 1
+        if any(self.queues[key]):
+            self.sources.append(key)
+        else:
+            del self.queues[key]
+        return paper
+
+    def discard(self, paper):
+        key = source_key(_browser_source(paper))
+        self.queues[key][self._tier(paper)].remove(paper)
+        self.size -= 1
+        if not any(self.queues[key]):
+            self.sources.remove(key)
+            del self.queues[key]
+
+    def peek(self):
+        return self._first(self.sources[0])[0]
+
+    @staticmethod
+    def _tier(paper):
+        short = str(paper.get('paper_type') or '').lower() in {
+            'letter', 'editorial', 'comment', 'correction', 'erratum', 'news'}
+        abstract_collection = re.match(r'^abstracts\s+of\b', str(paper.get('title') or ''), re.I)
+        return int(bool(short or abstract_collection))
+
+    def _first(self, key):
+        regular, short = self.queues[key]
+        return regular or short
+
+    def clear(self):
+        self.sources.clear()
+        self.queues.clear()
+        self.size = 0
+
+    def __len__(self):
+        return self.size
 
 
 class _SharedBrowser:
@@ -188,10 +293,11 @@ class _SharedBrowser:
                 self.browser.close()
                 self.browser = None
                 return {"status": "retryable_error", "reason": "browser_response_unavailable"}
-            if result.get("status") == "challenge" or result.get("reason") in {"http_403", "http_429", "publisher_paused"}:
+            if result.get("reason") in {"http_401", "http_429", "publisher_paused", "authentication_required"}:
                 actual = result.get("url") or source
-                self.gate.block(actual)
-                self.gate.block(source)
+                delay = 3600 if result.get('reason') == 'http_429' else 86400
+                self.gate.block(actual, retry_seconds=delay)
+                self.gate.block(source, retry_seconds=delay)
                 if source_key(source) == "doi.org":
                     self.unknown_source_blocked = True
             return result
@@ -218,6 +324,11 @@ def _read_cache(directory, paper):
 
 
 def _acquire_api(paper, cache, deadline, deps, gate, probes=None):
+    with download_scope(paper):
+        return _acquire_api_scoped(paper, cache, deadline, deps, gate, probes)
+
+
+def _acquire_api_scoped(paper, cache, deadline, deps, gate, probes=None):
     """Network and parsing only. No persistence, SQLite, or service-side writes."""
     probes = probes or {}
     updates, stats = [], {"provider_probes": 0, "cached_no_copy": 0, "cached_location": 0, "cached_retry": 0,
@@ -225,10 +336,14 @@ def _acquire_api(paper, cache, deadline, deps, gate, probes=None):
                           "api_http_429": 0, "api_http_other": 0, "api_parse_errors": 0, "api_network_errors": 0}
     def result(outcome):
         return {**outcome, "probe_updates": updates, "probe_stats": stats}
-    def update(provider, status, delay, *, clear_location=False):
+    def update(provider, status, delay, *, clear_location=False, reason=None):
         now = deps["wall_clock"]()
+        failures = probes.get(provider, {}).get('failures', 0) + 1 if status in ('retryable_error', 'parse_failed', 'invalid_body') else 0
+        if status == 'retryable_error' and delay == 900:
+            delay = min(86400, 900 * 2 ** min(failures - 1, 7))
         updates.append({"provider": provider, "status": status, "next_probe": now + delay,
-                        "checked_at": now, "pmcid": None if clear_location else probes.get(provider, {}).get("pmcid")})
+                        "checked_at": now, "pmcid": None if clear_location else probes.get(provider, {}).get("pmcid"),
+                        'reason': reason or status, 'failures': failures})
     if deps["clock"]() >= deadline:
         return result({"deferred": True})
     try:
@@ -242,6 +357,7 @@ def _acquire_api(paper, cache, deadline, deps, gate, probes=None):
             if deps["cached_paper_matches"](identity, paper):
                 document = deps["verify_cached_body"](saved["document"])
                 return result({"document": document, "persist": kind == "archive"})
+        preflight(paper)
         api_deadline = min(deadline, deps["clock"]() + 120)
         providers = [("oa", deps["fetch_oa"])]
         if deps.get("fetch_pmc_cloud"):
@@ -290,12 +406,12 @@ def _acquire_api(paper, cache, deadline, deps, gate, probes=None):
             except HTTPError as error:
                 stats["provider_errors"] += 1
                 stats["api_http_" + str(error.code) if error.code in (403, 429) else "api_http_other"] += 1
-                if error.code in (403, 429):
-                    gate.block(error.url, retry_seconds=3600 if error.code == 429 else 86400)
+                if error.code == 429:
+                    gate.block(error.url, retry_seconds=3600)
                     stats["source_paused"] += 1
                 update(name, "access_required" if error.code == 403 else "retryable_error",
-                       86400 if error.code == 403 else 3600 if error.code == 429 else 900,
-                       clear_location=error.code in (404, 410))
+                       3600 if error.code in (403, 429) else 900,
+                       clear_location=error.code in (404, 410), reason='http_' + str(error.code))
             except SourcePaused as error:
                 # An API rejection must not starve a different authorized source.
                 stats["source_paused"] += 1
@@ -304,10 +420,17 @@ def _acquire_api(paper, cache, deadline, deps, gate, probes=None):
             except (URLError, TimeoutError, ValueError, IncompleteRead, ConnectionError, ssl.SSLError) as error:
                 stats["provider_errors"] += 1
                 stats["api_parse_errors" if isinstance(error, ValueError) else "api_network_errors"] += 1
-                update(name, "parse_failed" if isinstance(error, ValueError) else "retryable_error", 900)
+                # Identity/checksum/format failures cannot improve by fetching
+                # the same bytes every 15 minutes. Catalog changes invalidate
+                # these checkpoints; unchanged sources are revisited weekly.
+                update(name, "parse_failed" if isinstance(error, ValueError) else "retryable_error",
+                       7 * 86400 if isinstance(error, ValueError) else 900,
+                       reason='source_validation_failed' if isinstance(error, ValueError) else 'transport_error')
                 if deps["clock"]() >= deadline:
                     return result({"deferred": True})
         return result({"browser": True})
+    except AcquisitionDeferred as error:
+        return result({"deferred": True, "quota_reason": error.reason})
     except (SourcePaused, TimeoutError):
         return result({"deferred": True})
     except (ValueError, KeyError, TypeError):
@@ -317,22 +440,43 @@ def _acquire_api(paper, cache, deadline, deps, gate, probes=None):
 
 
 def _acquire_browser(paper, deadline, deps, browser):
+    result = None
     try:
         if deps["clock"]() >= deadline:
             return {"deferred": True}
-        if str(paper.get("doi") or "").lower().startswith("10.1016/"):
-            return {"status": "unsupported", "reason": "browser_automation_not_permitted"}
+        if reason := browser_ineligible_reason(paper):
+            return {"status": "unsupported", "reason": reason}
+        preflight(paper)
         result = browser.read(paper)
+        if str(result.get("reason", "")).startswith("quota_"):
+            return {"deferred": True, "quota_reason": result["reason"],
+                    "blocked_host": result.get('blocked_host')}
         document = deps["parsed_result"](paper, result)
         if document is None:
             return {"status": result.get("status", "parse_failed"), "reason": result.get("reason", "validation_failed")}
         return {"document": document, "raw": result["html"].encode(), "suffix": ".html", "persist": True}
-    except SourcePaused:
-        return {"deferred": True, "source_paused": True}
+    except AcquisitionDeferred as error:
+        return {"deferred": True, "quota_reason": error.reason}
+    except SourcePaused as error:
+        return {"deferred": True, "source_paused": True, 'reason':'source_paused', 'retry_after':error.retry_after}
     except TimeoutError:
         return {"deferred": True}
-    except (ValueError, KeyError, TypeError):
-        return {"status": "parse_failed", "reason": "validation_failed"}
+    except (ValueError, KeyError, TypeError) as error:
+        reason = getattr(error, 'reason', '')
+        outcome = {"status": "parse_failed", "reason": reason if reason in {
+            'article_title_mismatch', 'article_doi_mismatch', 'article_body_not_found',
+            'article_text_too_short', 'article_access_interstitial', 'article_parse_failed',
+            'article_incomplete_body'} else 'validation_failed'}
+        if isinstance(result, dict) and result.get('status') == 'downloaded' and isinstance(result.get('html'), str):
+            # Quarantine is private evidence, never an acquired original/cache.
+            # Reprocessing this evidence after a parser repair needs no download.
+            raw = result['html'].encode()
+            if len(raw) <= 20 * 1024 * 1024:
+                url = urlsplit(result.get('url', ''))
+                outcome['rejected_body'] = {key: result.get(key) for key in ('title', 'doi', 'html', 'license')}
+                outcome['rejected_body'].update(source_hash=hashlib.sha256(raw).hexdigest(),
+                    url=urlunsplit((url.scheme, url.netloc, url.path, '', '')))
+        return outcome
     except (OSError, IncompleteRead):
         return {"status": "retryable_error", "reason": "collection_unavailable"}
 
@@ -385,7 +529,7 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
         0 if deps.get("fetch_pmc_cloud") and "pmc_cloud" not in probes.get(str(paper.get("pmid")), {}) else
         min((row["checked_at"] for row in probes.get(str(paper.get("pmid")), {}).values()), default=0)))
     gate = SourceGate(deps["clock"], deps["sleep"])
-    # Source rejection belongs to the host, not one process or one paper.
+    # Rate limits and explicit access checks persist across processes.
     # Persist wall-clock expiry while the in-process gate uses monotonic time.
     saved_pauses = dict(db.execute("SELECT source,retry_at FROM collection_source_pauses"))
     for source, retry_at in saved_pauses.items():
@@ -411,19 +555,15 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
              "discovery_batches": 0, "discovery_papers": 0, "browser_attempts": 0,
              "api_http_403": 0, "api_http_429": 0, "api_http_other": 0, "api_parse_errors": 0, "api_network_errors": 0,
              "cached_api_skipped": 0, "restored_source_pauses": len(gate.blocked), "elapsed_seconds": 0}
+    stats.update(browser_ineligible=0, deferred_by_reason={})
     started_at = deps["clock"]()
     print(f"Collection workers: api={max(1, min(3, max_workers))}, browser=1; publisher navigation serialized", flush=True)
     seen, pending = set(), {}
     browser_started, browser_timings = {}, {}
     iterator = deque(papers)
     exhausted = False
-    browser_backlog, browser_pending, browser_enqueued = deque(), {}, set()
-    for pmid in pending_ids:
-        if prior_retries.get(pmid, 0) <= deps["wall_clock"]() and probes.get(pmid, {}).get("browser", {}).get("next_probe", 0) <= deps["wall_clock"]() and not _providers_due(
-                probes.get(pmid, {}), enabled, deps["wall_clock"]()):
-            browser_backlog.append(by_pmid[pmid])
-            browser_enqueued.add(pmid)
-            stats["cached_no_copy"] += sum(row["status"] in {"unavailable", "not_indexed"} for row in probes.get(pmid, {}).values())
+    browser_backlog, browser_pending, browser_enqueued = _PublisherBacklog(), {}, set()
+    quota_deferrals = {}
 
     def record_probes(paper, updates):
         pmid, identity = str(paper["pmid"]), _paper_identity(paper)
@@ -432,9 +572,23 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
                 (pmid, update["provider"], identity, update["status"], update["next_probe"],
                  update["checked_at"], update.get("pmcid")))
             probes.setdefault(pmid, {})[update["provider"]] = dict(update)
+            db.execute('INSERT OR REPLACE INTO collection_probe_details VALUES(?,?,?,?,?)',
+                (pmid, update['provider'], identity, update.get('reason', update['status']), update.get('failures', 0)))
 
     def enqueue_browser(paper):
         pmid = str(paper["pmid"])
+        if probes.get(pmid, {}).get('quota', {}).get('next_probe', 0) > deps['wall_clock']():
+            clear_browser(pmid)
+            counts['deferred'] += 1
+            return False
+        if reason := browser_ineligible_reason(paper):
+            clear_browser(pmid)
+            if probes.get(pmid, {}).get('browser', {}).get('next_probe', 0) <= deps['wall_clock']():
+                finish(paper, {'status':'unsupported', 'reason':reason}, browser_attempt=True, quiet=True)
+            else:
+                counts['deferred'] += 1
+            stats['browser_ineligible'] += 1
+            return False
         if probes.get(pmid, {}).get("browser", {}).get("next_probe", 0) > deps["wall_clock"]():
             counts["deferred"] += 1
             return False
@@ -485,13 +639,14 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
             code = error.code if isinstance(error, HTTPError) else None
             stats[("api_http_" + str(code) if code in (403, 429) else "api_http_other") if code is not None
                   else "api_parse_errors" if isinstance(error, ValueError) else "api_network_errors"] += 1
-            if code in (403, 429):
-                gate.block(error.url, retry_seconds=3600 if code == 429 else 86400)
+            if code == 429:
+                gate.block(error.url, retry_seconds=3600)
                 stats["source_paused"] += 1
             now = deps["wall_clock"]()
             for paper in candidates:
                 record_probes(paper, [{"provider": provider, "status": "access_required" if code == 403 else "retryable_error",
-                    "next_probe": now + (86400 if code == 403 else 3600 if code == 429 else 900), "checked_at": now}
+                    "next_probe": now + (3600 if code in (403, 429) else 900), "checked_at": now,
+                    "reason": 'http_' + str(code) if code else 'source_lookup_failed'}
                     for provider in ("oa", "pmc_cloud") if provider in enabled
                     and _providers_due(probes.get(str(paper["pmid"]), {}), (provider,), now)])
             db.commit()
@@ -513,10 +668,35 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
             record_probes(paper, updates)
         db.commit()
 
-    def finish(paper, outcome, *, browser_attempt=False):
+    def finish(paper, outcome, *, browser_attempt=False, quiet=False):
         pmid = str(paper["pmid"])
+        if outcome.get('rejected_body'):
+            rejected = directory / 'browser-rejections'
+            rejected.mkdir(exist_ok=True)
+            deps['save_json'](rejected / (pmid + '.json'), {
+                'verified': False, 'pmid': pmid, 'catalog_identity': _paper_identity(paper),
+                'reason': outcome['reason'], 'received_at': deps['wall_clock'](),
+                'response': outcome['rejected_body']})
         if outcome.get("deferred"):
             counts["deferred"] += 1
+            reason = outcome.get('quota_reason') or outcome.get('reason') or 'time_budget'
+            now = deps['wall_clock']()
+            retry_at = now + outcome['retry_after'] if outcome.get('retry_after') else deferred_retry(reason, now)
+            provider = 'quota' if outcome.get('quota_reason') else 'browser' if browser_attempt else 'acquisition'
+            # Only genuinely shared capacity/access failures apply to siblings.
+            # An unsupported redirect or unmapped article is paper-specific.
+            if reason in ('quota_daily_limit', 'quota_source_paused', 'quota_not_started',
+                          'quota_policy_unavailable', 'quota_ledger_unavailable', 'quota_clock_rollback'):
+                quota_deferrals[tuple(paper_publishers(paper))] = outcome
+            record_probes(paper, [{'provider':provider, 'status':'deferred', 'next_probe':retry_at,
+                                  'checked_at':now, 'reason':reason}])
+            stats['deferred_by_reason'][reason] = stats['deferred_by_reason'].get(reason, 0) + 1
+            host = outcome.get('blocked_host')
+            if isinstance(host, str) and re.fullmatch(r'[a-z0-9.-]{1,253}', host):
+                # Hostname only, never an article URL, token or page content.
+                print(f'PMID {pmid}: {reason}, blocked_host={host}', flush=True)
+            if browser_attempt:
+                clear_browser(pmid)
             if outcome.get("source_paused"):
                 stats["source_paused"] += 1
             return
@@ -534,7 +714,7 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
                 # The verified local original remains available for a later receipt retry.
                 outcome = {"status": "retryable_error", "reason": "registration_failed"}
             else:
-                deps["record_collection_attempt"](db, pmid, "ready", now=deps["wall_clock"]())
+                deps["record_collection_attempt"](db, pmid, "ready", now=deps["wall_clock"](), commit=False)
                 clear_browser(pmid)
                 if outcome.get("persist"):
                     counts["completed"] += 1
@@ -544,22 +724,37 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
         if status not in {"access_required", "challenge", "unsupported", "parse_failed", "retryable_error"}:
             status = "parse_failed"
         now = deps["wall_clock"]()
-        retry_at = deps["record_collection_attempt"](db, pmid, status, outcome.get("reason"), now=now)
+        retry_at = deps["record_collection_attempt"](db, pmid, status, outcome.get("reason"), now=now, commit=False)
         if browser_attempt:
             record_probes(paper, [{"provider": "browser", "status": status,
-                "next_probe": retry_at, "checked_at": now}])
+                "next_probe": retry_at, "checked_at": now, 'reason':outcome.get('reason', status)}])
             # A browser-only failure must not postpone an independently eligible
             # API retry. The browser retains its own unchanged retry deadline.
             api_retries = [row["next_probe"] for name, row in probes.get(pmid, {}).items()
                            if name in enabled and now < row["next_probe"] < retry_at]
             if api_retries:
                 db.execute("UPDATE collection_attempts SET next_retry=? WHERE pmid=?", (min(api_retries), pmid))
+                retry_at = min(api_retries)
+        prior_retries[pmid] = retry_at
         clear_browser(pmid)
-        service.status("running", pmid, status)
+        if not quiet:
+            service.status("running", pmid, status)
         counts["failed"] += 1
         reason = outcome.get("reason", "validation_failed")
         reason = reason if isinstance(reason, str) and re.fullmatch(r"[a-z0-9_]{1,80}", reason) else "unspecified"
-        print(f"PMID {pmid}: {status}, {reason}", flush=True)
+        if not quiet:
+            print(f"PMID {pmid}: {status}, {reason}", flush=True)
+
+    # Retire stale, unsupported backlog entries in the coordinator. No browser
+    # process, Python CLI subprocess, or one-second source gate is needed.
+    for pmid in pending_ids:
+        if deps['clock']() >= deadline:
+            break
+        if browser_ineligible_reason(by_pmid[pmid]):
+            enqueue_browser(by_pmid[pmid])
+        elif prior_retries.get(pmid, 0) <= deps['wall_clock']() and not _providers_due(probes.get(pmid, {}), enabled, deps['wall_clock']()):
+            enqueue_browser(by_pmid[pmid])
+    db.commit()
 
     prepared = deque()
     try:
@@ -596,6 +791,10 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
                         counts["deferred"] += 1
                         continue
                     has_cache = pmid in cached_ids
+                    if not has_cache and any(probes.get(pmid, {}).get(lane, {}).get('next_probe', 0) > deps['wall_clock']()
+                                             for lane in ('quota', 'acquisition')):
+                        counts['deferred'] += 1
+                        continue
                     if deps["clock"]() >= deadline:
                         counts["deferred"] += 1
                         exhausted = True
@@ -605,6 +804,9 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
                     discover(prepared)
                 while prepared and len(pending) < max(1, min(3, max_workers)) and deps["clock"]() < deadline:
                     paper, has_cache = prepared.popleft()
+                    if not has_cache and (quota_deferred := quota_deferrals.get(tuple(paper_publishers(paper)))):
+                        finish(paper, quota_deferred)
+                        continue
                     if not has_cache and not _providers_due(probes.get(str(paper["pmid"]), {}), enabled, deps["wall_clock"]()):
                         stats["cached_api_skipped"] += 1
                         for provider in enabled:
@@ -622,12 +824,15 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
                                         probes.get(str(paper["pmid"]), {}))] = paper
                 # A host-wide pause applies to the entire queued host. Do not
                 # spend one executor turn / browser IPC round-trip per paper.
-                while browser_backlog and not browser_pending and deps["clock"]() < deadline and gate.is_blocked(_browser_source(browser_backlog[0])):
+                while browser_backlog and not browser_pending and deps["clock"]() < deadline and gate.is_blocked(_browser_source(browser_backlog.peek())):
                     browser_backlog.popleft()
                     counts["deferred"] += 1
                     stats["source_paused"] += 1
                 if browser_backlog and not browser_pending and deps["clock"]() < deadline:
                     paper = browser_backlog.popleft()
+                    if quota_deferred := quota_deferrals.get(tuple(paper_publishers(paper))):
+                        finish(paper, quota_deferred, browser_attempt=True)
+                        continue
                     stats["browser_attempts"] += 1
                     future = browser_pool.submit(_acquire_browser, paper, deadline, deps, browser)
                     browser_pending[future] = paper
@@ -663,7 +868,7 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
                     if outcome.get("browser"):
                         queued = enqueue_browser(paper)
                         if queued and deps["clock"]() >= deadline:
-                            browser_backlog.pop()
+                            browser_backlog.discard(paper)
                             counts["deferred"] += 1
                     else:
                         finish(paper, outcome, browser_attempt=browser_attempt)
@@ -677,9 +882,13 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
         db.commit()
         stats["elapsed_seconds"] = round(max(0, deps["clock"]() - started_at), 3)
         stats["new_originals"] = counts["completed"]
+        stats['outcome'] = 'acquired' if counts['completed'] else 'no_new_originals'
         stats["browser_pending"] = db.execute("SELECT count(*) FROM collection_browser_pending").fetchone()[0]
         stats["browser_settlement_by_source_status"] = {
             key: {name: round(value, 3) if name != "count" else value for name, value in timing.items()}
             for key, timing in sorted(browser_timings.items())}
         print("Collection telemetry: " + json.dumps(stats, sort_keys=True), flush=True)
+        # A zero exit code means the worker ran, not that it acquired anything.
+        _save_bytes(directory / 'collection-result.json', json.dumps({
+            'updated_at':deps['wall_clock'](), **counts, **stats}, sort_keys=True).encode())
     return counts

@@ -55,8 +55,9 @@ def download(url, headers=None, *, deadline=None, request_gate=None):
     opener = build_opener(HTTPSHandler(context=ssl.create_default_context()), NoRedirect())
     if request_gate is not None:
         request_gate(url, deadline)
+    from acquisition_quota import download_request
     # Gate waits consume the same article budget; recompute immediately before I/O.
-    with opener.open(request, timeout=_download_timeout(deadline)) as response:
+    with download_request(url), opener.open(request, timeout=_download_timeout(deadline)) as response:
         content = bytearray()
         read = getattr(response, 'read1', None) or response.read
         while True:
@@ -328,7 +329,9 @@ def parse_document(content):
                 node.decompose()
             references = _source_references(soup)
             body = next((soup.select_one(selector) for selector in
-                ("#body", ".article-section__full", ".article__body", ".c-article-body", ".article-full-text", ".article-body", "article", "main")
+                ("#body", ".article-section__full", ".article__body", "#article__content", ".c-article-body",
+                 ".article-full-text", "#article-full-text", ".articleFullText", ".article.full", "#content-block",
+                 ".article-body", "article", "main")
                 if soup.select_one(selector) is not None), None)
             if body is None:
                 raise ValueError("No article body (login/challenge/metadata response)")

@@ -69,9 +69,15 @@ class CollectionRetryTests(unittest.TestCase):
         for now in (10000, 11000, 15000):
             record_collection_attempt(self.db, "9", "retryable_error", "article_table_unavailable", now)
         self.assertEqual(record_collection_attempt(self.db, "9", "retryable_error", "navigation_error", 40000), 40900)
-        self.assertEqual(record_collection_attempt(self.db, "9", "access_required", "http_403", 50000), 50000 + 7 * 86400)
+        self.assertEqual(record_collection_attempt(self.db, "9", "access_required", "authentication_required", 50000), 50000 + 7 * 86400)
         self.assertEqual(record_collection_attempt(self.db, "9", "retryable_error", "navigation_error", 700000), 700900)
-        self.assertEqual(record_collection_attempt(self.db, "9", "challenge", "publisher_check", 800000), 886400)
+        self.assertEqual(record_collection_attempt(self.db, "9", "challenge", "publisher_check", 800000), 803600)
+
+    def test_bare_403_retries_only_this_paper_in_the_next_hourly_round(self):
+        prepare_collection_attempts(self.db)
+        for now in (10000, 20000, 30000, 40000):
+            self.assertEqual(record_collection_attempt(self.db, '9', 'access_required', 'http_403', now), now+3600)
+        self.assertEqual(record_collection_attempt(self.db, '9', 'retryable_error', 'http_403', 50000), 53600)
 
     def test_metadata_is_bounded_and_queue_update_rolls_back_if_metadata_write_fails(self):
         prepare_collection_attempts(self.db)

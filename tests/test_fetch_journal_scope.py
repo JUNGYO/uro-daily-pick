@@ -21,6 +21,26 @@ def pubmed_xml(*ids):
 
 
 class DailyJournalScopeTests(unittest.TestCase):
+    def test_doi_belongs_to_article_not_its_references(self):
+        cases = [
+            ("", "", ""),
+            ('<ArticleId IdType="doi"> 10.1000/own </ArticleId>', "", "10.1000/own"),
+            ("", '<ELocationID EIdType="doi" ValidYN="Y">10.1000/location</ELocationID>', "10.1000/location"),
+            ("", '<ELocationID EIdType="doi" ValidYN="N">10.1000/invalid</ELocationID>', ""),
+            ('<ArticleId IdType="doi">10.1000/own</ArticleId>',
+             '<ELocationID EIdType="doi">10.1000/location</ELocationID>', "10.1000/own"),
+        ]
+        for own, location, expected in cases:
+            with self.subTest(own=own, location=location):
+                article = fetch.ET.fromstring(
+                    '<PubmedArticle><MedlineCitation><PMID>37344463</PMID><Article>'
+                    '<ArticleTitle>Source paper</ArticleTitle>' + location +
+                    '</Article></MedlineCitation><PubmedData><ReferenceList><Reference>'
+                    '<ArticleIdList><ArticleId IdType="doi">10.1097/reference</ArticleId>'
+                    '</ArticleIdList></Reference></ReferenceList><ArticleIdList>' + own +
+                    '</ArticleIdList></PubmedData></PubmedArticle>')
+                self.assertEqual(fetch.parse_article(article)["doi"], expected)
+
     def test_capacity_pause_prevents_daily_discovery_and_writes(self):
         status = {"database_bytes": 487 * 1048576, "budget_bytes": 450 * 1048576}
         with patch.object(fetch, "SUPABASE_URL", "https://example.invalid"), \

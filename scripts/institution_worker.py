@@ -1,7 +1,9 @@
 """Independent local collection and summary workers, using authorized sources."""
 import argparse
 import ctypes
+from contextlib import nullcontext
 import hashlib
+import html
 from http.client import IncompleteRead
 import json
 import os
@@ -16,9 +18,10 @@ import sys
 import time
 import threading
 import uuid
+import unicodedata
 from difflib import SequenceMatcher
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urlsplit, urlunsplit
+from urllib.parse import unquote, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, build_opener, HTTPSHandler
 
 from fulltext import FulltextUnavailable, NoRedirect, fetch_oa, parse_document
@@ -216,7 +219,9 @@ class Browser:
         self.process = subprocess.Popen([str(node), str(Path(__file__).with_name("browser_fulltext.cjs"))],
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
             text=True, encoding="utf-8", env={**os.environ, "URO_BROWSER_PROFILE": str(directory / profile),
-                "URO_PUBLISHER_STATE": str(directory / "publisher-pauses")},
+                "URO_PUBLISHER_STATE": str(directory / "publisher-pauses"),
+                "URO_ACQUISITION_POLICY": str(directory / "acquisition-policy.json"),
+                "URO_QUOTA_PYTHON": sys.executable},
             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         self.responses = queue.Queue()
         def receive():
@@ -250,6 +255,8 @@ class Browser:
         self.process.wait(timeout=10)
 
     def read(self, paper, budget_ms=240000):
+        from acquisition_quota import preflight
+        preflight(paper)
         self.process.stdin.write(json.dumps({"pmid":paper["pmid"], "doi":paper["doi"], "budget_ms":budget_ms}) + "\n")
         self.process.stdin.flush()
         return self.response(budget_ms)
@@ -263,29 +270,44 @@ class Browser:
             self.kill()
 
     def image(self, url, budget_ms=20000):
-        self.process.stdin.write(json.dumps({"operation":"image","url":url,"budget_ms":budget_ms}) + "\n")
+        from acquisition_quota import current_publishers
+        self.process.stdin.write(json.dumps({"operation":"image","url":url,"budget_ms":budget_ms,
+                                             "publishers":current_publishers()}) + "\n")
         self.process.stdin.flush()
         return self.response(budget_ms)
+
+
+class ArticleValidationError(ValueError):
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
 
 
 def parsed_result(paper, result):
     if result.get("status") != "downloaded":
         return None
-    normalized = lambda text: " ".join(re.findall(r"\w+", text.lower()))
+    normalized = lambda text: " ".join(re.findall(r"\w+", unicodedata.normalize('NFKC', html.unescape(text)).lower()))
     expected, actual = normalized(paper["title"]), normalized(result.get("title", ""))
-    if expected not in actual and SequenceMatcher(None, expected, actual).ratio() < 0.8:
-        raise ValueError("Article title does not match the catalog")
-    if result.get("doi") and paper.get("doi") and result["doi"].lower() != paper["doi"].lower():
-        raise ValueError("Article DOI does not match the catalog")
-    parsed = parse_document(result["html"].encode())
+    if not expected or not actual or (expected not in actual and SequenceMatcher(None, expected, actual).ratio() < 0.8):
+        raise ArticleValidationError('article_title_mismatch')
+    canonical_doi = lambda value: re.sub(r'^(?:https?://(?:dx\.)?doi\.org/|doi:\s*)', '', unquote(value.strip()).lower())
+    if result.get("doi") and paper.get("doi") and canonical_doi(result['doi']) != canonical_doi(paper['doi']):
+        raise ArticleValidationError('article_doi_mismatch')
+    try:
+        parsed = parse_document(result["html"].encode())
+    except ValueError as error:
+        reasons = {'No article body (login/challenge/metadata response)':'article_body_not_found',
+            'Insufficient article text; scanned PDFs need OCR before import':'article_text_too_short',
+            'Access challenge is not article text':'article_access_interstitial'}
+        raise ArticleValidationError(reasons.get(str(error), 'article_parse_failed')) from None
     if len(parsed["content_text"]) < 2000 or len(parsed["sections"]) < 2:
-        raise ValueError("Incomplete body")
+        raise ArticleValidationError('article_incomplete_body')
     url = urlsplit(result["url"])
     return {**parsed, "source_url": urlunsplit((url.scheme, url.netloc, url.path, "", "")), "license":result.get("license")}
 
 
 def next_retry(status, now):
-    return now + (900 if status == "retryable_error" else 86400 if status == "challenge" else 7 * 86400)
+    return now + (900 if status == "retryable_error" else 3600 if status == "challenge" else 7 * 86400)
 
 
 def prepare_collection_attempts(db):
@@ -298,20 +320,23 @@ def prepare_collection_attempts(db):
             consecutive_failures INTEGER NOT NULL, attempted_at REAL NOT NULL)""")
 
 
-def record_collection_attempt(db, pmid, status, reason="", now=None):
+def record_collection_attempt(db, pmid, status, reason="", now=None, *, commit=True):
     """Back off repeated collection failures; summarization keeps its own policy."""
     if status not in STATES | {"ready"}:
         raise ValueError("Unknown collection outcome")
     now = time.time() if now is None else now
     # Store only the bounded machine reason, never publisher text or source URLs.
     reason = reason if isinstance(reason, str) and re.fullmatch(r"[a-z0-9_]{1,80}", reason) else "unspecified"
-    with db:
+    with db if commit else nullcontext():
         prior = db.execute("SELECT status,reason,consecutive_failures FROM collection_retry_metadata WHERE pmid=?", (pmid,)).fetchone()
         same_failure = prior and prior[0] == status and prior[1] == reason
         failures = prior[2] + 1 if same_failure and status == "retryable_error" else 1
         retry_at = 0 if status == "ready" else next_retry(status, now)
         if status == "retryable_error":
             retry_at = now + (900, 3600, 21600, 86400)[min(failures, 4) - 1]
+        if reason in {"http_403", "publisher_check"} and status in {"access_required", "retryable_error", "challenge"}:
+            # Retry this paper in a later hourly round, without blocking its publisher.
+            retry_at = now + 3600
         db.execute("INSERT OR REPLACE INTO collection_attempts VALUES(?,?,?)", (pmid, status, retry_at))
         if status == "ready":
             db.execute("DELETE FROM collection_retry_metadata WHERE pmid=?", (pmid,))
@@ -460,8 +485,15 @@ def run(directory, node, seconds, phase="all", requested_pmid=None):
         print(f"Institution {phase} queue: {len(papers)} papers", flush=True)
         if phase == "collect":
             from collection_queue import run_collection
+            collection_started = time.time()
             counts = run_local_cycles(service, deadline, phase,
                 lambda candidates: run_collection(directory, node, deadline, service, db, candidates), requested_pmid)
+            result = {'started_at':collection_started, 'updated_at':time.time(), **counts,
+                      'new_originals':counts.get('completed', 0),
+                      'outcome':'acquired' if counts.get('completed') else 'no_new_originals'}
+            save_json(directory / 'collection-run.json', result)
+            service.catalog.set_meta('collection_status', result)
+            print('Collection run outcome: ' + json.dumps(result, sort_keys=True), flush=True)
             print(f"Institution collect: {counts.get('completed', 0)} completed locally, {counts.get('failed', 0)} unavailable/invalid, "
                   f"{counts.get('deferred', 0)} deferred", flush=True)
             return
@@ -509,7 +541,9 @@ def run(directory, node, seconds, phase="all", requested_pmid=None):
                         document=parsed_result(paper,result)
                     else:
                         try:
-                            content,source_url=fetch_oa(pmid)
+                            from acquisition_quota import download_scope
+                            with download_scope(paper):
+                                content,source_url=fetch_oa(pmid)
                             document={**parse_document(content),"source_url":source_url}
                             if len(document["content_text"]) < 2000 or len(document["sections"]) < 2:
                                 raise ValueError("Incomplete OA body")
@@ -593,6 +627,7 @@ def main():
         return
     if not args.node or not 60 <= args.max_seconds <= 3600:
         parser.error("A Node executable and 60..3600 second runtime are required")
+    os.environ["URO_ACQUISITION_POLICY"] = str(args.state_dir / "acquisition-policy.json")
     try:
         if args.phase=="research":
             from research_extraction import run_research_queue

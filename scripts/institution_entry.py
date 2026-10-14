@@ -1,5 +1,5 @@
 """Run local catalog, acquisition, inference and cloud sync independently."""
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 import json
 import os
 from pathlib import Path
@@ -7,6 +7,7 @@ import subprocess
 import sqlite3
 import sys
 import time
+from acquisition_quota import AcquisitionDeferred, KST, Quota
 
 def resolve_state_directory(install_root):
     """Use the durable local storage choice for every scheduled release."""
@@ -39,6 +40,104 @@ def stop_child(process):
     process.wait(timeout=15)
 
 
+def figure_budget(state, started, collection_day):
+    """Only the remainder of this collection run/day is available for figures."""
+    quota = Quota(state / "acquisition-policy.json")
+    quota.active()
+    status = quota.status()
+    now = quota.now().astimezone(KST)
+    if status['day'] != collection_day or now.date().isoformat() != collection_day:
+        raise AcquisitionDeferred('originals_first_new_day')
+    # Figure bytes use separate receipts. Any article-body refetch still needs
+    # original capacity; every request retains source pauses and policy checks.
+    midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
+    # Keep time for graceful exit before the existing 58-minute child deadline.
+    seconds = int(min(3300, 3480 - (time.monotonic() - started) - 15,
+                      (midnight - now).total_seconds() - 15))
+    if seconds < 10:
+        raise AcquisitionDeferred('originals_first_no_time')
+    return seconds
+
+
+def run_phases(release, state):
+    """Run inference/sync independently, with collection preceding figures."""
+    processes, logs = [], []
+    started = time.monotonic()
+    collection_day = None
+
+    def launch(phase, seconds=3300):
+        output = (state / (phase + '.log')).open('a', encoding='utf-8', buffering=1)
+        logs.append(output)
+        output.write(f'\n{datetime.now(timezone.utc).isoformat()} {phase} started\n')
+        if phase == 'knowledge':
+            command = [sys.executable, '-u', str(release / 'knowledge_worker.py'),
+                       '--state-dir', str(state), '--max-seconds', str(seconds)]
+        elif phase in {'catalog', 'sync'}:
+            script = 'local_catalog_worker.py' if phase == 'catalog' else 'catalog_sync.py'
+            command = [sys.executable, '-u', str(release / script),
+                       '--state-dir', str(state), '--max-seconds', '3560' if phase == 'sync' else str(seconds)]
+        else:
+            command = [sys.executable, '-u', str(release / 'institution_worker.py'),
+                       '--state-dir', str(state), '--node', str(release / 'node.exe'),
+                       '--phase', phase, '--max-seconds', str(seconds)]
+        process = subprocess.Popen(command, cwd=release,
+            stdout=output, stderr=output, stdin=subprocess.DEVNULL,
+            env={**os.environ, 'URO_ACQUISITION_POLICY': str(state / 'acquisition-policy.json')},
+            creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        pair = (phase, process)
+        processes.append(pair)
+        return pair
+
+    try:
+        # Start every independent lane immediately; figures must not race the
+        # acquisition lane for the same publisher's daily reservations.
+        for phase in ('catalog', 'sync', 'collect', 'summarize', 'research', 'knowledge'):
+            if phase == 'collect':
+                try:
+                    quota = Quota(state / 'acquisition-policy.json')
+                    quota.active()
+                    collection_day = quota.status()['day']
+                except AcquisitionDeferred as error:
+                    print(f'collect: deferred, {error.reason}', flush=True)
+                    continue
+            launch(phase)
+        pending = sorted(processes, key=lambda pair: pair[0] != 'collect')
+        results = []
+        while pending:
+            phase, process = pending.pop(0)
+            timed_out = False
+            try:
+                limit = 3590 if phase == 'sync' else 3480
+                code = process.wait(timeout=max(1, limit - (time.monotonic() - started)))
+            except subprocess.TimeoutExpired:
+                timed_out = True
+                stop_child(process)
+                code = process.returncode or 1
+                print(f'{phase}: stalled child stopped; committed documents are retained', flush=True)
+            results.append(code)
+            print(f'{datetime.now(timezone.utc).isoformat()} {phase} finished: {code}', flush=True)
+            if phase == 'collect':
+                if code or timed_out:
+                    print('figures: deferred, originals_first_collection_failed', flush=True)
+                    continue
+                try:
+                    seconds = figure_budget(state, started, collection_day)
+                except AcquisitionDeferred as error:
+                    print(f'figures: deferred, {error.reason}', flush=True)
+                    continue
+                print(f'figures: originals phase finished; remaining window {seconds}s', flush=True)
+                # Wait for figures before the longer sync lane, so a hung figure
+                # child is stopped at the existing acquisition deadline.
+                pending.insert(0, launch('figures', seconds))
+        return results
+    finally:
+        for _, process in processes:
+            if process.poll() is None:
+                stop_child(process)
+        for output in logs:
+            output.close()
+
+
 def main():
     import msvcrt
     release = Path(__file__).resolve().parent
@@ -56,45 +155,14 @@ def main():
         print("An institution worker is already running", flush=True)
         lock.close()
         return
-    processes = []
-    logs = []
-    started = time.monotonic()
     try:
         print(f"\n{datetime.now(timezone.utc).isoformat()} Z8 acquisition and summary queues started", flush=True)
-        with sqlite3.connect(state / "queue.sqlite3", timeout=20) as database:
+        database = sqlite3.connect(state / "queue.sqlite3", timeout=20)
+        try:
             database.execute("PRAGMA journal_mode=WAL")
-        # No cloud call precedes local work: a full or unavailable database must
-        # never prevent durable discovery, acquisition or inference from starting.
-        for phase in ("catalog", "sync", "collect", "summarize", "figures", "research", "knowledge"):
-            output = (state / (phase + ".log")).open("a", encoding="utf-8", buffering=1)
-            logs.append(output)
-            output.write(f"\n{datetime.now(timezone.utc).isoformat()} {phase} started\n")
-            if phase == "knowledge":
-                command = [sys.executable, "-u", str(release / "knowledge_worker.py"),
-                           "--state-dir", str(state), "--max-seconds", "3300"]
-            elif phase in {"catalog", "sync"}:
-                script = "local_catalog_worker.py" if phase == "catalog" else "catalog_sync.py"
-                command = [sys.executable, "-u", str(release / script),
-                           "--state-dir", str(state), "--max-seconds", "3560" if phase == "sync" else "3300"]
-            else:
-                command = [sys.executable, "-u", str(release / "institution_worker.py"),
-                    "--state-dir", str(state), "--node", str(release / "node.exe"),
-                    "--phase", phase, "--max-seconds", "3300"]
-            process = subprocess.Popen(command, cwd=release,
-                stdout=output, stderr=output, stdin=subprocess.DEVNULL,
-                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-            processes.append((phase, process))
-        results = []
-        for phase, process in processes:
-            try:
-                limit = 3590 if phase == 'sync' else 3480
-                code = process.wait(timeout=max(1, limit - (time.monotonic() - started)))
-            except subprocess.TimeoutExpired:
-                stop_child(process)
-                code = process.returncode
-                print(f"{phase}: stalled child stopped; committed documents are retained", flush=True)
-            results.append(code)
-            print(f"{datetime.now(timezone.utc).isoformat()} {phase} finished: {code}", flush=True)
+        finally:
+            database.close()
+        results = run_phases(release, state)
         from local_catalog import LocalCatalog
         with LocalCatalog(state) as catalog:
             catalog.set_meta("controller_status", {"state": "error" if any(results) else "idle",
@@ -102,11 +170,6 @@ def main():
         if any(results):
             raise SystemExit(1)
     finally:
-        for _, process in processes:
-            if process.poll() is None:
-                stop_child(process)
-        for output in logs:
-            output.close()
         lock.close()
 
 

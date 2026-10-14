@@ -17,6 +17,7 @@ import zipfile
 from bs4 import BeautifulSoup
 from defusedxml import ElementTree as ET
 from fulltext import NoRedirect
+from acquisition_quota import AcquisitionDeferred, download_request, download_scope
 
 MAX_IMAGE_BYTES = 20 * 1024 * 1024
 MAX_PACKAGE_BYTES = 100 * 1024 * 1024
@@ -68,7 +69,7 @@ def fetch_bytes(url, maximum=MAX_IMAGE_BYTES, timeout=20):
     if not allowed_image_url(url): raise ValueError('Image host is not supported')
     opener = build_opener(HTTPSHandler(context=ssl.create_default_context()), NoRedirect())
     req = Request(url, headers={'User-Agent':'UroDailyPick/1.0', 'Accept':'image/*,application/zip'})
-    with opener.open(req, timeout=timeout) as response:
+    with download_request(url, resource_kind='figure'), opener.open(req, timeout=timeout) as response:
         data = response.read(maximum + 1)
     if not data or len(data) > maximum: raise ValueError('Image/package size limit')
     return data
@@ -162,6 +163,11 @@ def save_image(folder, data):
 
 
 def collect_images(directory, pmid, record, browser=None, deadline=None):
+    with download_scope(record.get('paper') or record, record['document'].get('source_url', '')):
+        return _collect_images(directory, pmid, record, browser, deadline)
+
+
+def _collect_images(directory, pmid, record, browser=None, deadline=None):
     """Resume one local article. A missing image cannot invalidate its body or summary."""
     if not re.fullmatch(r'[1-9][0-9]{0,11}', pmid): raise ValueError('Invalid PMID')
     spool = Path(directory) / 'documents'
@@ -325,6 +331,8 @@ def run_image_queue(directory, node, seconds, requested_pmid=None):
                     result=collect_images(directory,path.stem,record,browser, min(deadline,time.monotonic()+120))
                     ready=sum(f['status']=='ready' for f in result['figures'])
                     print(f"PMID {path.stem}: figures {ready}/{len(result['figures'])} stored",flush=True)
+                except AcquisitionDeferred as error:
+                    print(f'PMID {path.stem}: figures deferred, {error.reason}',flush=True)
                 except (OSError,ValueError,KeyError):
                     print(f'PMID {path.stem}: figure collection deferred',flush=True)
     finally:
