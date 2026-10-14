@@ -1,6 +1,7 @@
 """Independent local collection and summary workers, using authorized sources."""
 import argparse
 import ctypes
+from contextlib import nullcontext
 import hashlib
 from http.client import IncompleteRead
 import json
@@ -304,14 +305,14 @@ def prepare_collection_attempts(db):
             consecutive_failures INTEGER NOT NULL, attempted_at REAL NOT NULL)""")
 
 
-def record_collection_attempt(db, pmid, status, reason="", now=None):
+def record_collection_attempt(db, pmid, status, reason="", now=None, *, commit=True):
     """Back off repeated collection failures; summarization keeps its own policy."""
     if status not in STATES | {"ready"}:
         raise ValueError("Unknown collection outcome")
     now = time.time() if now is None else now
     # Store only the bounded machine reason, never publisher text or source URLs.
     reason = reason if isinstance(reason, str) and re.fullmatch(r"[a-z0-9_]{1,80}", reason) else "unspecified"
-    with db:
+    with db if commit else nullcontext():
         prior = db.execute("SELECT status,reason,consecutive_failures FROM collection_retry_metadata WHERE pmid=?", (pmid,)).fetchone()
         same_failure = prior and prior[0] == status and prior[1] == reason
         failures = prior[2] + 1 if same_failure and status == "retryable_error" else 1
@@ -466,8 +467,15 @@ def run(directory, node, seconds, phase="all", requested_pmid=None):
         print(f"Institution {phase} queue: {len(papers)} papers", flush=True)
         if phase == "collect":
             from collection_queue import run_collection
+            collection_started = time.time()
             counts = run_local_cycles(service, deadline, phase,
                 lambda candidates: run_collection(directory, node, deadline, service, db, candidates), requested_pmid)
+            result = {'started_at':collection_started, 'updated_at':time.time(), **counts,
+                      'new_originals':counts.get('completed', 0),
+                      'outcome':'acquired' if counts.get('completed') else 'no_new_originals'}
+            save_json(directory / 'collection-run.json', result)
+            service.catalog.set_meta('collection_status', result)
+            print('Collection run outcome: ' + json.dumps(result, sort_keys=True), flush=True)
             print(f"Institution collect: {counts.get('completed', 0)} completed locally, {counts.get('failed', 0)} unavailable/invalid, "
                   f"{counts.get('deferred', 0)} deferred", flush=True)
             return

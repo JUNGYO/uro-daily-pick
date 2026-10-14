@@ -69,7 +69,7 @@ def fetch_bytes(url, maximum=MAX_IMAGE_BYTES, timeout=20):
     if not allowed_image_url(url): raise ValueError('Image host is not supported')
     opener = build_opener(HTTPSHandler(context=ssl.create_default_context()), NoRedirect())
     req = Request(url, headers={'User-Agent':'UroDailyPick/1.0', 'Accept':'image/*,application/zip'})
-    with download_request(url), opener.open(req, timeout=timeout) as response:
+    with download_request(url, resource_kind='figure'), opener.open(req, timeout=timeout) as response:
         data = response.read(maximum + 1)
     if not data or len(data) > maximum: raise ValueError('Image/package size limit')
     return data

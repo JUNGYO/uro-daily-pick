@@ -15,16 +15,14 @@ The adjacent `acquisition-quota.sqlite3` ledger is shared by API, browser and
 figure workers. Back it up with the state directory; never delete it to recover
 capacity. Initialization refuses an existing ledger. Quota records stay local.
 
-The limit is at most 30 downloaded responses or unresolved reservations per
+The original limit is at most 30 downloaded article-body responses or unresolved original reservations per
 publisher per Korean calendar day. Each request reserves capacity before
 transport. Confirmed HTTP/transport failures release only that request's
 reservation, once, on its original day. Browser redirects do not retain a charge;
 the destination is reserved separately. Completed downloads still count if
 subsequent parsing fails. Crashes, uncertain outcomes and legacy aggregate usage
 are not refunded. HTTP 401/403/429 also pause the publisher across workers, so
-releasing a failed reservation does not authorize another blocked request. Full-text,
-linked-table and figure requests consume the same budget, so fewer than 30
-complete papers may be acquired. Concurrent workers and restarts share an atomic
+releasing a failed reservation does not authorize another blocked request. Figure and same-article linked-table requests have separate zero-charge receipts and do not consume the original allowance. Fetching a whole article again to find figures still consumes original capacity, so acquired-paper counts can be lower than downloaded-body counts. Auxiliary failures cannot refund another original; their 401/403/429 responses still pause the publisher for every resource kind. Redirects from auxiliary URLs are stopped before transport. Concurrent workers and restarts share an atomic
 ledger. Chromium intercepts redirect destinations before transport. Publisher
 domain aliases are grouped; known DOI prefixes add a conservative charge when
 the actual destination differs. Repository content without a recognized
@@ -53,7 +51,7 @@ Z8 collects full articles through the hospital network and stores originals outs
 
 The client checks the existing model and sends its own paper messages directly, one inference request at a time. It does not install models, start servers, change the SSH tunnel or submit tasks to another application. Spark outages preserve pending documents for retry; model API fallback is not automatic.
 
-Collection first tries licensed Europe PMC full text, then ordinary headed Chrome with a dedicated minimized profile. Supported structures include ScienceDirect, Springer/Nature, Wiley, JAMA and BMJ. Access depends on institution subscriptions. The browser waits for body sections, includes linked Springer tables, checks title/DOI and rejects incomplete bodies.
+Collection first tries licensed Europe PMC and PMC repository copies, plus an authorized Elsevier API when configured, then ordinary headed Chrome with a dedicated minimized profile. Browser adapters support Springer/Nature, Wiley, JAMA and BMJ. ScienceDirect web automation remains disabled. Other publishers are classified before browser startup; this browser limitation does not suppress available repository copies. Access depends on institution subscriptions. The browser waits for body sections, includes linked Springer tables, checks title/DOI and rejects incomplete bodies.
 
 ## Install
 
@@ -79,10 +77,10 @@ The worker now includes every catalog paper with a missing/stale summary or a mo
 
 The controller starts collection, summaries, knowledge and synchronization
 independently. Figure supplementation starts only after the original collection
-phase exits successfully, using the same remaining publisher quota. Its time
+phase exits successfully. Figure bytes do not consume original quota. Its time
 budget is limited to the remainder of the existing hourly run (normally about
 three minutes after a full 55-minute collection phase). A failed or timed-out
-collection, exhausted quota, insufficient time, a new pause, or a change of the
+collection, insufficient time, a new pause, or a change of the
 Korean calendar day defers figures until a later collection run. It never resets
 the daily count. Only confirmed individual transport failures release their own
 reservation. This gives new originals the first opportunity to use
@@ -102,3 +100,10 @@ download is checkpointed per figure and retried after one hour. Existing complet
 manifests skip downloads. Each image is limited to 20 MiB; writes preserve at least
 1 GiB free space. `figures.log` records progress without article text or credentials.
 Missing access is left pending, and does not block collection or summarization.
+
+
+## Acquisition outcomes and fallback
+
+Unsupported browser entries are retired from the active backlog without browser IPC. Per-source reasons and retry times survive restarts. API/network errors back off exponentially up to one day; unchanged identity, checksum or parsing failures wait one week without weakening validation. Catalog DOI/title changes invalidate those checkpoints. Quota deferrals wait until the next Korean day or a bounded source/policy recheck. A browser failure does not postpone an independently due repository/API route. If no authorized copy is available, the paper remains unavailable for a later retry; browser challenges are not bypassed.
+
+`collection-result.json` records the latest cycle's actual new originals, reason aggregates and browser timings. `collection-run.json` and local `collection_status` retain totals for the whole collection phase. `no_new_originals` is distinct from `acquired`; a process exit code of zero only confirms that the worker finished. These records contain no original text, credentials or publisher URLs.

@@ -141,12 +141,15 @@ class Quota:
             raise
         return db
 
-    def reserve(self, groups, *, amount=1, manual=False, tracked=False):
+    def reserve(self, groups, *, amount=1, manual=False, tracked=False, resource_kind='original'):
         groups = sorted(set(groups))
         if not groups or not set(groups).issubset(PUBLISHERS) or type(amount) is not int or amount < 0:
             raise AcquisitionDeferred("quota_unknown_publisher")
         if tracked and (amount != 1 or manual):
             raise AcquisitionDeferred("quota_invalid_request")
+        if resource_kind not in ('original', 'figure', 'table') or (manual and resource_kind != 'original'):
+            raise AcquisitionDeferred('quota_invalid_request')
+        charged = amount if resource_kind == 'original' else 0
         config, start = self.config()
         now = self.now()
         if now < start or config.get("paused", False):
@@ -170,13 +173,13 @@ class Quota:
                 automatic, used_manual = row or (0, 0)
                 # Reserved manual capacity remains available to manual entries.
                 used = automatic + (used_manual if manual else max(used_manual, config.get("manual_reserve", 0)))
-                if used + (amount or 1) > config["daily_limit"]:
+                if resource_kind == 'original' and used + (amount or 1) > config["daily_limit"]:
                     raise AcquisitionDeferred("quota_daily_limit")
                 rows[group] = (automatic, used_manual)
             if amount:
                 for group, (automatic, used_manual) in rows.items():
                     db.execute("INSERT OR REPLACE INTO usage VALUES(?,?,?,?)",
-                               (day, group, automatic + (0 if manual else amount), used_manual + (amount if manual else 0)))
+                               (day, group, automatic + (0 if manual else charged), used_manual + (charged if manual else 0)))
                 db.execute("UPDATE metadata SET value=? WHERE key='last_day'", (day,))
             request_id = None
             if tracked:
@@ -187,8 +190,13 @@ class Quota:
                 request_id = uuid.uuid4().hex
                 db.execute("INSERT INTO quota_requests VALUES(?,?,?,'pending',NULL,?,NULL)",
                            (request_id, day, json.dumps(groups), now.isoformat()))
+                # Side table preserves the seven-column contract used by a
+                # previous worker finishing its already reserved requests.
+                db.execute('''CREATE TABLE IF NOT EXISTS quota_request_details(
+                    id TEXT PRIMARY KEY,resource_kind TEXT NOT NULL,charged INTEGER NOT NULL CHECK(charged IN (0,1)))''')
+                db.execute('INSERT INTO quota_request_details VALUES(?,?,?)', (request_id, resource_kind, charged))
             db.commit()
-            return {"day": day, "publishers": groups, "charged": amount, "request_id": request_id}
+            return {"day": day, "publishers": groups, "charged": charged, "resource_kind": resource_kind, "request_id": request_id}
         except (OSError, sqlite3.Error):
             raise AcquisitionDeferred("quota_ledger_unavailable") from None
         finally:
@@ -217,8 +225,15 @@ class Quota:
                 if not groups or not set(groups).issubset(PUBLISHERS):
                     raise AcquisitionDeferred('quota_ledger_unavailable')
                 if failed:
+                    charged = 1  # Legacy receipts remain charged unless individually proven failed.
+                    if db.execute("SELECT 1 FROM sqlite_master WHERE name='quota_request_details'").fetchone():
+                        detail = db.execute('SELECT charged FROM quota_request_details WHERE id=?', (request_id,)).fetchone()
+                        if detail is not None:
+                            charged = detail[0]
                     for group in groups:
-                        changed = db.execute('UPDATE usage SET automatic=automatic-1 WHERE day=? AND publisher=? AND automatic>=1', (day, group))
+                        if not charged:
+                            continue
+                        changed = db.execute('UPDATE usage SET automatic=automatic-? WHERE day=? AND publisher=? AND automatic>=?', (charged, day, group, charged))
                         if changed.rowcount != 1:
                             raise AcquisitionDeferred('quota_ledger_unavailable')
                     if reason in ('http_401', 'http_403', 'http_429'):
@@ -267,13 +282,13 @@ def before_download(url):
 
 
 @contextmanager
-def download_request(url):
+def download_request(url, *, resource_kind='original'):
     """Reserve before I/O; release only confirmed HTTP/transport failures."""
     selected = policy_path()
     quota, reservation = None, None
     if selected and not metadata_url(url):
         quota = Quota(selected)
-        reservation = quota.reserve(groups_for_url(url, current_publishers()), tracked=True)
+        reservation = quota.reserve(groups_for_url(url, current_publishers()), tracked=True, resource_kind=resource_kind)
     try:
         yield
     except (HTTPError, URLError, OSError, IncompleteRead) as error:
@@ -321,6 +336,7 @@ def main():
     parser.add_argument("--count", type=int, default=1)
     parser.add_argument("--request-id")
     parser.add_argument("--reason")
+    parser.add_argument('--resource-kind', choices=('original', 'figure', 'table'), default='original')
     args = parser.parse_args()
     quota = Quota(args.policy)
     try:
@@ -341,7 +357,7 @@ def main():
                 result = {"charged": 0}
             else:
                 result = quota.reserve(groups, amount=0 if args.action == "check" else args.count,
-                                       manual=args.action == "manual", tracked=args.action == "begin")
+                                       manual=args.action == "manual", tracked=args.action == "begin", resource_kind=args.resource_kind)
         print(json.dumps({"ok": True, **result}))
     except AcquisitionDeferred as error:
         print(json.dumps({"ok": False, "reason": error.reason}))

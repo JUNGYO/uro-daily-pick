@@ -139,7 +139,7 @@ print(accepted)
         self.assertDenied("quota_daily_limit", lambda: self.quota.reserve(["springer-nature", "wiley"]))
         self.assertEqual(self.quota.status()["publishers"]["springer-nature"]["automatic"], 0)
 
-    def test_failed_transport_does_not_consume_budget_and_image_shares_it(self):
+    def test_failed_transport_and_image_do_not_consume_original_budget(self):
         import fulltext
         import article_images
         def actual_quota(path):
@@ -211,7 +211,7 @@ print(accepted)
         self.assertDenied('quota_source_paused',lambda:restarted.reserve(['jama']))
         restarted.reserve(['bmj'])
 
-    def test_received_body_counts_even_when_later_parsing_fails(self):
+    def test_received_image_does_not_count_even_when_later_parsing_fails(self):
         import article_images
         with patch.dict(os.environ, {'URO_ACQUISITION_POLICY':str(self.policy)}), \
              patch('acquisition_quota.Quota',return_value=self.quota), \
@@ -219,7 +219,59 @@ print(accepted)
             opener.return_value.open.return_value.__enter__.return_value.read.return_value=b'not an image'
             body=article_images.fetch_bytes('https://onlinelibrary.wiley.com/image.png')
             with self.assertRaises(ValueError):article_images.image_type(body)
-        self.assertEqual(self.quota.status()['publishers']['wiley']['automatic'],1)
+        self.assertEqual(self.quota.status()['publishers']['wiley']['automatic'],0)
+
+    def test_figures_and_tables_keep_receipts_without_consuming_full_original_limit(self):
+        self.quota.reserve(['wiley'], amount=30)
+        for kind in ('figure', 'table'):
+            check = self.quota.reserve(['wiley'], amount=0, resource_kind=kind)
+            self.assertEqual(check['charged'], 0)
+            receipt = self.quota.reserve(['wiley'], tracked=True, resource_kind=kind)
+            self.quota.settle(receipt['request_id'])
+            self.assertEqual(receipt['charged'], 0)
+        self.assertEqual(self.quota.status()['publishers']['wiley']['automatic'], 30)
+        self.assertDenied('quota_daily_limit', lambda:self.quota.reserve(['wiley']))
+
+    def test_failed_figure_cannot_refund_original_and_403_pauses_both(self):
+        self.quota.reserve(['wiley'], amount=30)
+        receipt = self.quota.reserve(['wiley'], tracked=True, resource_kind='figure')
+        self.quota.settle(receipt['request_id'], failed=True, reason='http_403')
+        self.quota.settle(receipt['request_id'], failed=True, reason='http_403')
+        self.assertEqual(self.quota.status()['publishers']['wiley']['automatic'], 30)
+        for kind in ('original', 'figure', 'table'):
+            self.assertDenied('quota_source_paused', lambda:self.quota.reserve(['wiley'], resource_kind=kind))
+        self.quota.reserve(['bmj'], resource_kind='figure')
+
+    def test_legacy_seven_column_receipts_remain_compatible(self):
+        self.quota.reserve(['jama'], tracked=True, resource_kind='figure')
+        receipt = self.quota.reserve(['wiley'], tracked=True)['request_id']
+        with closing(sqlite3.connect(self.root/'acquisition-quota.sqlite3')) as db, db:
+            db.execute('DELETE FROM quota_request_details WHERE id=?', (receipt,))
+            db.execute("INSERT INTO quota_requests VALUES(?,?,?,'pending',NULL,?,NULL)",
+                       ('b'*32, '2026-10-13', '["wiley"]', self.now.isoformat()))
+        self.quota.settle(receipt, failed=True)
+        self.assertEqual(self.quota.status()['publishers']['wiley']['automatic'], 0)
+
+    def test_concurrent_assets_cannot_expand_original_capacity(self):
+        def attempt(n):
+            kind = 'original' if n % 2 == 0 else 'figure'
+            try:
+                receipt = self.quota.reserve(['jama'], tracked=True, resource_kind=kind)
+                self.quota.settle(receipt['request_id'])
+                return int(kind == 'original')
+            except AcquisitionDeferred:
+                return 0
+        with ThreadPoolExecutor(max_workers=10) as pool:
+            self.assertEqual(sum(pool.map(attempt, range(100))), 30)
+        self.assertEqual(self.quota.status()['publishers']['jama']['automatic'], 30)
+
+    def test_received_original_stays_charged_after_parser_rejection(self):
+        from acquisition_quota import download_request
+        with patch.dict(os.environ, {'URO_ACQUISITION_POLICY':str(self.policy)}), \
+             patch('acquisition_quota.Quota', return_value=self.quota):
+            with download_request('https://onlinelibrary.wiley.com/article'):
+                pass
+        self.assertEqual(self.quota.status()['publishers']['wiley']['automatic'], 1)
 
     def test_metadata_and_local_work_do_not_consume_quota(self):
         with patch.dict(os.environ, {"URO_ACQUISITION_POLICY": str(self.policy)}):

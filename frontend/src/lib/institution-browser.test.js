@@ -499,3 +499,55 @@ test.each(["media.springernature.com", "static-content.springer-cdn.com"])(
     expect(vi.getTimerCount()).toBe(0);
   },
 );
+
+
+test('auxiliary redirects cannot download another article without original quota', async()=>{
+  const h=await quotaTransport();
+  const url=articleUrl+'/tables/1';
+  h.navigation.auxiliaryUrl=url;
+  h.navigation.job.resource_kind='table';
+  await h.paused({...h.event,request:{url}});
+  expect(h.quota.before).toHaveBeenCalledWith(url, expect.objectContaining({resource_kind:'table'}));
+  await h.paused({...h.event,requestId:'other',request:{url:articleUrl}});
+  expect(h.quota.before).toHaveBeenCalledTimes(1);
+  expect(h.navigation.reason).toBe('auxiliary_redirect_not_permitted');
+  expect(h.session.send).toHaveBeenCalledWith('Fetch.failRequest', expect.objectContaining({requestId:'other'}));
+});
+
+test('article reads force original accounting and only its own linked tables use table receipts',async()=>{
+  const tableUrl=articleUrl+'/tables/1';
+  const article=fakePage({body:{tables:[tableUrl, 'https://link.springer.com/article/other/tables/1']}});
+  const table=fakePage({destination:tableUrl});
+  table.waitForSelector=vi.fn(async()=>{});
+  table.evaluate=vi.fn(async()=>'<table><tr><td>17</td></tr></table>');
+  const handlers=new Map();
+  const context={
+    newPage:vi.fn().mockResolvedValueOnce(article).mockResolvedValueOnce(table),
+    newCDPSession:vi.fn(async page=>({on:(event,fn)=>{if(event==='Fetch.requestPaused')handlers.set(page,fn);},send:vi.fn(async()=>{})})),
+  };
+  for (const page of [article,table]) {
+    const goto=page.goto;
+    page.goto=async url=>{
+      await handlers.get(page)({requestId:page===article?'article':'table',resourceType:'Document',request:{url}});
+      return goto(url);
+    };
+  }
+  const quota={call:vi.fn(()=>({ok:true})),before:vi.fn(()=> 'a'.repeat(32))};
+  const policy=new PublisherPolicy(null,quota);
+  policy.before=vi.fn(async()=>{});
+  const result=await readArticle(context,{doi:'10.1007/synthetic',resource_kind:'figure'},policy);
+  expect(result.status).toBe('downloaded');
+  expect(result.html).toContain('<td>17</td>');
+  expect(quota.before).toHaveBeenCalledWith(expect.stringContaining('doi.org'),expect.objectContaining({resource_kind:'original'}));
+  expect(quota.before).toHaveBeenCalledWith(tableUrl,expect.objectContaining({resource_kind:'table'}));
+  expect(context.newPage).toHaveBeenCalledTimes(2);
+});
+
+test('image preflight uses its separate category even when an input requests original',async()=>{
+  const quota={call:vi.fn(()=>{throw Object.assign(new Error('pause'),{reason:'quota_source_paused'});})};
+  const context={newPage:vi.fn()};
+  expect(await readImage(context,{url:'https://link.springer.com/image.png',resource_kind:'original'},new PublisherPolicy(null,quota)))
+    .toMatchObject({status:'unavailable',reason:'quota_source_paused'});
+  expect(quota.call).toHaveBeenCalledWith('check',expect.objectContaining({resource_kind:'figure'}),'https://link.springer.com/image.png');
+  expect(context.newPage).not.toHaveBeenCalled();
+});

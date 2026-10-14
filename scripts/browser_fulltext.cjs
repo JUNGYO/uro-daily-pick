@@ -30,6 +30,7 @@ class BrowserQuota {
     if (!this.python) throw Object.assign(new Error('Quota unavailable'), {reason:'quota_ledger_unavailable'});
     const args = [path.join(__dirname, 'acquisition_quota.py'), '--policy', this.config, action,
       '--doi', String(job.doi || ''), '--publishers', (job.publishers || []).join(',')];
+    args.push('--resource-kind', job.resource_kind || 'original');
     if (url) args.push('--url', url);
     if (receipt.requestId) args.push('--request-id', receipt.requestId);
     if (receipt.reason) args.push('--reason', receipt.reason);
@@ -145,6 +146,10 @@ async function blockPublisherRequests(context, page, policy, navigation) {
       if (policy.pauseFor(host)) throw Object.assign(new Error('Paused'), {reason:'publisher_paused'});
       if (!policy.quota) throw Object.assign(new Error('Paused'), {reason:'publisher_paused'});
       if (event.resourceType === 'Document' && !byFetch.has(event.requestId)) {
+        // An auxiliary page may not redirect to a whole article and retain its
+        // zero-charge classification. Stop before transport outside that URL.
+        if (navigation.auxiliaryUrl && event.request.url.split('#')[0] !== navigation.auxiliaryUrl.split('#')[0])
+          throw Object.assign(new Error('Auxiliary redirect'), {reason:'auxiliary_redirect_not_permitted'});
         const token = policy.quota.before(event.request.url, navigation.job || {});
         if (token) {
           const entry = {token, fetchId:event.requestId, networkId:event.networkId};
@@ -209,6 +214,7 @@ const allowedImage = value => {
 };
 
 async function readImage(context, job, policy = new PublisherPolicy()) {
+  job = {...job, resource_kind:'figure'};
   if (!allowedImage(job.url)) return {status:'unsupported'};
   try { policy.quota?.call('check', job, job.url); }
   catch (error) { return {status:'unavailable',reason:error.reason}; }
@@ -216,7 +222,7 @@ async function readImage(context, job, policy = new PublisherPolicy()) {
   const budget = Number.isFinite(job.budget_ms) ? Math.max(1,Math.min(30000,job.budget_ms)) : 20000;
   const deadline = Date.now() + budget;
   const timer=setTimeout(()=>void page.close().catch(()=>{}),budget);
-  const navigation = {job};
+  const navigation = {job, auxiliaryUrl:job.url};
   try {
     await blockPublisherRequests(context, page, policy, navigation);
     await page.route('**/*', async route => {
@@ -247,6 +253,7 @@ const selectorsFor = (host) => disabledWebHost(host) ? []
   : host === 'www.bmj.com' ? ['.article.full', '#content-block'] : [];
 
 async function readArticle(context, job, policy = new PublisherPolicy()) {
+  job = {...job, resource_kind:'original'};
   const doi = String(job.doi || '').trim();
   if (!/^10\.\d{4,9}\/[^\s<>"#?]+$/i.test(doi)) return {status:'unsupported', reason:'invalid_doi'};
   // Known Elsevier DOI routing can be rejected without contacting a resolver.
@@ -325,19 +332,21 @@ async function readArticle(context, job, policy = new PublisherPolicy()) {
     for (const url of [...new Set(result.tables)].slice(0,10)) {
       if (timedOut) return {status:'retryable_error',reason:'article_time_budget'};
       if (new URL(url).origin !== new URL(page.url()).origin) continue;
+      if (!new URL(url).pathname.startsWith(new URL(page.url()).pathname.replace(/\/$/, '') + '/tables/')) continue;
       const tablePage=await context.newPage();
       pages.add(tablePage);
+      const tableNavigation = {job:{...job, resource_kind:'table'}, auxiliaryUrl:url};
       try {
         if (timedOut) throw new Error('article_time_budget');
-        await blockPublisherRequests(context, tablePage, policy, navigation);
-        await guardPage(tablePage, policy, deadline, navigation);
+        await blockPublisherRequests(context, tablePage, policy, tableNavigation);
+        await guardPage(tablePage, policy, deadline, tableNavigation);
         const response=await tablePage.goto(url,{waitUntil:'domcontentloaded',timeout:30000});
         if (response) policy.observe(new URL(tablePage.url()).hostname, response.status());
         if (!response || response.status() !== 200) throw new Error('table_unavailable');
         await tablePage.waitForSelector('table',{timeout:15000});
         tableHtml+=await tablePage.evaluate(()=>[...document.querySelectorAll('table')].map(t=>'<h2>'+document.title.replace(/[<>]/g,'')+'</h2>'+t.outerHTML).join(''));
       } catch {
-        if (navigation.reason) return {status:'access_required',reason:navigation.reason};
+        if (tableNavigation.reason) return {status:'access_required',reason:tableNavigation.reason};
         return {status:'retryable_error',reason:'article_table_unavailable',url:page.url()};
       } finally { pages.delete(tablePage); await tablePage.close().catch(() => {}); }
     }

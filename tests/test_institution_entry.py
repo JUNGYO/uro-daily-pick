@@ -84,9 +84,8 @@ class OriginalFirstTests(unittest.TestCase):
 
         def figures():
             self.assertEqual(self.quota.status()['publishers']['wiley']['remaining'], 2)
-            self.quota.reserve(['wiley'], amount=2)
-            with self.assertRaises(AcquisitionDeferred):
-                self.quota.reserve(['wiley'])
+            self.quota.reserve(['wiley'], resource_kind='figure')
+            self.assertEqual(self.quota.status()['publishers']['wiley']['remaining'], 2)
         self.on_figures = figures
         self.assertFalse(any(self.run_controller()))
         waited = self.events.index(('wait', 'collect'))
@@ -95,16 +94,15 @@ class OriginalFirstTests(unittest.TestCase):
         self.assertLess(self.events.index(('wait', 'figures')), self.events.index(('wait', 'sync')))
         command = self.commands['figures']
         self.assertEqual(int(command[command.index('--max-seconds') + 1]), 165)
-        self.assertEqual(self.quota.status()['publishers']['wiley']['automatic'], 30)
+        self.assertEqual(self.quota.status()['publishers']['wiley']['automatic'], 28)
 
-    def test_exhausted_budget_skips_figures_and_survives_controller_restart(self):
+    def test_exhausted_original_budget_allows_figures_without_reset_on_restart(self):
         self.after_collect = lambda: self.quota.reserve(PUBLISHERS, amount=30)
         self.run_controller()
-        self.assertNotIn('figures', self.commands)
-        self.assertIn('quota_daily_limit', self.output.getvalue())
+        self.assertIn('figures', self.commands)
         self.after_collect = lambda: None
         self.run_controller()
-        self.assertNotIn('figures', self.commands)
+        self.assertIn('figures', self.commands)
         self.assertTrue(all(p['automatic'] == 30 for p in self.quota.status()['publishers'].values()))
 
     def test_collection_failure_does_not_release_budget_to_figures(self):

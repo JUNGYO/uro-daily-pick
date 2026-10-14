@@ -48,8 +48,8 @@ def figure_budget(state, started, collection_day):
     now = quota.now().astimezone(KST)
     if status['day'] != collection_day or now.date().isoformat() != collection_day:
         raise AcquisitionDeferred('originals_first_new_day')
-    if not any(publisher['remaining'] > 0 for publisher in status['publishers'].values()):
-        raise AcquisitionDeferred('quota_daily_limit')
+    # Figure bytes use separate receipts. Any article-body refetch still needs
+    # original capacity; every request retains source pauses and policy checks.
     midnight = (now + timedelta(days=1)).replace(hour=0, minute=0, second=0, microsecond=0)
     # Keep time for graceful exit before the existing 58-minute child deadline.
     seconds = int(min(3300, 3480 - (time.monotonic() - started) - 15,

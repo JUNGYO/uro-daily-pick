@@ -343,6 +343,90 @@ class DurableCollectionTests(unittest.TestCase):
         self.assertEqual(result['deferred'], 19)
         self.assertEqual(f.db.execute('SELECT count(*) FROM collection_browser_pending').fetchone()[0], 19)
 
+    def test_unsupported_backlog_is_retired_without_browser_and_valid_tail_runs(self):
+        from collection_queue import _prepare_probe_state, _paper_identity
+        f, calls = self.f, []
+        papers = [f.paper(n, '10.1097/unsupported-' + str(n)) for n in range(1, 1001)] + [f.paper(1001)]
+        from institution_worker import prepare_collection_attempts
+        prepare_collection_attempts(f.db)
+        _prepare_probe_state(f.db, papers)
+        for paper in papers:
+            identity = _paper_identity(paper)
+            f.db.execute('INSERT INTO collection_source_probes VALUES(?,?,?,?,?,?,?)',
+                (paper['pmid'], 'oa', identity, 'unavailable', self.now[0] + 604800, self.now[0], None))
+            f.db.execute('INSERT INTO collection_browser_pending VALUES(?,?,?)', (paper['pmid'], identity, self.now[0]))
+        f.db.commit()
+        class Browser:
+            def __init__(self, *args): pass
+            def read(self, paper, **kwargs):
+                calls.append(paper['pmid'])
+                return f.browser_result(paper)
+            def close(self): pass
+        f.deps.update(fetch_oa=f.forbid_network, Browser=Browser)
+        result = self.run_queue(papers)
+        self.assertEqual(result['completed'], 1)
+        self.assertEqual(calls, ['1001'])
+        self.assertEqual(self.telemetry['browser_attempts'], 1)
+        self.assertEqual(f.db.execute('SELECT count(*) FROM collection_browser_pending').fetchone()[0], 0)
+        self.assertEqual(f.db.execute("SELECT count(*) FROM collection_probe_details WHERE reason='browser_adapter_unavailable'").fetchone()[0], 1000)
+        self.run_queue(papers[:-1])
+        self.assertEqual(calls, ['1001'])
+        report = json.loads((f.directory/'collection-result.json').read_text())
+        self.assertEqual(report['outcome'], 'no_new_originals')
+
+    def test_browser_ineligible_paper_still_uses_available_repository(self):
+        result = self.run_queue([self.f.paper(1, '10.1097/oa')])
+        self.assertEqual(result['completed'], 1)
+        self.assertEqual(self.telemetry['browser_attempts'], 0)
+
+    def test_browser_quota_deferral_is_persisted_and_not_retried_before_midnight(self):
+        f, calls = self.f, []
+        f.deps['fetch_oa'] = lambda *a, **k: (_ for _ in ()).throw(FulltextUnavailable())
+        class Browser:
+            def __init__(self, *args): pass
+            def read(self, paper, **kwargs):
+                calls.append(paper['pmid'])
+                return {'status':'access_required', 'reason':'quota_daily_limit'}
+            def close(self): pass
+        f.deps['Browser'] = Browser
+        paper = f.paper(1)
+        self.run_queue([paper])
+        self.now[0] += 600
+        self.run_queue([paper])
+        self.assertEqual(calls, ['1'])
+        row = f.db.execute("SELECT reason FROM collection_probe_details WHERE provider='quota'").fetchone()
+        self.assertEqual(row[0], 'quota_daily_limit')
+        self.assertEqual(f.db.execute('SELECT count(*) FROM collection_browser_pending').fetchone()[0], 0)
+        self.now[0] = f.db.execute("SELECT next_probe FROM collection_source_probes WHERE provider='quota'").fetchone()[0] + 1
+        self.run_queue([paper])
+        self.assertEqual(calls, ['1', '1'])
+
+    def test_validation_failure_waits_weekly_but_identity_change_retries(self):
+        f, calls = self.f, []
+        def fail(pmid, **kwargs):
+            calls.append(pmid)
+            raise ValueError('PMC DOI mismatch')
+        f.deps['fetch_oa'] = fail
+        paper = f.paper(1, '10.1016/invalid')
+        self.run_queue([paper])
+        self.now[0] += 901
+        self.run_queue([paper])
+        self.assertEqual(calls, ['1'])
+        self.assertEqual(f.db.execute("SELECT reason FROM collection_probe_details WHERE provider='oa'").fetchone()[0], 'source_validation_failed')
+        self.run_queue([{**paper, 'doi':'10.1016/corrected'}])
+        self.assertEqual(calls, ['1', '1'])
+
+    def test_transient_errors_back_off_across_restart(self):
+        f = self.f
+        f.deps['fetch_oa'] = lambda *a, **k: (_ for _ in ()).throw(HTTPError('https://example.test',500,'unavailable',{},None))
+        paper = f.paper(1, '10.1016/retry')
+        self.run_queue([paper])
+        self.now[0] += 901
+        self.run_queue([paper])
+        row = f.db.execute("SELECT next_probe FROM collection_source_probes WHERE provider='oa'").fetchone()
+        self.assertEqual(row[0], self.now[0] + 1800)
+        self.assertEqual(f.db.execute("SELECT failures FROM collection_probe_details WHERE provider='oa'").fetchone()[0], 2)
+
     def test_next_batch_fills_free_slot_while_previous_batch_last_request_is_slow(self):
         f = self.f
         later_started = threading.Event()
