@@ -12,7 +12,7 @@ import ssl
 import threading
 import time
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 from acquisition_quota import AcquisitionDeferred, KST, download_scope, paper_publishers, preflight
 
 
@@ -278,10 +278,11 @@ class _SharedBrowser:
                 self.browser.close()
                 self.browser = None
                 return {"status": "retryable_error", "reason": "browser_response_unavailable"}
-            if result.get("status") == "challenge" or result.get("reason") in {"http_403", "http_429", "publisher_paused"}:
+            if result.get("status") == "challenge" or result.get("reason") in {"http_401", "http_403", "http_429", "publisher_paused", "authentication_required"}:
                 actual = result.get("url") or source
-                self.gate.block(actual)
-                self.gate.block(source)
+                delay = 3600 if result.get('reason') == 'http_429' else 86400
+                self.gate.block(actual, retry_seconds=delay)
+                self.gate.block(source, retry_seconds=delay)
                 if source_key(source) == "doi.org":
                     self.unknown_source_blocked = True
             return result
@@ -424,6 +425,7 @@ def _acquire_api_scoped(paper, cache, deadline, deps, gate, probes=None):
 
 
 def _acquire_browser(paper, deadline, deps, browser):
+    result = None
     try:
         if deps["clock"]() >= deadline:
             return {"deferred": True}
@@ -444,8 +446,22 @@ def _acquire_browser(paper, deadline, deps, browser):
         return {"deferred": True, "source_paused": True, 'reason':'source_paused', 'retry_after':error.retry_after}
     except TimeoutError:
         return {"deferred": True}
-    except (ValueError, KeyError, TypeError):
-        return {"status": "parse_failed", "reason": "validation_failed"}
+    except (ValueError, KeyError, TypeError) as error:
+        reason = getattr(error, 'reason', '')
+        outcome = {"status": "parse_failed", "reason": reason if reason in {
+            'article_title_mismatch', 'article_doi_mismatch', 'article_body_not_found',
+            'article_text_too_short', 'article_access_interstitial', 'article_parse_failed',
+            'article_incomplete_body'} else 'validation_failed'}
+        if isinstance(result, dict) and result.get('status') == 'downloaded' and isinstance(result.get('html'), str):
+            # Quarantine is private evidence, never an acquired original/cache.
+            # Reprocessing this evidence after a parser repair needs no download.
+            raw = result['html'].encode()
+            if len(raw) <= 20 * 1024 * 1024:
+                url = urlsplit(result.get('url', ''))
+                outcome['rejected_body'] = {key: result.get(key) for key in ('title', 'doi', 'html', 'license')}
+                outcome['rejected_body'].update(source_hash=hashlib.sha256(raw).hexdigest(),
+                    url=urlunsplit((url.scheme, url.netloc, url.path, '', '')))
+        return outcome
     except (OSError, IncompleteRead):
         return {"status": "retryable_error", "reason": "collection_unavailable"}
 
@@ -638,6 +654,13 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
 
     def finish(paper, outcome, *, browser_attempt=False, quiet=False):
         pmid = str(paper["pmid"])
+        if outcome.get('rejected_body'):
+            rejected = directory / 'browser-rejections'
+            rejected.mkdir(exist_ok=True)
+            deps['save_json'](rejected / (pmid + '.json'), {
+                'verified': False, 'pmid': pmid, 'catalog_identity': _paper_identity(paper),
+                'reason': outcome['reason'], 'received_at': deps['wall_clock'](),
+                'response': outcome['rejected_body']})
         if outcome.get("deferred"):
             counts["deferred"] += 1
             reason = outcome.get('quota_reason') or outcome.get('reason') or 'time_budget'

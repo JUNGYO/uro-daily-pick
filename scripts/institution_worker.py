@@ -3,6 +3,7 @@ import argparse
 import ctypes
 from contextlib import nullcontext
 import hashlib
+import html
 from http.client import IncompleteRead
 import json
 import os
@@ -17,9 +18,10 @@ import sys
 import time
 import threading
 import uuid
+import unicodedata
 from difflib import SequenceMatcher
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode, urlsplit, urlunsplit
+from urllib.parse import unquote, urlencode, urlsplit, urlunsplit
 from urllib.request import Request, build_opener, HTTPSHandler
 
 from fulltext import FulltextUnavailable, NoRedirect, fetch_oa, parse_document
@@ -275,18 +277,31 @@ class Browser:
         return self.response(budget_ms)
 
 
+class ArticleValidationError(ValueError):
+    def __init__(self, reason):
+        super().__init__(reason)
+        self.reason = reason
+
+
 def parsed_result(paper, result):
     if result.get("status") != "downloaded":
         return None
-    normalized = lambda text: " ".join(re.findall(r"\w+", text.lower()))
+    normalized = lambda text: " ".join(re.findall(r"\w+", unicodedata.normalize('NFKC', html.unescape(text)).lower()))
     expected, actual = normalized(paper["title"]), normalized(result.get("title", ""))
-    if expected not in actual and SequenceMatcher(None, expected, actual).ratio() < 0.8:
-        raise ValueError("Article title does not match the catalog")
-    if result.get("doi") and paper.get("doi") and result["doi"].lower() != paper["doi"].lower():
-        raise ValueError("Article DOI does not match the catalog")
-    parsed = parse_document(result["html"].encode())
+    if not expected or not actual or (expected not in actual and SequenceMatcher(None, expected, actual).ratio() < 0.8):
+        raise ArticleValidationError('article_title_mismatch')
+    canonical_doi = lambda value: re.sub(r'^(?:https?://(?:dx\.)?doi\.org/|doi:\s*)', '', unquote(value.strip()).lower())
+    if result.get("doi") and paper.get("doi") and canonical_doi(result['doi']) != canonical_doi(paper['doi']):
+        raise ArticleValidationError('article_doi_mismatch')
+    try:
+        parsed = parse_document(result["html"].encode())
+    except ValueError as error:
+        reasons = {'No article body (login/challenge/metadata response)':'article_body_not_found',
+            'Insufficient article text; scanned PDFs need OCR before import':'article_text_too_short',
+            'Access challenge is not article text':'article_access_interstitial'}
+        raise ArticleValidationError(reasons.get(str(error), 'article_parse_failed')) from None
     if len(parsed["content_text"]) < 2000 or len(parsed["sections"]) < 2:
-        raise ValueError("Incomplete body")
+        raise ArticleValidationError('article_incomplete_body')
     url = urlsplit(result["url"])
     return {**parsed, "source_url": urlunsplit((url.scheme, url.netloc, url.path, "", "")), "license":result.get("license")}
 

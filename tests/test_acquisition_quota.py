@@ -49,6 +49,21 @@ class QuotaTests(unittest.TestCase):
         self.assertEqual(status["springer-nature"]["automatic"], 30)
         self.assertEqual(status["wiley"]["automatic"], 1)
 
+    def test_terminal_check_pause_survives_restart_without_charging_a_document(self):
+        receipt = self.quota.reserve(['wiley'], tracked=True)
+        self.quota.settle(receipt['request_id'], failed=True, reason='automatic_check_document')
+        self.assertEqual(self.quota.status()['publishers']['wiley']['automatic'], 0)
+        self.quota.pause(['wiley'], 'publisher_check')
+        restarted = Quota(self.policy, now=lambda: self.now)
+        self.assertDenied('quota_source_paused', lambda: restarted.reserve(['wiley']))
+        self.assertDenied('quota_source_paused', lambda: restarted.reserve(['wiley'], resource_kind='figure'))
+        self.assertDenied('quota_invalid_request', lambda: restarted.pause(['unknown'], 'http_403'))
+        self.assertDenied('quota_invalid_request', lambda: restarted.pause(['wiley'], 'arbitrary_reason'))
+
+    def test_manual_tracked_receipts_are_rejected_before_charging_the_wrong_column(self):
+        self.assertDenied('quota_invalid_request', lambda: self.quota.reserve(['wiley'], manual=True, tracked=True))
+        self.assertEqual(self.quota.status()['publishers']['wiley']['manual'], 0)
+
     def test_repository_publisher_mappings_keep_shared_daily_limits(self):
         sbu = paper_publishers({"doi": "10.1590/S1677-5538.IBJU.2026.0023"})
         self.assertEqual(sbu, ["brazilian-society-of-urology"])

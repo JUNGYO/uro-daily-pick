@@ -17,10 +17,37 @@ const publisherHosts = ['doi.org', 'dx.doi.org', 'link.springer.com', 'www.natur
 const allowedHost = (host) => publisherHosts.includes(host) || host.endsWith('.onlinelibrary.wiley.com');
 const publisherGroup = host => ['link.springer.com','nature.com','media.springernature.com','static-content.springer-cdn.com'].includes(host)
     || host.endsWith('.nature.com') ? 'springer-nature'
-  : host.endsWith('wiley.com') ? 'wiley' : host.endsWith('doi.org') ? 'doi'
+  : host === 'wiley.com' || host.endsWith('.wiley.com') || host === 'wiley.scienceconnect.io' ? 'wiley'
+  : host === 'doi.org' || host === 'dx.doi.org' ? 'doi'
   : ['www.ebi.ac.uk','europepmc.org'].includes(host) ? 'europe-pmc'
   : host === 'ncbi.nlm.nih.gov' || host.endsWith('.ncbi.nlm.nih.gov') ? 'ncbi'
   : host === 'jamanetwork.com' ? 'jama' : host === 'www.bmj.com' ? 'bmj' : null;
+
+const isAuthHost = host => host === 'wiley.scienceconnect.io';
+const safeNavigation = url => url.protocol === 'https:' && !url.username && !url.password && (!url.port || url.port === '443');
+const isAutomaticCheck = (status, headers = []) => [200,403].includes(status) &&
+  headers.some(h => h.name.toLowerCase() === 'cf-mitigated' && h.value.toLowerCase() === 'challenge');
+function noteResponse(policy, navigation, url, status, headers = []) {
+  const host = new URL(url).hostname;
+  navigation.httpStatus = status;
+  navigation.responseHost = host;
+  if (navigation.job?.resource_kind === 'original' && isAutomaticCheck(status, headers)) {
+    // Observe only the site's own automatic transition. Never reload, solve a
+    // CAPTCHA, reset a session, or extend this window on repeated challenges.
+    navigation.checkUntil ||= Date.now() + 30000;
+    navigation.checkHost = host;
+    navigation.checkPending = true;
+    return true;
+  }
+  if (status >= 200 && status < 300) navigation.checkPending = false;
+  policy.observe(host, status);
+  return false;
+}
+function terminalAccess(policy, navigation, reason, host) {
+  policy.observe(host, reason === 'http_429' ? 429 : reason === 'http_401' ? 401 : 403,
+    reason === 'publisher_check' || reason === 'authentication_required');
+  policy.quota?.call('pause', navigation.job, 'https://' + (isAuthHost(host) ? 'onlinelibrary.wiley.com' : host) + '/', {reason});
+}
 
 // A denied/rate-limited source stays paused across hourly runs. No session reset
 // or alternate address is used to retry a publisher block.
@@ -109,6 +136,10 @@ async function blockPublisherRequests(context, page, policy, navigation) {
   // Route callbacks do not cover every HTTP redirect hop. Chromium's network
   // block applies before transport, including automatic redirect destinations.
   const session = await context.newCDPSession(page);
+  // Frame identity, not resource type alone, distinguishes article navigation
+  // from advertisements. Refuse unknown frames rather than exempting downloads.
+  const tree = await session.send('Page.getFrameTree');
+  const mainFrameId = tree?.frameTree?.frame?.id;
   const byFetch = new Map(), byNetwork = new Map();
   function settle(entry, failed, reason) {
     if (!entry) return;
@@ -129,12 +160,21 @@ async function blockPublisherRequests(context, page, policy, navigation) {
   }
   session.on('Fetch.requestPaused', async event => {
     const host = new URL(event.request.url).hostname;
+    const subframe = Boolean(mainFrameId && event.frameId && event.frameId !== mainFrameId);
     try {
+      if (subframe) {
+        // Challenge UI may render normally; it is never clicked or solved here.
+        if (host === 'challenges.cloudflare.com' && navigation.checkPending && Date.now() < navigation.checkUntil)
+          await session.send('Fetch.continueRequest', {requestId:event.requestId});
+        else await session.send('Fetch.failRequest', {requestId:event.requestId,errorReason:'BlockedByClient'});
+        return;
+      }
       if (event.responseStatusCode !== undefined || event.responseErrorReason !== undefined) {
         const entry = byFetch.get(event.requestId);
         const status = event.responseStatusCode;
-        policy.observe(host, status);
-        if (event.responseErrorReason || status < 200 || status >= 300)
+        const checking = noteResponse(policy, navigation, event.request.url, status, event.responseHeaders);
+        if (checking) settle(entry, true, 'automatic_check_document');
+        else if (event.responseErrorReason || status < 200 || status >= 300)
           settle(entry, true, event.responseErrorReason ? 'transport_error' : 'http_' + status);
         else if (entry && !entry.networkId)
           settle(entry, false); // No completion correlation: conservatively charge.
@@ -145,12 +185,20 @@ async function blockPublisherRequests(context, page, policy, navigation) {
       if (disabledWebHost(host)) throw Object.assign(new Error('Disabled'), {reason:'publisher_web_disabled'});
       if (policy.pauseFor(host)) throw Object.assign(new Error('Paused'), {reason:'publisher_paused'});
       if (!policy.quota) throw Object.assign(new Error('Paused'), {reason:'publisher_paused'});
+      if (navigation.checkPending && Date.now() >= navigation.checkUntil)
+        throw Object.assign(new Error('Security check needs attention'), {reason:'publisher_check'});
       if (event.resourceType === 'Document' && !byFetch.has(event.requestId)) {
         // An auxiliary page may not redirect to a whole article and retain its
         // zero-charge classification. Stop before transport outside that URL.
         if (navigation.auxiliaryUrl && event.request.url.split('#')[0] !== navigation.auxiliaryUrl.split('#')[0])
           throw Object.assign(new Error('Auxiliary redirect'), {reason:'auxiliary_redirect_not_permitted'});
-        const token = policy.quota.before(event.request.url, navigation.job || {});
+        const auth = isAuthHost(host) && navigation.publisher === 'wiley' && !navigation.auxiliaryUrl && safeNavigation(new URL(event.request.url));
+        if (auth) navigation.authUntil ||= Date.now() + 30000;
+        if (isAuthHost(host) && !auth) throw Object.assign(new Error('Unsupported authentication route'), {reason:'unsupported_publisher'});
+        if (navigation.authUntil && Date.now() >= navigation.authUntil && isAuthHost(host))
+          throw Object.assign(new Error('Authentication required'), {reason:'authentication_required'});
+        const token = auth ? null : policy.quota.before(event.request.url, navigation.job || {});
+        if (allowedHost(host) && publisherGroup(host) !== 'doi') navigation.publisher = publisherGroup(host);
         if (token) {
           const entry = {token, fetchId:event.requestId, networkId:event.networkId};
           byFetch.set(event.requestId, entry);
@@ -170,6 +218,7 @@ async function blockPublisherRequests(context, page, policy, navigation) {
     patterns.push({urlPattern:'*',resourceType:'Document',requestStage});
   await session.send('Fetch.enable', {patterns});
   page.on('requestfailed', request => {
+    if (request.isNavigationRequest && (!request.isNavigationRequest() || request.frame() !== page.mainFrame())) return;
     const host = new URL(request.url()).hostname;
     if (disabledWebHost(host)) navigation.reason = 'publisher_web_disabled';
     else if (policy.pauseFor(host)) navigation.reason = 'publisher_paused';
@@ -178,8 +227,8 @@ async function blockPublisherRequests(context, page, policy, navigation) {
     try {
       const request = response.request();
       if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
-        policy.observe(new URL(response.url()).hostname, response.status());
-        if ([401,403,429].includes(response.status())) navigation.httpStatus = response.status();
+        noteResponse(policy, navigation, response.url(), response.status(),
+          Object.entries(response.headers?.() || {}).map(([name,value])=>({name,value})));
       }
     } catch { navigation.reason = 'publisher_paused'; }
   });
@@ -199,7 +248,8 @@ async function guardPage(page, policy, deadline, state) {
     if (!request.isNavigationRequest() && ['image', 'media', 'font'].includes(request.resourceType()))
       return route.abort();
     if (request.isNavigationRequest() && request.frame() === page.mainFrame()) {
-      if (!allowedHost(host)) { state.reason = 'unsupported_publisher'; return route.abort(); }
+      const auth = isAuthHost(host) && state.publisher === 'wiley' && !state.auxiliaryUrl;
+      if (!safeNavigation(new URL(request.url())) || (!allowedHost(host) && !auth)) { state.reason = 'unsupported_publisher'; return route.abort(); }
       try { await policy.before(host, deadline); }
       catch (error) { state.reason = error.reason || 'publisher_paused'; return route.abort(); }
     }
@@ -253,6 +303,35 @@ const selectorsFor = (host) => disabledWebHost(host) ? []
   : host === 'jamanetwork.com' ? ['.article-full-text', '#article-full-text', '.articleFullText']
   : host === 'www.bmj.com' ? ['.article.full', '#content-block'] : [];
 
+async function waitForAccessTransition(page, policy, navigation, deadline) {
+  if (isAuthHost(new URL(page.url()).hostname)) {
+    navigation.authUntil ||= Date.now() + 30000;
+    try {
+      await page.waitForURL(url => !isAuthHost(url.hostname), {
+        timeout:Math.max(1, Math.min(navigation.authUntil, deadline)-Date.now())});
+    } catch {}
+    if (isAuthHost(new URL(page.url()).hostname)) {
+      terminalAccess(policy, navigation, 'authentication_required', new URL(page.url()).hostname);
+      return {status:'access_required',reason:'authentication_required'};
+    }
+  }
+  if (navigation.checkPending) {
+    try {
+      await page.waitForFunction(() => {
+        const text = document.body?.innerText.slice(0,2500) || '';
+        return /verify you are human|complete the captcha|인간인지 확인/i.test(text) ||
+          Boolean(document.querySelector('.c-article-body,.article-section__full,.article__body,#article__content,.article-full-text,#article-full-text,.articleFullText,.article.full'));
+      }, null, {timeout:Math.max(1, Math.min(navigation.checkUntil, deadline)-Date.now())});
+    } catch {}
+    if (navigation.checkPending || navigation.httpStatus !== 200) {
+      terminalAccess(policy, navigation, 'publisher_check', navigation.checkHost);
+      navigation.checkPending = false;
+      return {status:'challenge',reason:'publisher_check'};
+    }
+  }
+  return null;
+}
+
 async function readArticle(context, job, policy = new PublisherPolicy()) {
   job = {...job, resource_kind:'original'};
   const doi = String(job.doi || '').trim();
@@ -278,26 +357,39 @@ async function readArticle(context, job, policy = new PublisherPolicy()) {
     const response = await page.goto('https://doi.org/' + encodeURIComponent(doi),
       {waitUntil:'domcontentloaded', timeout:45000});
     if (navigation.reason) throw Object.assign(new Error('Navigation stopped'), {reason:navigation.reason});
-    if (response) policy.observe(new URL(page.url()).hostname, response.status());
-    if (response && [401,403,429].includes(response.status()))
+    if (response) noteResponse(policy, navigation, page.url(), response.status(),
+      Object.entries(response.headers?.() || {}).map(([name,value])=>({name,value})));
+    if (response && [401,403,429].includes(response.status()) && !navigation.checkPending)
       return {status: response.status() === 429 ? 'retryable_error' : 'access_required', reason:'http_'+response.status()};
     if (response && response.status() >= 500) return {status:'retryable_error',reason:'publisher_unavailable'};
     // DOI linking pages can redirect after their own DOM has loaded.
-    try { await page.waitForURL(url => selectorsFor(url.hostname).length > 0, {timeout:20000}); } catch {}
+    try { await page.waitForURL(url => selectorsFor(url.hostname).length > 0, {timeout:Math.min(30000, Math.max(1, deadline-Date.now()))}); } catch {}
+    const access = await waitForAccessTransition(page, policy, navigation, deadline);
+    if (access) return access;
     if (navigation.reason) throw Object.assign(new Error('Navigation stopped'), {reason:navigation.reason});
     await page.waitForLoadState('domcontentloaded');
-    if (navigation.httpStatus) return {status: navigation.httpStatus === 429 ? 'retryable_error' : 'access_required',
+    if ([401,403,429].includes(navigation.httpStatus)) return {status: navigation.httpStatus === 429 ? 'retryable_error' : 'access_required',
       reason:'http_' + navigation.httpStatus, url:page.url()};
-    const host = new URL(page.url()).hostname;
-    const selectors = selectorsFor(host);
+    let host = new URL(page.url()).hostname;
+    let selectors = selectorsFor(host);
     if (!selectors.length) return {status:'unsupported', reason:'unsupported_publisher',url:page.url()};
     // A visible placeholder is not a loaded article body.
-    try {
-      await page.waitForFunction(sels => /verify you are human|access denied|checking your browser|enable javascript and cookies|verify your access|CPE00001/i.test(document.body?.innerText.slice(0,2500) || '') || sels.some(sel => {
+    for (let pass=0; pass<4; pass++) {
+      try {
+      await page.waitForFunction(sels => location.hostname === 'wiley.scienceconnect.io' || /verify you are human|access denied|checking your browser|enable javascript and cookies|verify your access|CPE00001/i.test(document.body?.innerText.slice(0,2500) || '') || sels.some(sel => {
         const node = document.querySelector(sel);
         return node && node.innerText.length >= 2000 && node.querySelectorAll('h2,h3').length >= 2;
-      }), selectors, {timeout:90000});
-    } catch {}
+      }), selectors, {timeout:Math.max(1, Math.min(90000, deadline-Date.now()))});
+      } catch {}
+      if (navigation.reason) throw Object.assign(new Error('Navigation stopped'), {reason:navigation.reason});
+      if (!navigation.checkPending && !isAuthHost(new URL(page.url()).hostname)) break;
+      const nextAccess = await waitForAccessTransition(page, policy, navigation, deadline);
+      if (nextAccess) return nextAccess;
+      host = new URL(page.url()).hostname;
+      selectors = selectorsFor(host);
+    }
+    if ([401,403,429].includes(navigation.httpStatus))
+      return {status:navigation.httpStatus === 429 ? 'retryable_error' : 'access_required', reason:'http_'+navigation.httpStatus};
     const result = await page.evaluate(sels => {
       const candidates = sels.map(sel => document.querySelector(sel)).filter(Boolean);
       const original = candidates.find(node=>node.innerText.length>=2000 && node.querySelectorAll('h2,h3').length>=2) || candidates[0];
@@ -313,7 +405,7 @@ async function readArticle(context, job, policy = new PublisherPolicy()) {
       }
       const start = document.body.innerText.slice(0,2500);
       return {
-        title: document.querySelector('h1')?.innerText || document.title,
+        title: document.querySelector('meta[name="citation_title"]')?.content || document.querySelector('h1')?.innerText || document.title,
         html: body?.outerHTML || '', characters: body?.textContent.length || 0,
         headings: [...(body?.querySelectorAll('h2,h3') || [])].map(n => n.textContent.trim()),
         institution: document.querySelector('#gh-inst-icon-btn')?.innerText || null,
@@ -324,7 +416,7 @@ async function readArticle(context, job, policy = new PublisherPolicy()) {
         loading: /loading/i.test(original?.innerText || ''),
       };
     }, selectors);
-    if (result.challenge) { policy.observe(host, 200, true); return {status:'challenge',reason:'publisher_check'}; }
+    if (result.challenge) { terminalAccess(policy, navigation, 'publisher_check', host); return {status:'challenge',reason:'publisher_check'}; }
     if (result.characters < 2000 || result.headings.length < 2)
       return {status:result.loading ? 'retryable_error' : 'access_required',reason:'no_complete_body',url:page.url()};
     // Springer keeps table values on separate article pages. Read the actual
@@ -358,11 +450,17 @@ async function readArticle(context, job, policy = new PublisherPolicy()) {
     return {status:'downloaded', url:page.url(), ...result};
   } catch (error) {
     const reason = navigation.reason || error.reason;
+    if (['publisher_check','authentication_required'].includes(reason))
+      terminalAccess(policy, navigation, reason, navigation.checkHost || navigation.blockedHost || new URL(page.url()).hostname);
     if (reason) return {status: reason === 'publisher_web_disabled' || reason === 'unsupported_publisher' ? 'unsupported'
       : reason === 'article_time_budget' ? 'retryable_error' : 'access_required', reason,
       ...(navigation.blockedHost ? {blocked_host:navigation.blockedHost} : {})};
     return {status:'retryable_error', reason:error.name === 'TimeoutError' ? 'timeout' : 'navigation_error'};
-  } finally { clearTimeout(timer); await page.close().catch(() => {}); }
+  } finally {
+    clearTimeout(timer);
+    if (navigation.checkPending) terminalAccess(policy, navigation, 'publisher_check', navigation.checkHost);
+    await page.close().catch(() => {});
+  }
 }
 
 async function main() {

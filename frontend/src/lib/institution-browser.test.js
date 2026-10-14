@@ -17,13 +17,13 @@ const temporaryDirectories = [];
 
 async function quotaTransport() {
   const handlers = new Map();
-  const session = {on: (event, fn) => handlers.set(event, fn), send:vi.fn(async()=>{})};
+  const session = {on: (event, fn) => handlers.set(event, fn), send:vi.fn(async command => command === 'Page.getFrameTree' ? {frameTree:{frame:{id:'main'}}} : undefined)};
   const quota = {before:vi.fn(()=> 'a'.repeat(32)), call:vi.fn(()=>({ok:true}))};
   const policy = new PublisherPolicy(null, quota);
-  const navigation = {job:{doi:'10.1007/synthetic'}};
+  const navigation = {job:{doi:'10.1007/synthetic',resource_kind:'original'}};
   const page = {on:vi.fn(), close:vi.fn(async()=>{})};
   await blockPublisherRequests({newCDPSession:async()=>session}, page, policy, navigation);
-  const event = {requestId:'fetch-1',networkId:'network-1',resourceType:'Document',
+  const event = {requestId:'fetch-1',networkId:'network-1',frameId:'main',resourceType:'Document',
     request:{url:articleUrl}};
   return {handlers,session,quota,policy,navigation,event,
     paused: value=>handlers.get('Fetch.requestPaused')(value)};
@@ -89,6 +89,99 @@ afterEach(() => {
     if (!resolved.startsWith(prefix)) throw new Error("Unexpected test cleanup path");
     fs.rmSync(resolved, { recursive: true });
   }
+});
+
+test('an advertisement iframe is blocked without reserving or failing the article',async()=>{
+  const h=await quotaTransport();
+  await h.paused({...h.event,frameId:'ad',request:{url:'https://ep2.adtrafficquality.google/frame'}});
+  expect(h.quota.before).not.toHaveBeenCalled();
+  expect(h.navigation.reason).toBeUndefined();
+  expect(h.session.send).toHaveBeenCalledWith('Fetch.failRequest',expect.objectContaining({requestId:'fetch-1'}));
+  await h.paused(h.event);
+  await h.paused({...h.event,responseStatusCode:200});
+  h.handlers.get('Network.loadingFinished')({requestId:'network-1'});
+  expect(h.quota.call).toHaveBeenCalledExactlyOnceWith('downloaded',{},'',expect.any(Object));
+});
+
+test('a top-level unknown destination is still blocked and charged nowhere',async()=>{
+  const h=await quotaTransport();
+  h.quota.before.mockImplementation(()=>{throw Object.assign(new Error(),{reason:'quota_unknown_publisher'});});
+  await h.paused({...h.event,request:{url:'https://ep2.adtrafficquality.google/article'}});
+  expect(h.navigation.reason).toBe('quota_unknown_publisher');
+});
+
+test('only a Wiley-initiated exact CONNECT hop is uncharged, and its return article is charged',async()=>{
+  const h=await quotaTransport();
+  await h.paused({...h.event,request:{url:'https://onlinelibrary.wiley.com/doi/10.1111/synthetic'}});
+  await h.paused({...h.event,responseStatusCode:302,request:{url:'https://onlinelibrary.wiley.com/doi/10.1111/synthetic'}});
+  await h.paused({...h.event,requestId:'auth',request:{url:'https://wiley.scienceconnect.io/auth'}});
+  expect(h.quota.before).toHaveBeenCalledTimes(1);
+  await h.paused({...h.event,requestId:'return',request:{url:'https://onlinelibrary.wiley.com/doi/10.1111/synthetic'}});
+  expect(h.quota.before).toHaveBeenCalledTimes(2);
+  const unrelated=await quotaTransport();
+  await unrelated.paused({...unrelated.event,request:{url:'https://wiley.scienceconnect.io/auth'}});
+  expect(unrelated.navigation.reason).toBe('unsupported_publisher');
+  expect(unrelated.quota.before).not.toHaveBeenCalled();
+});
+
+test.each([200,403])('a documented HTTP %i automatic-check document is uncharged and may complete normally',async status=>{
+  const h=await quotaTransport();
+  await h.paused(h.event);
+  await h.paused({...h.event,responseStatusCode:status,responseHeaders:[{name:'cf-mitigated',value:'challenge'}]});
+  expect(h.policy.pauseFor('link.springer.com')).toBeNull();
+  expect(h.navigation.checkPending).toBe(true);
+  expect(h.quota.call).toHaveBeenCalledWith('failed',{},'',expect.objectContaining({reason:'automatic_check_document'}));
+  await h.paused({...h.event,requestId:'resolved',networkId:'resolved'});
+  await h.paused({...h.event,requestId:'resolved',networkId:'resolved',responseStatusCode:200});
+  h.handlers.get('Network.loadingFinished')({requestId:'resolved'});
+  expect(h.navigation.checkPending).toBe(false);
+  expect(h.quota.call).toHaveBeenLastCalledWith('downloaded',{},'',expect.any(Object));
+});
+
+test('repeated automatic checks cannot extend their original deadline',async()=>{
+  frozenClock();
+  const h=await quotaTransport();
+  await h.paused(h.event);
+  const checked={...h.event,responseStatusCode:403,responseHeaders:[{name:'cf-mitigated',value:'challenge'}]};
+  await h.paused(checked);
+  const end=h.navigation.checkUntil;
+  await vi.advanceTimersByTimeAsync(20000);
+  await h.paused(checked);
+  expect(h.navigation.checkUntil).toBe(end);
+  await vi.advanceTimersByTimeAsync(10001);
+  await h.paused({...h.event,requestId:'too-late'});
+  expect(h.quota.before).toHaveBeenCalledTimes(1);
+  expect(h.navigation.reason).toBe('publisher_check');
+});
+
+test('an unresolved automatic check pauses all workers and closes without retrying',async()=>{
+  const page=fakePage({status:403});
+  const original=page.goto;
+  page.goto=vi.fn(async url=>({...await original(url),headers:()=>({'cf-mitigated':'challenge'})}));
+  // Simulate the same header on the response listener as the returned response.
+  const policy=new PublisherPolicy(null,{call:vi.fn(()=>({ok:true}))});
+  const result=await readArticle(fakeContext(page),{doi:'10.1007/synthetic'},policy);
+  expect(result).toMatchObject({status:'challenge',reason:'publisher_check'});
+  expect(policy.quota.call).toHaveBeenCalledWith('pause',expect.any(Object),expect.any(String),{reason:'publisher_check'});
+  expect(page.goto).toHaveBeenCalledTimes(1);
+  expect(page.close).toHaveBeenCalledTimes(1);
+});
+
+test('article identity uses citation metadata instead of a site-header h1',async()=>{
+  const previousHead=document.head.innerHTML, previousBody=document.body.innerHTML;
+  try {
+    document.head.innerHTML='<meta name="citation_title" content="The actual study"><meta name="citation_doi" content="10.1007/synthetic">';
+    document.body.innerHTML='<h1>Institution sign in</h1><div class="c-article-body"><h2>Methods</h2><p>'+
+      'Synthetic measured observations. '.repeat(100)+'</p><h2>Results</h2><p>Outcome 17.</p></div>';
+    for (const element of [document.body,document.querySelector('.c-article-body')])
+      Object.defineProperty(element,'innerText',{configurable:true,value:element.textContent});
+    const page=fakePage();
+    page.evaluate.mockImplementation(async (fn,arg)=>fn(arg));
+    const result=await readArticle(fakeContext(page),{doi:'10.1007/synthetic'});
+    expect(result.title).toBe('The actual study');
+    expect(result.doi).toBe('10.1007/synthetic');
+    expect(result.status).toBe('downloaded');
+  } finally {delete document.body.innerText;document.head.innerHTML=previousHead;document.body.innerHTML=previousBody;}
 });
 function frozenClock() {
   vi.useFakeTimers();
@@ -402,7 +495,7 @@ test("Chromium destination blocking is configured for every disabled website and
   const context = { newCDPSession: vi.fn(async () => session) };
   const navigation = {};
   await blockPublisherRequests(context, page, policy, navigation);
-  const [command, { patterns }] = session.send.mock.calls[0];
+  const [command, { patterns }] = session.send.mock.calls.find(call=>call[0]==='Fetch.enable');
   expect(command).toBe("Fetch.enable");
   const urls = patterns.map((pattern) => pattern.urlPattern);
   expect(patterns.every((pattern) => pattern.requestStage === "Request")).toBe(true);

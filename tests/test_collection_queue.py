@@ -15,6 +15,26 @@ from fulltext import FulltextUnavailable
 
 
 class DurableCollectionTests(unittest.TestCase):
+    def test_validation_rejection_is_quarantined_and_never_registered(self):
+        f = self.f
+        class Browser:
+            def __init__(self, *args): pass
+            def read(self, paper, **kwargs):
+                return {**f.browser_result(paper), 'doi':'10.1007/wrong',
+                    'url':'https://link.springer.com/article/example?private=token'}
+            def close(self): pass
+        def unavailable(*args, **kwargs): raise FulltextUnavailable()
+        f.deps.update(fetch_oa=unavailable, Browser=Browser)
+        self.assertEqual(self.run_queue([f.paper(1)])['completed'], 0)
+        self.assertEqual(f.registered, [])
+        self.assertFalse((f.directory/'documents/1.json').exists())
+        evidence=json.loads((f.directory/'browser-rejections/1.json').read_text())
+        self.assertIs(evidence['verified'], False)
+        self.assertEqual(evidence['reason'], 'article_doi_mismatch')
+        self.assertEqual(evidence['response']['url'], 'https://link.springer.com/article/example')
+        self.assertNotIn('private=token', self.output)
+        self.assertEqual(f.db.execute("SELECT reason FROM collection_probe_details WHERE provider='browser'").fetchone()[0], 'article_doi_mismatch')
+
     def test_source_pause_survives_restart_and_expires_without_blocking_other_sources(self):
         f = self.f
         calls = []

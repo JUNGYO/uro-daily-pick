@@ -329,7 +329,9 @@ def parse_document(content):
                 node.decompose()
             references = _source_references(soup)
             body = next((soup.select_one(selector) for selector in
-                ("#body", ".article-section__full", ".article__body", ".c-article-body", ".article-full-text", ".article-body", "article", "main")
+                ("#body", ".article-section__full", ".article__body", "#article__content", ".c-article-body",
+                 ".article-full-text", "#article-full-text", ".articleFullText", ".article.full", "#content-block",
+                 ".article-body", "article", "main")
                 if soup.select_one(selector) is not None), None)
             if body is None:
                 raise ValueError("No article body (login/challenge/metadata response)")

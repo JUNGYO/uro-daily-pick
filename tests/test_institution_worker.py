@@ -46,6 +46,28 @@ class InstitutionTests(unittest.TestCase):
             with self.subTest(key=key), self.assertRaises(ValueError):
                 parsed_result(PAPER, {**self.result(), key: value})
 
+    def test_identity_normalizes_representation_without_accepting_a_different_doi(self):
+        doc = parsed_result(PAPER, {**self.result(), 'doi':'https://doi.org/10.1000%2Fstudy'})
+        self.assertGreater(len(doc['content_text']), 2000)
+        with self.assertRaisesRegex(ValueError, 'article_doi_mismatch'):
+            parsed_result(PAPER, {**self.result(), 'doi':'https://doi.org/10.1000/other'})
+        with self.assertRaisesRegex(ValueError, 'article_title_mismatch'):
+            parsed_result({**PAPER, 'title':''}, self.result())
+
+    def test_browser_body_selectors_survive_python_parsing(self):
+        for opening in ('<div id="article__content">', '<div id="article-full-text">',
+                        '<div class="articleFullText">', '<div class="article full">'):
+            with self.subTest(opening=opening):
+                doc = parsed_result(PAPER, self.result(opening + f'<h2>Methods</h2><p>{PARA}</p>'
+                    '<h2>Results</h2><p>Observed endpoint.</p></div>'))
+                self.assertEqual(len(doc['sections']), 2)
+
+    def test_body_failures_have_specific_safe_reasons(self):
+        with self.assertRaisesRegex(ValueError, 'article_body_not_found'):
+            parsed_result(PAPER, self.result('<div>Unrecognized wrapper</div>'))
+        with self.assertRaisesRegex(ValueError, 'article_text_too_short'):
+            parsed_result(PAPER, self.result('<article><h2>Correction</h2><p>Short notice.</p></article>'))
+
     def test_sciencedirect_numbered_div_paragraphs_are_not_lost(self):
         html = (f'<div id="body"><h2>Methods</h2><div class="u-margin-s-bottom">'
                 f'<div id="p0010" class="u-margin-s-bottom">{PARA}</div></div>'

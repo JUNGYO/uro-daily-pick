@@ -254,6 +254,22 @@ class Quota:
             if db is not None:
                 db.close()
 
+    def pause(self, groups, reason):
+        """Persist a terminal browser denial after a bounded automatic check."""
+        groups = sorted(set(groups))
+        if not groups or not set(groups).issubset(PUBLISHERS) or reason not in ('http_401', 'http_403', 'http_429', 'publisher_check', 'authentication_required'):
+            raise AcquisitionDeferred('quota_invalid_request')
+        try:
+            with closing(self._db()) as db, db:
+                db.execute('CREATE TABLE IF NOT EXISTS quota_pauses(publisher TEXT PRIMARY KEY,until REAL NOT NULL,reason TEXT NOT NULL)')
+                until = self.now().timestamp() + (3600 if reason == 'http_429' else 86400)
+                for group in groups:
+                    db.execute('''INSERT INTO quota_pauses VALUES(?,?,?) ON CONFLICT(publisher)
+                        DO UPDATE SET until=max(until,excluded.until),reason=excluded.reason''', (group, until, reason))
+            return {'paused': groups, 'reason': reason}
+        except (OSError, sqlite3.Error):
+            raise AcquisitionDeferred('quota_ledger_unavailable') from None
+
     def active(self):
         config, start = self.config()
         if self.now() < start or config.get("paused", False):
@@ -330,7 +346,7 @@ def initialize(config_path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--policy", required=True)
-    parser.add_argument("action", choices=("initialize", "status", "reserve", "begin", "downloaded", "failed", "check", "manual"))
+    parser.add_argument("action", choices=("initialize", "status", "reserve", "begin", "downloaded", "failed", "check", "manual", "pause"))
     parser.add_argument("--url", default="")
     parser.add_argument("--publishers", default="")
     parser.add_argument("--doi", default="")
@@ -353,7 +369,9 @@ def main():
             groups = sorted(set(groups + paper_publishers({"doi": args.doi})))
             if args.url:
                 groups = groups_for_url(args.url, groups)
-            if args.action == "check" and not groups:
+            if args.action == 'pause':
+                result = quota.pause(groups, args.reason)
+            elif args.action == "check" and not groups:
                 quota.active()
                 result = {"charged": 0}
             else:
