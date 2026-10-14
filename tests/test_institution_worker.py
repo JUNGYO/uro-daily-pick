@@ -85,7 +85,7 @@ class InstitutionTests(unittest.TestCase):
 
     def test_retry_policy_does_not_hammer_unavailable_publishers(self):
         self.assertEqual(next_retry("retryable_error", 10), 910)
-        self.assertEqual(next_retry("challenge", 10), 86410)
+        self.assertEqual(next_retry("challenge", 10), 3610)
         self.assertEqual(next_retry("access_required", 10), 604810)
 
 
