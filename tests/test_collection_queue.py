@@ -15,6 +15,22 @@ from fulltext import FulltextUnavailable
 
 
 class DurableCollectionTests(unittest.TestCase):
+    def test_regular_papers_precede_short_formats_without_dropping_them_or_other_publishers(self):
+        from collection_queue import _PublisherBacklog
+        queue = _PublisherBacklog()
+        letter = {**self.f.paper(1, '10.1111/letter'), 'paper_type':'letter'}
+        article = self.f.paper(2, '10.1111/article')
+        meeting = {**self.f.paper(3, '10.1111/abstracts'), 'title':'Abstracts of the annual scientific meeting.'}
+        other = self.f.paper(4)
+        for paper in (letter, meeting, other, article): queue.append(paper)
+        self.assertEqual(queue.peek(), article)
+        self.assertEqual(queue.popleft(), article)
+        self.assertEqual(queue.popleft(), other)
+        self.assertEqual(queue.popleft(), letter)
+        self.assertEqual(queue.peek(), meeting)
+        queue.discard(meeting)
+        self.assertEqual(len(queue), 0)
+
     def test_validation_rejection_is_quarantined_and_never_registered(self):
         f = self.f
         class Browser:

@@ -203,7 +203,11 @@ def deferred_retry(reason, now):
 
 
 class _PublisherBacklog:
-    """Rotate publishers while retaining FIFO order inside each publisher."""
+    """Rotate publishers; collect regular papers before known short formats.
+
+    Both tiers retain FIFO order. Short formats remain queued, not discarded.
+    This is an acquisition priority, not a scientific-quality classification.
+    """
     def __init__(self):
         self.sources, self.queues, self.size = deque(), {}, 0
 
@@ -211,15 +215,15 @@ class _PublisherBacklog:
         key = source_key(_browser_source(paper))
         if key not in self.queues:
             self.sources.append(key)
-            self.queues[key] = deque()
-        self.queues[key].append(paper)
+            self.queues[key] = (deque(), deque())
+        self.queues[key][self._tier(paper)].append(paper)
         self.size += 1
 
     def popleft(self):
         key = self.sources.popleft()
-        paper = self.queues[key].popleft()
+        paper = self._first(key).popleft()
         self.size -= 1
-        if self.queues[key]:
+        if any(self.queues[key]):
             self.sources.append(key)
         else:
             del self.queues[key]
@@ -227,14 +231,25 @@ class _PublisherBacklog:
 
     def discard(self, paper):
         key = source_key(_browser_source(paper))
-        self.queues[key].remove(paper)
+        self.queues[key][self._tier(paper)].remove(paper)
         self.size -= 1
-        if not self.queues[key]:
+        if not any(self.queues[key]):
             self.sources.remove(key)
             del self.queues[key]
 
     def peek(self):
-        return self.queues[self.sources[0]][0]
+        return self._first(self.sources[0])[0]
+
+    @staticmethod
+    def _tier(paper):
+        short = str(paper.get('paper_type') or '').lower() in {
+            'letter', 'editorial', 'comment', 'correction', 'erratum', 'news'}
+        abstract_collection = re.match(r'^abstracts\s+of\b', str(paper.get('title') or ''), re.I)
+        return int(bool(short or abstract_collection))
+
+    def _first(self, key):
+        regular, short = self.queues[key]
+        return regular or short
 
     def clear(self):
         self.sources.clear()
