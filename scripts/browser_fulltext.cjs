@@ -44,8 +44,9 @@ function noteResponse(policy, navigation, url, status, headers = []) {
   return false;
 }
 function terminalAccess(policy, navigation, reason, host) {
-  policy.observe(host, reason === 'http_429' ? 429 : reason === 'http_401' ? 401 : 403,
-    reason === 'publisher_check' || reason === 'authentication_required');
+  // Failed security checks end this request, not every paper from its publisher.
+  if (reason === 'publisher_check') return;
+  policy.observe(host, reason === 'http_429' ? 429 : 401);
   policy.quota?.call('pause', navigation.job, 'https://' + (isAuthHost(host) ? 'onlinelibrary.wiley.com' : host) + '/', {reason});
 }
 
@@ -91,11 +92,11 @@ class PublisherPolicy {
     if (this.directory) {
       try {
         const saved = JSON.parse(fs.readFileSync(path.join(this.directory, group + '.json'), 'utf8'));
-        if (saved.reason !== 'http_403' && Number.isFinite(saved.until) && saved.until > (this.pauses.get(group)?.until || 0)) this.pauses.set(group, saved);
+        if (!['http_403','publisher_check'].includes(saved.reason) && Number.isFinite(saved.until) && saved.until > (this.pauses.get(group)?.until || 0)) this.pauses.set(group, saved);
       } catch (error) { if (error.code !== 'ENOENT') return {until: Infinity, reason: 'publisher_pause_unreadable'}; }
     }
     const paused = this.pauses.get(group);
-    return paused?.reason !== 'http_403' && paused?.until > Date.now() ? paused : null;
+    return !['http_403','publisher_check'].includes(paused?.reason) && paused?.until > Date.now() ? paused : null;
   }
   async before(host, deadline) {
     if (disabledWebHost(host)) throw Object.assign(new Error('Publisher website disabled'), {reason:'publisher_web_disabled'});
@@ -113,9 +114,9 @@ class PublisherPolicy {
     const group = publisherGroup(host);
     if (group) this.lastStart.set(group, Date.now());
     // A bare 403 describes this request, not a publisher-wide timed restriction.
-    if (!group || (!challenge && ![401,429].includes(status))) return;
+    if (!group || challenge || ![401,429].includes(status)) return;
     const value = {until: Date.now() + (status === 429 ? 3600 : 86400) * 1000,
-      reason: challenge ? 'publisher_check' : 'http_' + status};
+      reason: 'http_' + status};
     this.pauses.set(group, value);
     if (this.directory) {
       fs.mkdirSync(this.directory, {recursive:true});

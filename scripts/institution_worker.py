@@ -307,7 +307,7 @@ def parsed_result(paper, result):
 
 
 def next_retry(status, now):
-    return now + (900 if status == "retryable_error" else 86400 if status == "challenge" else 7 * 86400)
+    return now + (900 if status == "retryable_error" else 3600 if status == "challenge" else 7 * 86400)
 
 
 def prepare_collection_attempts(db):
@@ -334,7 +334,7 @@ def record_collection_attempt(db, pmid, status, reason="", now=None, *, commit=T
         retry_at = 0 if status == "ready" else next_retry(status, now)
         if status == "retryable_error":
             retry_at = now + (900, 3600, 21600, 86400)[min(failures, 4) - 1]
-        if reason == "http_403" and status in {"access_required", "retryable_error"}:
+        if reason in {"http_403", "publisher_check"} and status in {"access_required", "retryable_error", "challenge"}:
             # Retry this paper in a later hourly round, without blocking its publisher.
             retry_at = now + 3600
         db.execute("INSERT OR REPLACE INTO collection_attempts VALUES(?,?,?)", (pmid, status, retry_at))

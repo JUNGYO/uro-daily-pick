@@ -165,7 +165,7 @@ class Quota:
                 raise AcquisitionDeferred("quota_clock_rollback")
             if not manual and db.execute("SELECT 1 FROM sqlite_master WHERE name='quota_pauses'").fetchone():
                 for group in groups:
-                    pause = db.execute("SELECT until FROM quota_pauses WHERE publisher=? AND reason!='http_403'", (group,)).fetchone()
+                    pause = db.execute("SELECT until FROM quota_pauses WHERE publisher=? AND reason NOT IN ('http_403','publisher_check')", (group,)).fetchone()
                     if pause and pause[0] > now.timestamp():
                         raise AcquisitionDeferred('quota_source_paused')
             rows = {}
@@ -242,7 +242,7 @@ class Quota:
                         until = self.now().timestamp() + (3600 if reason == 'http_429' else 86400)
                         for group in groups:
                             db.execute('''INSERT INTO quota_pauses VALUES(?,?,?) ON CONFLICT(publisher)
-                                DO UPDATE SET until=CASE WHEN quota_pauses.reason='http_403' THEN excluded.until
+                                DO UPDATE SET until=CASE WHEN quota_pauses.reason IN ('http_403','publisher_check') THEN excluded.until
                                 ELSE max(until,excluded.until) END,reason=excluded.reason''', (group, until, reason))
                 state = 'failed' if failed else 'downloaded'
                 db.execute('UPDATE quota_requests SET state=?,reason=?,settled_at=? WHERE id=?',
@@ -261,7 +261,7 @@ class Quota:
         if not groups or not set(groups).issubset(PUBLISHERS) or reason not in ('http_401', 'http_403', 'http_429', 'publisher_check', 'authentication_required'):
             raise AcquisitionDeferred('quota_invalid_request')
         # Older callers can report a bare 403, but it must not pause other papers.
-        if reason == 'http_403':
+        if reason in ('http_403', 'publisher_check'):
             return {'paused': [], 'reason': reason}
         try:
             with closing(self._db()) as db, db:
@@ -269,7 +269,7 @@ class Quota:
                 until = self.now().timestamp() + (3600 if reason == 'http_429' else 86400)
                 for group in groups:
                     db.execute('''INSERT INTO quota_pauses VALUES(?,?,?) ON CONFLICT(publisher)
-                        DO UPDATE SET until=CASE WHEN quota_pauses.reason='http_403' THEN excluded.until
+                        DO UPDATE SET until=CASE WHEN quota_pauses.reason IN ('http_403','publisher_check') THEN excluded.until
                                 ELSE max(until,excluded.until) END,reason=excluded.reason''', (group, until, reason))
             return {'paused': groups, 'reason': reason}
         except (OSError, sqlite3.Error):

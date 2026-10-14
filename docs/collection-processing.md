@@ -30,10 +30,9 @@ survives the run deadline. This prevents an hourly restart from repeatedly
 searching the same front of the catalog while older records remain untouched.
 
 Requests to each API source start at least one second apart. Browser navigation
-uses the same minimum interval per publisher group. Bare HTTP 403 fails only the
-affected request; it does not pause the publisher. That paper/provider is retried
-in a later hourly round while other papers remain eligible. HTTP 429 and explicit
-access checks still pause the source; browser HTTP 401/authentication requirements
+uses the same minimum interval per publisher group. Bare HTTP 403 or an unresolved browser security check fails only the
+affected request; neither pauses the publisher. That paper/provider is retried
+in a later hourly round while other papers remain eligible. HTTP 429 still pauses the source; browser HTTP 401/authentication requirements
 also retain their access protections. Browser publisher pauses are
 retained in the local state directory across scheduled runs. No session rotation
 or alternative network address is used to retry a blocked publisher.
@@ -46,8 +45,8 @@ article API is used only when its API credentials are already configured.
 Repeated transient errors for the same paper and reason use a 15-minute, 1-hour,
 6-hour, then 24-hour delay. Success clears that failure streak. Access-required
 and unsupported papers retain the existing seven-day delay, except that bare
-HTTP 403 uses a one-hour paper-specific retry. Explicit challenges retain the
-one-day delay. Legacy browser/quota pauses whose reason is exactly `http_403`
+HTTP 403 and security checks use a one-hour paper-specific retry. Legacy
+browser/quota pauses whose reason is `http_403` or `publisher_check`
 are ignored; a later 429 cannot inherit their old expiry. A deferred paper is not counted as an acquired original.
 
 Acquisition stops submitting work at its time budget and saves completed results

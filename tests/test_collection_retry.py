@@ -71,7 +71,7 @@ class CollectionRetryTests(unittest.TestCase):
         self.assertEqual(record_collection_attempt(self.db, "9", "retryable_error", "navigation_error", 40000), 40900)
         self.assertEqual(record_collection_attempt(self.db, "9", "access_required", "authentication_required", 50000), 50000 + 7 * 86400)
         self.assertEqual(record_collection_attempt(self.db, "9", "retryable_error", "navigation_error", 700000), 700900)
-        self.assertEqual(record_collection_attempt(self.db, "9", "challenge", "publisher_check", 800000), 886400)
+        self.assertEqual(record_collection_attempt(self.db, "9", "challenge", "publisher_check", 800000), 803600)
 
     def test_bare_403_retries_only_this_paper_in_the_next_hourly_round(self):
         prepare_collection_attempts(self.db)

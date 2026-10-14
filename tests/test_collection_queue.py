@@ -71,6 +71,26 @@ class DurableCollectionTests(unittest.TestCase):
         self.assertEqual(self.run_queue([f.paper(1), f.paper(3)])['completed'], 1)
         self.assertEqual(calls, ['1','2','3'])
 
+    def test_publisher_check_does_not_pause_siblings_or_restart(self):
+        f, calls = self.f, []
+        class Browser:
+            def __init__(self, *args): pass
+            def read(self, paper, **kwargs):
+                calls.append(paper['pmid'])
+                if paper['pmid']=='1':
+                    return {'status':'challenge','reason':'publisher_check','url':'https://link.springer.com/article/1'}
+                return f.browser_result(paper)
+            def close(self): pass
+        def unavailable(*args, **kwargs): raise FulltextUnavailable()
+        f.deps.update(fetch_oa=unavailable, Browser=Browser)
+        result = self.run_queue([f.paper(1), f.paper(2)])
+        self.assertEqual(result['completed'], 1)
+        self.assertEqual(result['failed'], 1)
+        self.assertEqual(f.db.execute('SELECT count(*) FROM collection_source_pauses').fetchone()[0], 0)
+        self.assertEqual(f.db.execute("SELECT next_probe FROM collection_source_probes WHERE pmid='1' AND provider='browser'").fetchone()[0], self.now[0]+3600)
+        self.assertEqual(self.run_queue([f.paper(1), f.paper(3)])['completed'], 1)
+        self.assertEqual(calls, ['1','2','3'])
+
     def test_source_pause_survives_restart_and_expires_without_blocking_other_sources(self):
         f = self.f
         calls = []
@@ -78,7 +98,7 @@ class DurableCollectionTests(unittest.TestCase):
             def __init__(self, *args): pass
             def read(self, paper, **kwargs):
                 calls.append(paper["pmid"])
-                return {"status": "challenge", "reason": "publisher_check", "url": "https://link.springer.com/article"}
+                return {"status": "access_required", "reason": "http_401", "url": "https://link.springer.com/article"}
             def close(self): pass
         def unavailable(*args, **kwargs): raise FulltextUnavailable()
         f.deps.update(fetch_oa=unavailable, Browser=BlockedBrowser)
@@ -162,7 +182,7 @@ class DurableCollectionTests(unittest.TestCase):
             def __init__(self, *args): pass
             def read(self, paper, **kwargs):
                 self_outer.assertNotEqual(paper["pmid"], first_browser)
-                return {"status": "challenge", "reason": "publisher_check", "url": "https://link.springer.com/article"}
+                return {"status": "access_required", "reason": "http_401", "url": "https://link.springer.com/article"}
             def close(self): pass
         self_outer = self
         f.deps.update(fetch_oa=second_fetch, Browser=PausedBrowser)

@@ -293,7 +293,7 @@ class _SharedBrowser:
                 self.browser.close()
                 self.browser = None
                 return {"status": "retryable_error", "reason": "browser_response_unavailable"}
-            if result.get("status") == "challenge" or result.get("reason") in {"http_401", "http_429", "publisher_paused", "authentication_required"}:
+            if result.get("reason") in {"http_401", "http_429", "publisher_paused", "authentication_required"}:
                 actual = result.get("url") or source
                 delay = 3600 if result.get('reason') == 'http_429' else 86400
                 self.gate.block(actual, retry_seconds=delay)

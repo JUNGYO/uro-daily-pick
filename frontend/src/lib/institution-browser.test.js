@@ -154,7 +154,7 @@ test('repeated automatic checks cannot extend their original deadline',async()=>
   expect(h.navigation.reason).toBe('publisher_check');
 });
 
-test('an unresolved automatic check pauses all workers and closes without retrying',async()=>{
+test('an unresolved automatic check closes its page without pausing sibling papers',async()=>{
   const page=fakePage({status:403});
   const original=page.goto;
   page.goto=vi.fn(async url=>({...await original(url),headers:()=>({'cf-mitigated':'challenge'})}));
@@ -162,7 +162,8 @@ test('an unresolved automatic check pauses all workers and closes without retryi
   const policy=new PublisherPolicy(null,{call:vi.fn(()=>({ok:true}))});
   const result=await readArticle(fakeContext(page),{doi:'10.1007/synthetic'},policy);
   expect(result).toMatchObject({status:'challenge',reason:'publisher_check'});
-  expect(policy.quota.call).toHaveBeenCalledWith('pause',expect.any(Object),expect.any(String),{reason:'publisher_check'});
+  expect(policy.quota.call.mock.calls.some(([action])=>action==='pause')).toBe(false);
+  expect(policy.pauseFor('link.springer.com')).toBeNull();
   expect(page.goto).toHaveBeenCalledTimes(1);
   expect(page.close).toHaveBeenCalledTimes(1);
 });
@@ -315,7 +316,7 @@ test("a visible challenge immediately stops article and linked-table acquisition
     status: "challenge",
     reason: "publisher_check",
   });
-  expect(policy.pauseFor("link.springer.com")).toMatchObject({ reason: "publisher_check" });
+  expect(policy.pauseFor("link.springer.com")).toBeNull();
   expect(context.newPage).toHaveBeenCalledTimes(1);
   expect(page.close).toHaveBeenCalledTimes(1);
   expect(vi.getTimerCount()).toBe(0);
@@ -655,16 +656,18 @@ test('image preflight uses its separate category even when an input requests ori
   expect(context.newPage).not.toHaveBeenCalled();
 });
 
-test('legacy bare 403 pause is ignored without suppressing a new explicit check', async () => {
+test.each(['http_403','publisher_check'])('legacy %s pause is ignored while a new 429 remains effective', async (reason) => {
   frozenClock();
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'uro-publisher-policy-test-403-'));
   temporaryDirectories.push(directory);
-  fs.writeFileSync(path.join(directory, 'springer-nature.json'), JSON.stringify({reason:'http_403', until:Date.now()+86400000}));
+  fs.writeFileSync(path.join(directory, 'springer-nature.json'), JSON.stringify({reason, until:Date.now()+86400000}));
   const policy = new PublisherPolicy(directory);
   expect(policy.pauseFor('link.springer.com')).toBeNull();
   await expect(policy.before('link.springer.com', Date.now()+5000)).resolves.toBeUndefined();
   policy.observe('link.springer.com', 403, true);
-  expect(new PublisherPolicy(directory).pauseFor('link.springer.com').reason).toBe('publisher_check');
+  expect(new PublisherPolicy(directory).pauseFor('link.springer.com')).toBeNull();
+  policy.observe('link.springer.com',429);
+  expect(new PublisherPolicy(directory).pauseFor('link.springer.com').reason).toBe('http_429');
 });
 
 test.each([false, true])('bare 403 rejects only its paper, including delayed DOI=%s', async (delayed) => {
@@ -677,4 +680,16 @@ test.each([false, true])('bare 403 rejects only its paper, including delayed DOI
   const accepted=[];
   await readArticle(fakeContext(fakePage({}, accepted)), {doi:'10.1000/fixture'}, policy);
   expect(accepted.map(item => item.url)).toContain(articleUrl);
+});
+
+test('a challenged article cannot block a valid sibling or open its tables', async () => {
+  frozenClock();
+  const policy=new PublisherPolicy();
+  const denied=fakePage({challenge:true,body:{tables:[articleUrl+'/tables/1']}});
+  const firstContext=fakeContext(denied);
+  expect(await readArticle(firstContext,{doi:'10.1007/check'},policy)).toMatchObject({status:'challenge'});
+  expect(firstContext.newPage).toHaveBeenCalledTimes(1);
+  await vi.advanceTimersByTimeAsync(1001);
+  expect((await readArticle(fakeContext(fakePage()),{doi:'10.1007/next'},policy)).status).toBe('downloaded');
+  expect(policy.pauseFor('link.springer.com')).toBeNull();
 });
