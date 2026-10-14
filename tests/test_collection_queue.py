@@ -416,6 +416,29 @@ class DurableCollectionTests(unittest.TestCase):
         self.run_queue([{**paper, 'doi':'10.1016/corrected'}])
         self.assertEqual(calls, ['1', '1'])
 
+    def test_one_papers_unsupported_redirect_does_not_defer_its_publisher(self):
+        f, calls = self.f, []
+        f.deps['fetch_oa'] = lambda *a, **k: (_ for _ in ()).throw(FulltextUnavailable())
+        class Browser:
+            def __init__(self, *args): pass
+            def read(self, paper, **kwargs):
+                calls.append(paper['pmid'])
+                if paper['pmid']=='1':
+                    return {'status':'access_required','reason':'quota_unsupported_source'}
+                return f.browser_result(paper)
+            def close(self): pass
+        f.deps['Browser'] = Browser
+        self.assertEqual(self.run_queue([f.paper(1), f.paper(2)],max_workers=1)['completed'],1)
+        self.assertEqual(calls,['1','2'])
+        self.assertIsNone(f.db.execute("SELECT 1 FROM collection_source_probes WHERE pmid='2' AND provider='quota'").fetchone())
+
+    def test_actual_known_unsupported_routes_and_bmc_adapter(self):
+        from collection_queue import browser_ineligible_reason, _browser_source
+        for doi in ('10.1038/aja.2012.76','10.1111/j.1745-7262.2005.00020.x'):
+            self.assertEqual(browser_ineligible_reason(self.f.paper(1,doi)), 'browser_adapter_unavailable')
+        self.assertIsNone(browser_ineligible_reason(self.f.paper(1,'10.1186/s12894-026-example')))
+        self.assertEqual(_browser_source(self.f.paper(1,'10.1186/s12894-026-example')),'https://link.springer.com/')
+
     def test_transient_errors_back_off_across_restart(self):
         f = self.f
         f.deps['fetch_oa'] = lambda *a, **k: (_ for _ in ()).throw(HTTPError('https://example.test',500,'unavailable',{},None))

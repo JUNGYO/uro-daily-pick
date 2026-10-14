@@ -66,6 +66,14 @@ class QuotaTests(unittest.TestCase):
         self.quota.reserve(sbu, amount=30)
         self.assertDenied("quota_daily_limit", lambda: self.quota.reserve(sbu))
 
+    def test_bmc_repository_copies_share_springer_nature_limit(self):
+        groups=paper_publishers({'doi':'10.1186/s12894-026-example'})
+        self.assertEqual(groups,['springer-nature'])
+        self.quota.reserve(paper_publishers({'doi':'10.1007/example'}),amount=29)
+        self.quota.reserve(groups_for_url('https://www.ebi.ac.uk/europepmc/webservices/rest/PMC1/fullTextXML',groups))
+        self.assertDenied('quota_daily_limit',lambda:self.quota.reserve(groups))
+        self.assertEqual(paper_publishers({'doi':'10.11860/example'}),[])
+
     def test_korean_midnight_and_clock_rollback(self):
         self.now = datetime.fromisoformat("2026-10-12T14:59:59+00:00")
         self.assertDenied("quota_not_started", lambda: self.quota.reserve(["bmj"]))

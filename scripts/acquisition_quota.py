@@ -23,6 +23,7 @@ KST = timezone(timedelta(hours=9))
 PUBLISHERS = {"springer-nature", "wiley", "elsevier", "jama", "bmj", "wolters-kluwer",
               "brazilian-society-of-urology", "cju-communications", "tech-science-press"}
 PREFIXES = {"10.1007": "springer-nature", "10.1038": "springer-nature",
+            "10.1186": "springer-nature",
             "10.1002": "wiley", "10.1111": "wiley", "10.1016": "elsevier",
             "10.1001": "jama", "10.1136": "bmj", "10.1097": "wolters-kluwer",
             "10.32604": "tech-science-press"}

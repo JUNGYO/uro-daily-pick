@@ -153,7 +153,7 @@ def _browser_source(paper):
     doi = str(paper.get("doi") or "").lower()
     if doi.startswith("10.1016/"):
         return "https://www.sciencedirect.com/"
-    if doi.startswith(("10.1007/", "10.1038/")):
+    if doi.startswith(("10.1007/", "10.1038/", "10.1186/")):
         return "https://link.springer.com/"
     if doi.startswith(("10.1002/", "10.1111/")):
         return "https://onlinelibrary.wiley.com/"
@@ -171,6 +171,10 @@ def browser_ineligible_reason(paper):
         return 'invalid_doi'
     if doi.startswith('10.1016/'):
         return 'browser_automation_not_permitted'
+    # These former Nature/Wiley identifiers resolve to AsiaAndro, for which
+    # there is no browser adapter. A DOI prefix alone is not a destination.
+    if doi.startswith(('10.1038/aja.', '10.1111/j.1745-7262.')):
+        return 'browser_adapter_unavailable'
     if _browser_source(paper) == 'https://doi.org/':
         return 'browser_adapter_unavailable'
     return None
@@ -582,7 +586,10 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
             now = deps['wall_clock']()
             retry_at = now + outcome['retry_after'] if outcome.get('retry_after') else deferred_retry(reason, now)
             provider = 'quota' if outcome.get('quota_reason') else 'browser' if browser_attempt else 'acquisition'
-            if outcome.get('quota_reason'):
+            # Only genuinely shared capacity/access failures apply to siblings.
+            # An unsupported redirect or unmapped article is paper-specific.
+            if reason in ('quota_daily_limit', 'quota_source_paused', 'quota_not_started',
+                          'quota_policy_unavailable', 'quota_ledger_unavailable', 'quota_clock_rollback'):
                 quota_deferrals[tuple(paper_publishers(paper))] = outcome
             record_probes(paper, [{'provider':provider, 'status':'deferred', 'next_probe':retry_at,
                                   'checked_at':now, 'reason':reason}])
