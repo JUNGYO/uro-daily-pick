@@ -39,9 +39,9 @@ def derived(paper,document):
 
 class SparkPipelineTests(unittest.TestCase):
     def test_collection_does_not_wait_for_spark_or_publish_originals(self):
-        papers=[{"pmid":str(n),"doi":"10.1000/study","title":"Synthetic study"} for n in (1,2)]
+        papers=[{"pmid":str(n),"doi":"10.1007/study","title":"Synthetic study"} for n in (1,2)]
         service=Mock(); service.candidates.return_value=papers
-        browser=Mock(); browser.read.return_value={"status":"downloaded","title":"Synthetic study","doi":"10.1000/study", "html":HTML,"url":"https://link.springer.com/article/10.1000/study"}
+        browser=Mock(); browser.read.return_value={"status":"downloaded","title":"Synthetic study","doi":"10.1007/study", "html":HTML,"url":"https://link.springer.com/article/10.1007/study"}
         with tempfile.TemporaryDirectory() as temporary, \
              patch.dict(sys.modules,{"msvcrt":SimpleNamespace(locking=lambda *a:None,LK_NBLCK=1)}), \
              patch.object(worker,"local_service",return_value=service), patch.object(worker,"Browser",return_value=browser), \
@@ -55,6 +55,10 @@ class SparkPipelineTests(unittest.TestCase):
             readiness.assert_not_called(); summary.assert_not_called()
             service.rpc.assert_not_called()
             self.assertEqual(service.register_original.call_count,2)
+            run_result=json.loads((directory/'collection-run.json').read_text())
+            self.assertEqual(run_result['outcome'],'acquired')
+            self.assertEqual(run_result['new_originals'],2)
+            service.catalog.set_meta.assert_called_once_with('collection_status',run_result)
 
     def test_summary_queue_uses_local_bodies_without_opening_a_publisher(self):
         paper={"pmid":"1","doi":"10.1000/study","title":"Synthetic study"}
