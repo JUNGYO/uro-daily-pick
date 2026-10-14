@@ -21,8 +21,9 @@ transport. Confirmed HTTP/transport failures release only that request's
 reservation, once, on its original day. Browser redirects do not retain a charge;
 the destination is reserved separately. Completed downloads still count if
 subsequent parsing fails. Crashes, uncertain outcomes and legacy aggregate usage
-are not refunded. HTTP 401/403/429 also pause the publisher across workers, so
-releasing a failed reservation does not authorize another blocked request. Figure and same-article linked-table requests have separate zero-charge receipts and do not consume the original allowance. Fetching a whole article again to find figures still consumes original capacity, so acquired-paper counts can be lower than downloaded-body counts. Auxiliary failures cannot refund another original; their 401/403/429 responses still pause the publisher for every resource kind. Redirects from auxiliary URLs are stopped before transport. Concurrent workers and restarts share an atomic
+are not refunded. Bare HTTP 403 releases its failed reservation without pausing
+the publisher; only that paper/provider waits for a later hourly retry. HTTP 401,
+429 and explicit unresolved access checks still pause the publisher across workers. Figure and same-article linked-table requests have separate zero-charge receipts and do not consume the original allowance. Fetching a whole article again to find figures still consumes original capacity, so acquired-paper counts can be lower than downloaded-body counts. Auxiliary failures cannot refund another original; their 401/429 responses still pause the publisher for every resource kind, while bare HTTP 403 affects only that request. Redirects from auxiliary URLs are stopped before transport. Concurrent workers and restarts share an atomic
 ledger. Chromium intercepts redirect destinations before transport. Publisher
 domain aliases are grouped; known DOI prefixes add a conservative charge when
 the actual destination differs. Repository content without a recognized
