@@ -51,6 +51,26 @@ class DurableCollectionTests(unittest.TestCase):
         self.assertNotIn('private=token', self.output)
         self.assertEqual(f.db.execute("SELECT reason FROM collection_probe_details WHERE provider='browser'").fetchone()[0], 'article_doi_mismatch')
 
+    def test_bare_403_does_not_pause_other_papers_or_survive_as_source_block(self):
+        f, calls = self.f, []
+        class Browser:
+            def __init__(self, *args): pass
+            def read(self, paper, **kwargs):
+                calls.append(paper['pmid'])
+                if paper['pmid']=='1':
+                    return {'status':'access_required','reason':'http_403','url':'https://link.springer.com/article/1'}
+                return f.browser_result(paper)
+            def close(self): pass
+        def unavailable(*args, **kwargs): raise FulltextUnavailable()
+        f.deps.update(fetch_oa=unavailable, Browser=Browser)
+        result = self.run_queue([f.paper(1), f.paper(2)])
+        self.assertEqual(result['completed'], 1)
+        self.assertEqual(result['failed'], 1)
+        self.assertEqual(f.db.execute('SELECT count(*) FROM collection_source_pauses').fetchone()[0], 0)
+        self.assertEqual(f.db.execute("SELECT next_probe FROM collection_source_probes WHERE pmid='1' AND provider='browser'").fetchone()[0], self.now[0]+3600)
+        self.assertEqual(self.run_queue([f.paper(1), f.paper(3)])['completed'], 1)
+        self.assertEqual(calls, ['1','2','3'])
+
     def test_source_pause_survives_restart_and_expires_without_blocking_other_sources(self):
         f = self.f
         calls = []
@@ -217,7 +237,7 @@ class DurableCollectionTests(unittest.TestCase):
         self.assertEqual(rows["1"], ("not_indexed", 96400))
         self.assertEqual(rows["2"], ("unavailable", 614800))
 
-    def test_discovery_403_is_not_a_negative_and_stops_further_source_requests(self):
+    def test_discovery_403_is_paper_specific_and_does_not_pause_the_source(self):
         f, requests = self.f, []
         def discover(pmids, *, deadline, request_gate):
             url = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
@@ -226,12 +246,30 @@ class DurableCollectionTests(unittest.TestCase):
             raise HTTPError(url, 403, "synthetic denial", {}, None)
         f.deps.update(discover_oa_batch=discover, fetch_oa=f.forbid_network)
         self.run_queue([f.paper(n, "10.1016/x-" + str(n)) for n in range(1, 53)])
+        self.assertEqual(len(requests), 2)
+        self.assertEqual(f.db.execute("SELECT count(*) FROM collection_source_probes WHERE status IN ('unavailable','not_indexed')").fetchone()[0], 0)
+        self.assertEqual(self.telemetry["source_paused"], 0)
+        later = f.db.execute("SELECT status,next_probe FROM collection_source_probes WHERE pmid='52' AND provider='oa'").fetchone()
+        self.assertEqual(later[0], "access_required")
+        self.assertAlmostEqual(later[1], 13600, delta=30)
+        self.assertEqual(f.db.execute("SELECT next_retry FROM collection_attempts WHERE pmid='52'").fetchone()[0], later[1])
+        self.assertEqual(f.db.execute("SELECT next_probe FROM collection_source_probes WHERE pmid='52' AND provider='browser'").fetchone()[0], 614800)
+
+    def test_discovery_429_is_not_a_negative_and_stops_further_source_requests(self):
+        f, requests = self.f, []
+        def discover(pmids, *, deadline, request_gate):
+            url = "https://www.ebi.ac.uk/europepmc/webservices/rest/search"
+            request_gate(url, deadline)
+            requests.append(pmids)
+            raise HTTPError(url, 429, "synthetic denial", {}, None)
+        f.deps.update(discover_oa_batch=discover, fetch_oa=f.forbid_network)
+        self.run_queue([f.paper(n, "10.1016/x-" + str(n)) for n in range(1, 53)])
         self.assertEqual(len(requests), 1)
         self.assertEqual(f.db.execute("SELECT count(*) FROM collection_source_probes WHERE status IN ('unavailable','not_indexed')").fetchone()[0], 0)
         self.assertGreaterEqual(self.telemetry["source_paused"], 1)
         later = f.db.execute("SELECT status,next_probe FROM collection_source_probes WHERE pmid='52' AND provider='oa'").fetchone()
         self.assertEqual(later[0], "source_paused")
-        self.assertAlmostEqual(later[1], 96400, delta=30)
+        self.assertAlmostEqual(later[1], 13600, delta=30)
         self.assertEqual(f.db.execute("SELECT next_retry FROM collection_attempts WHERE pmid='52'").fetchone()[0], later[1])
         self.assertEqual(f.db.execute("SELECT next_probe FROM collection_source_probes WHERE pmid='52' AND provider='browser'").fetchone()[0], 614800)
 

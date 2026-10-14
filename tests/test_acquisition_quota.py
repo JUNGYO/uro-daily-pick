@@ -1,7 +1,7 @@
 """Synthetic quota boundaries; never contact a publisher or touch real state."""
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import closing
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import os
 from pathlib import Path
@@ -114,7 +114,7 @@ class QuotaTests(unittest.TestCase):
     def test_separate_processes_share_one_ledger(self):
         code = """
 from acquisition_quota import Quota,AcquisitionDeferred
-from datetime import datetime
+from datetime import datetime, timedelta
 import sys
 q=Quota(sys.argv[1],now=lambda:datetime.fromisoformat('2026-10-13T01:00:00+09:00'))
 accepted=0
@@ -219,7 +219,7 @@ print(accepted)
             list(pool.map(lambda _:self.quota.settle(receipt, failed=True), range(16)))
         self.assertEqual(self.quota.status()['publishers']['wiley']['automatic'], 29)
 
-    def test_403_is_uncharged_but_pauses_publisher_across_processes(self):
+    def test_403_is_uncharged_and_does_not_pause_other_papers_across_processes(self):
         import fulltext
         with patch.dict(os.environ, {'URO_ACQUISITION_POLICY':str(self.policy)}), \
              patch('acquisition_quota.Quota', return_value=self.quota), \
@@ -228,11 +228,26 @@ print(accepted)
             with self.assertRaises(HTTPError):fulltext.download('https://jamanetwork.com/article')
             self.assertEqual(self.quota.status()['publishers']['jama']['automatic'], 0)
             opener.return_value.open.reset_mock()
-            self.assertDenied('quota_source_paused', lambda:fulltext.download('https://jamanetwork.com/another'))
-            opener.return_value.open.assert_not_called()
+            with self.assertRaises(HTTPError):fulltext.download('https://jamanetwork.com/another')
+            opener.return_value.open.assert_called_once()
         restarted = Quota(self.policy, now=lambda:self.now)
-        self.assertDenied('quota_source_paused',lambda:restarted.reserve(['jama']))
+        restarted.reserve(['jama'])
         restarted.reserve(['bmj'])
+
+    def test_legacy_403_pause_is_ignored_but_explicit_access_and_rate_pauses_remain(self):
+        with closing(sqlite3.connect(self.root/'acquisition-quota.sqlite3')) as db, db:
+            db.execute('CREATE TABLE quota_pauses(publisher TEXT PRIMARY KEY,until REAL NOT NULL,reason TEXT NOT NULL)')
+            db.execute('INSERT INTO quota_pauses VALUES(?,?,?)', ('jama', self.now.timestamp()+86400, 'http_403'))
+        restarted = Quota(self.policy, now=lambda:self.now)
+        self.assertEqual(restarted.pause(['jama'], 'http_403')['paused'], [])
+        restarted.reserve(['jama'])
+        for reason in ('http_401','http_429','publisher_check','authentication_required'):
+            restarted.pause(['bmj'], reason)
+            self.assertDenied('quota_source_paused', lambda:restarted.reserve(['bmj']))
+        self.assertEqual(restarted.status()['publishers']['jama']['automatic'], 1)
+        restarted.pause(['jama'], 'http_429')
+        self.now += timedelta(seconds=3601)
+        restarted.reserve(['jama'])
 
     def test_received_image_does_not_count_even_when_later_parsing_fails(self):
         import article_images
@@ -255,14 +270,15 @@ print(accepted)
         self.assertEqual(self.quota.status()['publishers']['wiley']['automatic'], 30)
         self.assertDenied('quota_daily_limit', lambda:self.quota.reserve(['wiley']))
 
-    def test_failed_figure_cannot_refund_original_and_403_pauses_both(self):
+    def test_failed_figure_403_cannot_refund_original_or_pause_other_resources(self):
         self.quota.reserve(['wiley'], amount=30)
         receipt = self.quota.reserve(['wiley'], tracked=True, resource_kind='figure')
         self.quota.settle(receipt['request_id'], failed=True, reason='http_403')
         self.quota.settle(receipt['request_id'], failed=True, reason='http_403')
         self.assertEqual(self.quota.status()['publishers']['wiley']['automatic'], 30)
-        for kind in ('original', 'figure', 'table'):
-            self.assertDenied('quota_source_paused', lambda:self.quota.reserve(['wiley'], resource_kind=kind))
+        self.assertDenied('quota_daily_limit', lambda:self.quota.reserve(['wiley']))
+        for kind in ('figure', 'table'):
+            self.quota.reserve(['wiley'], resource_kind=kind)
         self.quota.reserve(['bmj'], resource_kind='figure')
 
     def test_legacy_seven_column_receipts_remain_compatible(self):

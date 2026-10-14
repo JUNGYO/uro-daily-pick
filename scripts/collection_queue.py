@@ -293,7 +293,7 @@ class _SharedBrowser:
                 self.browser.close()
                 self.browser = None
                 return {"status": "retryable_error", "reason": "browser_response_unavailable"}
-            if result.get("status") == "challenge" or result.get("reason") in {"http_401", "http_403", "http_429", "publisher_paused", "authentication_required"}:
+            if result.get("status") == "challenge" or result.get("reason") in {"http_401", "http_429", "publisher_paused", "authentication_required"}:
                 actual = result.get("url") or source
                 delay = 3600 if result.get('reason') == 'http_429' else 86400
                 self.gate.block(actual, retry_seconds=delay)
@@ -406,11 +406,11 @@ def _acquire_api_scoped(paper, cache, deadline, deps, gate, probes=None):
             except HTTPError as error:
                 stats["provider_errors"] += 1
                 stats["api_http_" + str(error.code) if error.code in (403, 429) else "api_http_other"] += 1
-                if error.code in (403, 429):
-                    gate.block(error.url, retry_seconds=3600 if error.code == 429 else 86400)
+                if error.code == 429:
+                    gate.block(error.url, retry_seconds=3600)
                     stats["source_paused"] += 1
                 update(name, "access_required" if error.code == 403 else "retryable_error",
-                       86400 if error.code == 403 else 3600 if error.code == 429 else 900,
+                       3600 if error.code in (403, 429) else 900,
                        clear_location=error.code in (404, 410), reason='http_' + str(error.code))
             except SourcePaused as error:
                 # An API rejection must not starve a different authorized source.
@@ -529,7 +529,7 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
         0 if deps.get("fetch_pmc_cloud") and "pmc_cloud" not in probes.get(str(paper.get("pmid")), {}) else
         min((row["checked_at"] for row in probes.get(str(paper.get("pmid")), {}).values()), default=0)))
     gate = SourceGate(deps["clock"], deps["sleep"])
-    # Source rejection belongs to the host, not one process or one paper.
+    # Rate limits and explicit access checks persist across processes.
     # Persist wall-clock expiry while the in-process gate uses monotonic time.
     saved_pauses = dict(db.execute("SELECT source,retry_at FROM collection_source_pauses"))
     for source, retry_at in saved_pauses.items():
@@ -639,13 +639,14 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
             code = error.code if isinstance(error, HTTPError) else None
             stats[("api_http_" + str(code) if code in (403, 429) else "api_http_other") if code is not None
                   else "api_parse_errors" if isinstance(error, ValueError) else "api_network_errors"] += 1
-            if code in (403, 429):
-                gate.block(error.url, retry_seconds=3600 if code == 429 else 86400)
+            if code == 429:
+                gate.block(error.url, retry_seconds=3600)
                 stats["source_paused"] += 1
             now = deps["wall_clock"]()
             for paper in candidates:
                 record_probes(paper, [{"provider": provider, "status": "access_required" if code == 403 else "retryable_error",
-                    "next_probe": now + (86400 if code == 403 else 3600 if code == 429 else 900), "checked_at": now}
+                    "next_probe": now + (3600 if code in (403, 429) else 900), "checked_at": now,
+                    "reason": 'http_' + str(code) if code else 'source_lookup_failed'}
                     for provider in ("oa", "pmc_cloud") if provider in enabled
                     and _providers_due(probes.get(str(paper["pmid"]), {}), (provider,), now)])
             db.commit()

@@ -91,11 +91,11 @@ class PublisherPolicy {
     if (this.directory) {
       try {
         const saved = JSON.parse(fs.readFileSync(path.join(this.directory, group + '.json'), 'utf8'));
-        if (Number.isFinite(saved.until) && saved.until > (this.pauses.get(group)?.until || 0)) this.pauses.set(group, saved);
+        if (saved.reason !== 'http_403' && Number.isFinite(saved.until) && saved.until > (this.pauses.get(group)?.until || 0)) this.pauses.set(group, saved);
       } catch (error) { if (error.code !== 'ENOENT') return {until: Infinity, reason: 'publisher_pause_unreadable'}; }
     }
     const paused = this.pauses.get(group);
-    return paused?.until > Date.now() ? paused : null;
+    return paused?.reason !== 'http_403' && paused?.until > Date.now() ? paused : null;
   }
   async before(host, deadline) {
     if (disabledWebHost(host)) throw Object.assign(new Error('Publisher website disabled'), {reason:'publisher_web_disabled'});
@@ -112,7 +112,8 @@ class PublisherPolicy {
   observe(host, status, challenge = false) {
     const group = publisherGroup(host);
     if (group) this.lastStart.set(group, Date.now());
-    if (!group || (!challenge && ![401,403,429].includes(status))) return;
+    // A bare 403 describes this request, not a publisher-wide timed restriction.
+    if (!group || (!challenge && ![401,429].includes(status))) return;
     const value = {until: Date.now() + (status === 429 ? 3600 : 86400) * 1000,
       reason: challenge ? 'publisher_check' : 'http_' + status};
     this.pauses.set(group, value);

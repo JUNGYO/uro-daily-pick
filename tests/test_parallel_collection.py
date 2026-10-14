@@ -207,7 +207,7 @@ class ParallelCollectionTests(unittest.TestCase):
                 self.assertEqual(target.read_bytes(), b"existing original")
                 self.assertEqual(temporary.read_bytes(), b"new original")
 
-    def test_api_403_stops_same_source_but_keeps_authorized_alternative(self):
+    def test_api_403_keeps_other_papers_and_authorized_alternative_available(self):
         calls = []
         def rejected(pmid, *, deadline, request_gate):
             url = "https://oa.example.test/search"
@@ -217,7 +217,7 @@ class ParallelCollectionTests(unittest.TestCase):
         self.deps.update(fetch_oa=rejected, elsevier_enabled=True,
                          fetch_elsevier=lambda *a, **k: (self.xml, "https://api.elsevier.com/article"))
         result = self.run_queue([self.paper(n) for n in range(1, 5)], max_workers=1)
-        self.assertEqual(len(calls), 1)
+        self.assertEqual(len(calls), 4)
         self.assertEqual(result["completed"], 4)
 
     def test_browser_challenge_stops_later_same_publisher_and_retains_due_candidates(self):

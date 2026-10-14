@@ -29,16 +29,16 @@ async function quotaTransport() {
     paused: value=>handlers.get('Fetch.requestPaused')(value)};
 }
 
-test('403 releases its reservation once and preserves the publisher pause',async()=>{
+test('403 releases its reservation once and allows the next publisher document',async()=>{
   const h=await quotaTransport();
   await h.paused(h.event);
   await h.paused({...h.event,responseStatusCode:403});
   h.handlers.get('Network.loadingFailed')({requestId:h.event.networkId});
   expect(h.quota.call).toHaveBeenCalledExactlyOnceWith('failed',{},'',{requestId:'a'.repeat(32),reason:'http_403'});
-  expect(h.policy.pauseFor('link.springer.com').reason).toBe('http_403');
+  expect(h.policy.pauseFor('link.springer.com')).toBeNull();
   await h.paused({...h.event,requestId:'fetch-2',networkId:'network-2'});
-  expect(h.quota.before).toHaveBeenCalledTimes(1);
-  expect(h.navigation.reason).toBe('publisher_paused');
+  expect(h.quota.before).toHaveBeenCalledTimes(2);
+  expect(h.navigation.reason).not.toBe('publisher_paused');
 });
 
 test('completed response remains charged when subsequent browser work fails',async()=>{
@@ -283,7 +283,7 @@ test("a known Elsevier DOI is rejected without opening a browser page", async ()
   });
   expect(context.newPage).not.toHaveBeenCalled();
 });
-test.each([403, 429])(
+test.each([401, 429])(
   "HTTP %i pauses the publisher and the next article sends no request to that host",
   async (status) => {
     frozenClock();
@@ -457,7 +457,7 @@ test("a stalled article is closed at its deadline and never accepted as full tex
   expect(page.close).toHaveBeenCalled();
   expect(vi.getTimerCount()).toBe(0);
 });
-test.each([403, 429])(
+test.each([401, 429])(
   "a delayed DOI redirect's HTTP %i also pauses the destination publisher",
   async (status) => {
     frozenClock();
@@ -483,7 +483,7 @@ test("a deadline expiring while the interval timer waits prevents release", asyn
 test("Chromium destination blocking is configured for every disabled website and an already paused publisher", async () => {
   frozenClock();
   const policy = new PublisherPolicy();
-  policy.observe("link.springer.com", 403);
+  policy.observe("link.springer.com", 429);
   policy.observe("onlinelibrary.wiley.com", 429);
   const handlers = new Map();
   const page = { on: (event, handler) => handlers.set(event, handler) };
@@ -592,7 +592,7 @@ test.each(["media.springernature.com", "static-content.springer-cdn.com"])(
   async (host) => {
     frozenClock();
     const policy = new PublisherPolicy();
-    policy.observe("link.springer.com", 403);
+    policy.observe("link.springer.com", 429);
     const url = `https://${host}/synthetic.png`;
     const accepted = [];
     const page = fakePage({ destination: url }, accepted);
@@ -653,4 +653,28 @@ test('image preflight uses its separate category even when an input requests ori
     .toMatchObject({status:'unavailable',reason:'quota_source_paused'});
   expect(quota.call).toHaveBeenCalledWith('check',expect.objectContaining({resource_kind:'figure'}),'https://link.springer.com/image.png');
   expect(context.newPage).not.toHaveBeenCalled();
+});
+
+test('legacy bare 403 pause is ignored without suppressing a new explicit check', async () => {
+  frozenClock();
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'uro-publisher-policy-test-403-'));
+  temporaryDirectories.push(directory);
+  fs.writeFileSync(path.join(directory, 'springer-nature.json'), JSON.stringify({reason:'http_403', until:Date.now()+86400000}));
+  const policy = new PublisherPolicy(directory);
+  expect(policy.pauseFor('link.springer.com')).toBeNull();
+  await expect(policy.before('link.springer.com', Date.now()+5000)).resolves.toBeUndefined();
+  policy.observe('link.springer.com', 403, true);
+  expect(new PublisherPolicy(directory).pauseFor('link.springer.com').reason).toBe('publisher_check');
+});
+
+test.each([false, true])('bare 403 rejects only its paper, including delayed DOI=%s', async (delayed) => {
+  frozenClock();
+  const policy = new PublisherPolicy();
+  const denied = fakePage({ delayed, status:403, body:{characters:0,headings:[]} });
+  expect(await readArticle(fakeContext(denied), {doi:'10.1000/fixture'}, policy)).toMatchObject({status:'access_required', reason:'http_403'});
+  expect(policy.pauseFor('link.springer.com')).toBeNull();
+  await vi.advanceTimersByTimeAsync(1001);
+  const accepted=[];
+  await readArticle(fakeContext(fakePage({}, accepted)), {doi:'10.1000/fixture'}, policy);
+  expect(accepted.map(item => item.url)).toContain(articleUrl);
 });
