@@ -439,6 +439,56 @@ class DurableCollectionTests(unittest.TestCase):
         self.assertIsNone(browser_ineligible_reason(self.f.paper(1,'10.1186/s12894-026-example')))
         self.assertEqual(_browser_source(self.f.paper(1,'10.1186/s12894-026-example')),'https://link.springer.com/')
 
+    def test_large_first_publisher_backlog_cannot_starve_other_publisher(self):
+        from collection_queue import _prepare_probe_state, _paper_identity
+        from institution_worker import prepare_collection_attempts
+        f, calls = self.f, []
+        papers = [f.paper(n, '10.1111/fixture-' + str(n)) for n in range(1, 101)] + [f.paper(101)]
+        prepare_collection_attempts(f.db)
+        _prepare_probe_state(f.db, papers)
+        for paper in papers:
+            identity = _paper_identity(paper)
+            f.db.execute('INSERT INTO collection_source_probes VALUES(?,?,?,?,?,?,?)',
+                (paper['pmid'], 'oa', identity, 'unavailable', self.now[0] + 604800, self.now[0], None))
+            f.db.execute('INSERT INTO collection_browser_pending VALUES(?,?,?)', (paper['pmid'], identity, self.now[0]))
+        f.db.commit()
+        class Browser:
+            def __init__(self, *args): pass
+            def read(self, paper, **kwargs):
+                calls.append(paper['pmid'])
+                if paper['pmid'] == '101': return f.browser_result(paper)
+                return {'status':'access_required','reason':'quota_unknown_publisher'}
+            def close(self): pass
+        f.deps.update(fetch_oa=f.forbid_network, Browser=Browser)
+        with patch.object(SourceGate, '__call__', return_value=None):
+            self.assertEqual(self.run_queue(papers)['completed'], 1)
+        self.assertEqual(calls[:2], ['1','101'])
+        self.assertEqual([p for p in calls if p != '101'], sorted(str(n) for n in range(1,101)))
+
+    def test_new_adapter_expires_only_old_capability_failure(self):
+        from collection_queue import _prepare_probe_state, _paper_identity
+        from institution_worker import prepare_collection_attempts, record_collection_attempt
+        f = self.f
+        papers = [f.paper(n,'10.1186/example-' + str(n)) for n in (1,2)]
+        prepare_collection_attempts(f.db)
+        _prepare_probe_state(f.db, papers)
+        for paper, reason in zip(papers, ['browser_adapter_unavailable','http_403']):
+            pmid, identity = paper['pmid'], _paper_identity(paper)
+            record_collection_attempt(f.db, pmid, 'unsupported' if pmid=='1' else 'access_required', reason, now=self.now[0])
+            for provider, status in [('browser','unsupported' if pmid=='1' else 'access_required'),('oa','unavailable')]:
+                f.db.execute('INSERT INTO collection_source_probes VALUES(?,?,?,?,?,?,?)',
+                    (pmid,provider,identity,status,self.now[0]+604800,self.now[0],None))
+            f.db.execute('INSERT INTO collection_probe_details VALUES(?,?,?,?,?)', (pmid,'browser',identity,reason,1))
+        f.db.execute('INSERT INTO collection_source_pauses VALUES(?,?)', ('springer-nature',self.now[0]+86400))
+        f.db.commit()
+        probes, _ = _prepare_probe_state(f.db,papers)
+        self.assertNotIn('browser',probes['1'])
+        self.assertIn('oa',probes['1'])
+        self.assertEqual(probes['2']['browser']['reason'],'http_403')
+        self.assertIsNone(f.db.execute("SELECT 1 FROM collection_attempts WHERE pmid='1'").fetchone())
+        self.assertIsNotNone(f.db.execute("SELECT 1 FROM collection_attempts WHERE pmid='2'").fetchone())
+        self.assertEqual(f.db.execute('SELECT retry_at FROM collection_source_pauses').fetchone()[0],self.now[0]+86400)
+
     def test_transient_errors_back_off_across_restart(self):
         f = self.f
         f.deps['fetch_oa'] = lambda *a, **k: (_ for _ in ()).throw(HTTPError('https://example.test',500,'unavailable',{},None))

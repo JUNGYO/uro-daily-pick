@@ -65,6 +65,20 @@ def _prepare_probe_state(db, papers):
     for pmid, provider, identity, reason, failures in db.execute('SELECT * FROM collection_probe_details'):
         if pmid in probes and provider in probes[pmid] and identity == identities.get(pmid):
             probes[pmid][provider].update(reason=reason, failures=failures)
+    # A newly supported adapter must not inherit the old unsupported verdict.
+    # Only that exact negative capability result expires: access/validation
+    # failures, API probes, quota receipts and publisher pauses remain intact.
+    newly_supported = {str(paper['pmid']) for paper in papers
+        if probes.get(str(paper['pmid']), {}).get('browser', {}).get('reason') == 'browser_adapter_unavailable'
+        and not browser_ineligible_reason(paper)}
+    if newly_supported:
+        with db:
+            for pmid in newly_supported:
+                db.execute("DELETE FROM collection_source_probes WHERE pmid=? AND provider='browser'", (pmid,))
+                db.execute("DELETE FROM collection_probe_details WHERE pmid=? AND provider='browser'", (pmid,))
+                db.execute("DELETE FROM collection_attempts WHERE pmid=? AND EXISTS(SELECT 1 FROM collection_retry_metadata WHERE pmid=? AND reason='browser_adapter_unavailable')", (pmid, pmid))
+                db.execute("DELETE FROM collection_retry_metadata WHERE pmid=? AND reason='browser_adapter_unavailable'", (pmid,))
+                probes[pmid].pop('browser', None)
     if invalid:
         with db:
             for pmid in invalid:
@@ -186,6 +200,49 @@ def deferred_retry(reason, now):
             hour=0, minute=0, second=0, microsecond=0).timestamp()
     return now + (7 * 86400 if reason in ('quota_unknown_publisher', 'quota_unsupported_source')
                   else 3600 if reason in ('quota_source_paused', 'source_paused') else 300)
+
+
+class _PublisherBacklog:
+    """Rotate publishers while retaining FIFO order inside each publisher."""
+    def __init__(self):
+        self.sources, self.queues, self.size = deque(), {}, 0
+
+    def append(self, paper):
+        key = source_key(_browser_source(paper))
+        if key not in self.queues:
+            self.sources.append(key)
+            self.queues[key] = deque()
+        self.queues[key].append(paper)
+        self.size += 1
+
+    def popleft(self):
+        key = self.sources.popleft()
+        paper = self.queues[key].popleft()
+        self.size -= 1
+        if self.queues[key]:
+            self.sources.append(key)
+        else:
+            del self.queues[key]
+        return paper
+
+    def discard(self, paper):
+        key = source_key(_browser_source(paper))
+        self.queues[key].remove(paper)
+        self.size -= 1
+        if not self.queues[key]:
+            self.sources.remove(key)
+            del self.queues[key]
+
+    def peek(self):
+        return self.queues[self.sources[0]][0]
+
+    def clear(self):
+        self.sources.clear()
+        self.queues.clear()
+        self.size = 0
+
+    def __len__(self):
+        return self.size
 
 
 class _SharedBrowser:
@@ -375,7 +432,8 @@ def _acquire_browser(paper, deadline, deps, browser):
         preflight(paper)
         result = browser.read(paper)
         if str(result.get("reason", "")).startswith("quota_"):
-            return {"deferred": True, "quota_reason": result["reason"]}
+            return {"deferred": True, "quota_reason": result["reason"],
+                    "blocked_host": result.get('blocked_host')}
         document = deps["parsed_result"](paper, result)
         if document is None:
             return {"status": result.get("status", "parse_failed"), "reason": result.get("reason", "validation_failed")}
@@ -473,7 +531,7 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
     browser_started, browser_timings = {}, {}
     iterator = deque(papers)
     exhausted = False
-    browser_backlog, browser_pending, browser_enqueued = deque(), {}, set()
+    browser_backlog, browser_pending, browser_enqueued = _PublisherBacklog(), {}, set()
     quota_deferrals = {}
 
     def record_probes(paper, updates):
@@ -594,6 +652,10 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
             record_probes(paper, [{'provider':provider, 'status':'deferred', 'next_probe':retry_at,
                                   'checked_at':now, 'reason':reason}])
             stats['deferred_by_reason'][reason] = stats['deferred_by_reason'].get(reason, 0) + 1
+            host = outcome.get('blocked_host')
+            if isinstance(host, str) and re.fullmatch(r'[a-z0-9.-]{1,253}', host):
+                # Hostname only, never an article URL, token or page content.
+                print(f'PMID {pmid}: {reason}, blocked_host={host}', flush=True)
             if browser_attempt:
                 clear_browser(pmid)
             if outcome.get("source_paused"):
@@ -723,7 +785,7 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
                                         probes.get(str(paper["pmid"]), {}))] = paper
                 # A host-wide pause applies to the entire queued host. Do not
                 # spend one executor turn / browser IPC round-trip per paper.
-                while browser_backlog and not browser_pending and deps["clock"]() < deadline and gate.is_blocked(_browser_source(browser_backlog[0])):
+                while browser_backlog and not browser_pending and deps["clock"]() < deadline and gate.is_blocked(_browser_source(browser_backlog.peek())):
                     browser_backlog.popleft()
                     counts["deferred"] += 1
                     stats["source_paused"] += 1
@@ -767,7 +829,7 @@ def run_collection(directory, node, deadline, service, db, papers, *, dependenci
                     if outcome.get("browser"):
                         queued = enqueue_browser(paper)
                         if queued and deps["clock"]() >= deadline:
-                            browser_backlog.pop()
+                            browser_backlog.discard(paper)
                             counts["deferred"] += 1
                     else:
                         finish(paper, outcome, browser_attempt=browser_attempt)

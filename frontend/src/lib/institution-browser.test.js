@@ -58,6 +58,16 @@ test('network failure releases a pending browser reservation',async()=>{
   expect(h.quota.call).toHaveBeenCalledExactlyOnceWith('failed',{},'',{requestId:'a'.repeat(32),reason:'transport_error'});
 });
 
+test('quota rejection reports only the blocked hostname and still prevents transport',async()=>{
+  const h=await quotaTransport();
+  h.quota.before.mockImplementation(()=>{throw Object.assign(new Error('unknown'),{reason:'quota_unknown_publisher'});});
+  await h.paused({...h.event,request:{url:'https://unknown.example.test/article?secret=private'}});
+  expect(h.navigation.blockedHost).toBe('unknown.example.test');
+  expect(h.navigation.reason).toBe('quota_unknown_publisher');
+  expect(JSON.stringify(h.navigation)).not.toContain('private');
+  expect(h.session.send).toHaveBeenCalledWith('Fetch.failRequest',expect.objectContaining({requestId:h.event.requestId}));
+});
+
 test('redirect releases its own hop and charges the destination independently',async()=>{
   const h=await quotaTransport();
   await h.paused(h.event);

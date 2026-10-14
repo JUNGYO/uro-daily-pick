@@ -160,6 +160,7 @@ async function blockPublisherRequests(context, page, policy, navigation) {
       await session.send('Fetch.continueRequest', {requestId:event.requestId});
     } catch (error) {
       navigation.reason = error.reason || 'quota_ledger_unavailable';
+      navigation.blockedHost = host;
       await session.send('Fetch.failRequest', {requestId:event.requestId, errorReason:'BlockedByClient'})
         .catch(() => page.close().catch(() => {}));
     }
@@ -358,7 +359,8 @@ async function readArticle(context, job, policy = new PublisherPolicy()) {
   } catch (error) {
     const reason = navigation.reason || error.reason;
     if (reason) return {status: reason === 'publisher_web_disabled' || reason === 'unsupported_publisher' ? 'unsupported'
-      : reason === 'article_time_budget' ? 'retryable_error' : 'access_required', reason};
+      : reason === 'article_time_budget' ? 'retryable_error' : 'access_required', reason,
+      ...(navigation.blockedHost ? {blocked_host:navigation.blockedHost} : {})};
     return {status:'retryable_error', reason:error.name === 'TimeoutError' ? 'timeout' : 'navigation_error'};
   } finally { clearTimeout(timer); await page.close().catch(() => {}); }
 }
