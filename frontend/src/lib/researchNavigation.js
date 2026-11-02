@@ -27,6 +27,10 @@ export function switchRelationship(params, relation) {
   if ((next.get("relation") === "citations" ? "citations" : "concepts") === relation) return next;
   ["page", "unlinkedPage", "citationPage", "direction"].forEach((key) => next.delete(key));
   if (relation === "citations") {
+    if (next.get("category")) next.set("scopeCategory", next.get("category"));
+    if (next.get("prefix")) next.set("scopePrefix", next.get("prefix"));
+    next.delete("category");
+    next.delete("prefix");
     if (next.get("concept")) next.set("scopeConcept", next.get("concept"));
     if (next.get("with")) next.set("scopePeer", next.get("with"));
     next.set("relation", "citations");
@@ -34,6 +38,12 @@ export function switchRelationship(params, relation) {
     next.delete("with");
   } else {
     next.delete("relation");
+    if (next.get("scopeCategory")) next.set("category", next.get("scopeCategory"));
+    else next.delete("category");
+    if (next.get("scopePrefix")) next.set("prefix", next.get("scopePrefix"));
+    else next.delete("prefix");
+    next.delete("scopeCategory");
+    next.delete("scopePrefix");
     if (next.get("scopeConcept")) next.set("concept", next.get("scopeConcept"));
     else next.delete("concept");
     if (next.get("scopePeer")) next.set("with", next.get("scopePeer"));

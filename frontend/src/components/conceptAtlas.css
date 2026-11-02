@@ -1,0 +1,406 @@
+.concept-atlas {
+  min-width: 0;
+  color: #253e61;
+}
+.concept-atlas button {
+  font: inherit;
+  cursor: pointer;
+}
+.concept-atlas button:disabled {
+  cursor: default;
+  opacity: 0.45;
+}
+.concept-atlas button:focus-visible,
+.concept-atlas [role="button"]:focus-visible {
+  outline: 3px solid #2864b8;
+  outline-offset: 3px;
+}
+.concept-atlas-path {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  border-block: 1px solid #e2e8f0;
+  background: #f8fafc;
+  font-size: 12px;
+}
+.concept-atlas-path ol {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  min-width: 0;
+}
+.concept-atlas-path li {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.concept-atlas-path button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  background: transparent;
+  border: 0;
+  border-radius: 5px;
+  padding: 4px;
+  color: #245ba2;
+}
+.concept-atlas-path > button:first-child {
+  min-width: 36px;
+}
+.concept-atlas-path span[aria-current] {
+  color: #253e61;
+  font-weight: 600;
+}
+.concept-atlas-path .concept-atlas-reset {
+  margin-left: auto;
+  flex-shrink: 0;
+  text-decoration: underline;
+}
+.concept-atlas-summary {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 18px 20px 6px;
+}
+.concept-atlas-summary strong {
+  display: block;
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+.concept-atlas-summary span {
+  display: block;
+  font-size: 12px;
+  color: #526780;
+  line-height: 1.6;
+}
+.concept-atlas-summary .concept-atlas-scope {
+  text-align: right;
+}
+.concept-atlas-instruction {
+  margin: 4px 20px 15px;
+  color: #526780;
+  font-size: 12px;
+  line-height: 1.65;
+}
+.concept-atlas-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-block: 1px solid #e2e8f0;
+  padding: 9px 20px;
+}
+.concept-atlas-toolbar > span {
+  color: #526780;
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.concept-atlas-toolbar > div {
+  display: flex;
+  flex-shrink: 0;
+  gap: 4px;
+}
+.concept-atlas-toolbar button {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid #dce3ec;
+  background: #fff;
+  border-radius: 6px;
+  color: #355372;
+}
+.concept-atlas-toolbar button[aria-pressed="true"] {
+  background: #e8f0fc;
+  border-color: #9bb7db;
+}
+.concept-atlas-minimum {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 11px;
+  color: #526780;
+  margin-left: auto;
+}
+.concept-atlas-minimum select {
+  min-height: 34px;
+  background: #fff;
+  color: #355372;
+  border: 1px solid #dce3ec;
+  border-radius: 6px;
+  padding: 3px 5px;
+  font: inherit;
+}
+.concept-atlas-viewport.network-canvas-scroll {
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  max-height: none;
+  background: radial-gradient(ellipse at 50% 45%, #fff, #f3f6fa);
+}
+.concept-atlas-graph.atlas-graph {
+  display: block;
+  width: 100%;
+  height: auto;
+  max-width: 100%;
+  min-width: 0;
+  touch-action: none;
+  user-select: none;
+}
+.concept-atlas-node,
+.concept-atlas-edge {
+  cursor: pointer;
+}
+.concept-atlas-node:focus,
+.concept-atlas-edge:focus {
+  outline: none;
+}
+.concept-atlas-node:focus-visible .concept-atlas-disc {
+  stroke: #122c59;
+  stroke-width: 3;
+}
+.concept-atlas-edge:focus-visible line:first-of-type {
+  stroke: #122c59;
+  stroke-opacity: 1;
+}
+.concept-atlas-label {
+  font-size: 12px;
+  font-weight: 500;
+  fill: #253e61;
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 4;
+  stroke-linejoin: round;
+  pointer-events: none;
+}
+.concept-atlas-label-detail {
+  font-size: 10px;
+  font-weight: 400;
+  fill: #526780;
+}
+.concept-atlas-group-count {
+  fill: #fff;
+  font-size: 11px;
+  font-weight: 600;
+  pointer-events: none;
+}
+.concept-atlas-readout {
+  min-height: 65px;
+  padding: 12px 20px;
+  border-top: 1px solid #e2e8f0;
+  font-size: 12px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.concept-atlas-readout p {
+  margin: 0;
+}
+.concept-atlas-readout strong {
+  display: block;
+  font-weight: 600;
+}
+.concept-atlas-readout span,
+.concept-atlas-help {
+  color: #526780;
+}
+.concept-atlas-edge-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin-top: 8px;
+}
+.concept-atlas-edge-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  color: #245ba2;
+  padding: 3px 0;
+  text-align: left;
+}
+.concept-atlas-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  padding: 8px 20px 16px;
+  color: #40546d;
+  font-size: 11px;
+}
+.concept-atlas-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.concept-atlas-legend i {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.concept-atlas-legend .concept-atlas-ring-key {
+  border: 1.5px solid #526780;
+  outline: 1px solid #9daec0;
+  outline-offset: 2px;
+  margin-inline: 2px;
+}
+.concept-atlas-method {
+  margin: 0 20px 20px;
+  padding-top: 12px;
+  border-top: 1px solid #e2e8f0;
+  color: #526780;
+  font-size: 12px;
+  line-height: 1.65;
+}
+.concept-atlas-method summary {
+  color: #253e61;
+  font-weight: 600;
+  cursor: pointer;
+}
+.concept-atlas-method p {
+  margin-top: 10px;
+}
+.concept-atlas-empty {
+  margin: 0;
+  padding: 64px 24px;
+  color: #526780;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.7;
+}
+.concept-atlas-list.atlas-node-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  padding: 12px 20px;
+  gap: 0 20px;
+  list-style: none;
+  background: #fff;
+}
+.concept-atlas-list li {
+  min-width: 0;
+}
+.concept-atlas .concept-atlas-list button {
+  display: flex;
+  width: 100%;
+  min-height: 68px;
+  align-items: center;
+  gap: 12px;
+  border: 0;
+  border-bottom: 1px solid #e8edf3;
+  background: transparent;
+  text-align: left;
+  padding: 12px 5px;
+  color: #253e61;
+  font-size: 12px;
+}
+.concept-atlas-list button[aria-pressed="true"] {
+  background: #edf3fb;
+}
+.concept-atlas-list i {
+  width: 11px;
+  height: 11px;
+  flex-shrink: 0;
+  border-radius: 50%;
+}
+.concept-atlas-list i.is-group {
+  outline: 1px solid #9aadc0;
+  outline-offset: 3px;
+}
+.concept-atlas-list button > span:first-of-type {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.concept-atlas-list strong {
+  font-weight: 500;
+}
+.concept-atlas-list small {
+  display: block;
+  color: #526780;
+  font-size: 11px;
+  margin-top: 3px;
+}
+.concept-atlas-list .concept-atlas-list-count {
+  flex: 0 0 auto;
+  flex-shrink: 0;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+@media (max-width: 600px) {
+  .concept-atlas-path,
+  .concept-atlas-toolbar {
+    padding-inline: 12px;
+  }
+  .concept-atlas-path {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  .concept-atlas-path button {
+    min-height: 44px;
+  }
+  .concept-atlas-summary {
+    flex-direction: column;
+    gap: 4px;
+    padding: 16px 12px 4px;
+  }
+  .concept-atlas-summary .concept-atlas-scope {
+    text-align: left;
+  }
+  .concept-atlas-summary .concept-atlas-scope > span {
+    display: inline;
+  }
+  .concept-atlas-summary .concept-atlas-scope > span::before {
+    content: " · ";
+  }
+  .concept-atlas-instruction {
+    margin-inline: 12px;
+  }
+  .concept-atlas-toolbar {
+    flex-wrap: wrap;
+  }
+  .concept-atlas-toolbar > span {
+    display: none;
+  }
+  .concept-atlas-toolbar > div {
+    margin-left: auto;
+  }
+  .concept-atlas-toolbar button {
+    width: 40px;
+    height: 44px;
+  }
+  .concept-atlas-minimum {
+    margin-left: 0;
+  }
+  .concept-atlas-minimum select {
+    min-height: 44px;
+  }
+  .concept-atlas-readout {
+    padding-inline: 12px;
+    min-height: 77px;
+  }
+  .concept-atlas-legend {
+    padding-inline: 12px;
+  }
+  .concept-atlas-method {
+    margin-inline: 12px;
+  }
+  .concept-atlas-list.atlas-node-list {
+    grid-template-columns: minmax(0, 1fr);
+    padding-inline: 12px;
+  }
+}

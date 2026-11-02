@@ -44,16 +44,35 @@ These counts refer to reports, not independent studies or participants. A single
 paper can generate many pairs; those pairs are not independent observations.
 
 Circle area is proportional to paper count, with one common size scale per view.
-Line width is `1 + log2(shared papers)`. Color represents entity category.
+Line width increases logarithmically with shared-paper count. Color represents entity category.
 A deterministic force layout uses Jaccard overlap to arrange concepts, followed
 by collision-aware label placement. Coordinates are navigation aids, not measured
 scientific distances. Selecting an edge reveals the actual shared papers and
 marginal counts. Clinical association, effect, quality and consensus are not
 inferred from co-occurrence.
 
-Nodes are the most frequent concepts, with a selected concept's neighbors prioritized and
-the selected endpoints retained. The user can display 30, 60 or 100 nodes, and
-set the minimum shared-paper count. At most 500 co-occurrence edges are displayed.
+The Concepts view starts with **every extracted concept in the filtered indexed
+corpus represented**, without a frequency-ranked top-N selection. Small scopes
+show individual concepts. Larger scopes show the existing MeSH category groups;
+opening a group reveals its members. Categories with more than 80 concepts are
+partitioned into complete alphabetical ranges until each leaf fits the map.
+Eighty is a per-level rendering threshold, not a sampling limit. Rare and isolated
+concepts remain reachable. Groups show their contained concept count, and the
+coverage line distinguishes represented concepts from visible circles. Categories
+and alphabetical ranges are navigation aids, not inferred clinical clusters.
+
+Selected concepts remain individual nodes and are excluded from group membership
+counts. Each paper contributes at most once to a group and once to a group-to-group
+edge. Group counts therefore cannot be added to estimate distinct papers. Opening
+a group narrows the reading list and year chart to its supporting papers; selecting
+a concept or pair opens its evidence. Breadcrumbs restore broader scopes. Changing
+search, year, journal or design resets the alphabetical path because its membership
+depends on those filters. Indexed papers without extracted concepts are explicitly
+counted and are available in the broader reading list.
+
+The minimum shared-paper control filters connections, not concepts. There is no
+500-edge truncation in this view. The initial minimum of one retains every
+connection at the displayed level.
 The same nodes and links are available on desktop and mobile. Panning, zooming,
 keyboard controls and the full node list support dense views. Label suppression
 does not remove nodes. The JSON export is a snapshot of the **displayed graph**,
@@ -100,8 +119,9 @@ coverage bias. The atlas must not be described as clinically validated.
 ## Connected research workflow
 
 The existing Concepts, Connections and Publication timeline designs form one
-navigation flow. Switching to Citations carries the selected concept or pair as
-a source-paper scope. Returning to Concepts restores that selection. Year bars
+navigation flow. Switching to Citations carries the selected concept or pair and
+the open category/range as a source-paper scope. Returning to Concepts restores
+that selection. Year bars
 count the selected indexed papers, not unrelated papers from the whole corpus.
 Knowledge narratives remain corpus-wide and are labeled separately from the
 filtered reading list.
@@ -129,7 +149,9 @@ annotate and add the paper to a project; returning restores the research context
 There is no new inferred evidence, model, original download, or bulk acquisition
 in this navigation flow.
 
-Deploy `20261013020723_integrated_research_navigation.sql` before this frontend.
+Deploy `20261102045506_whole_corpus_concept_map.sql` before this frontend (after
+`20261013020723_integrated_research_navigation.sql`). The Concepts view requires
+the authenticated `knowledge_concept_map` RPC; deployment preflight checks it.
 The service-only `research_navigation_contract` marker is required by deployment
 preflight; anonymous and reader roles cannot execute it. The network RPC retains
 its confirmed/approved-reader check, empty search path and eight-second timeout.

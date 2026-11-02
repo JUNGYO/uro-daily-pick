@@ -1,6 +1,17 @@
 import { expect, it, vi } from "vitest";
 vi.mock("./supabase", () => ({ supabase: {} }));
 import { atlasLink, paperFromAtlas, paperAtlasLink, switchRelationship } from "./researchNavigation";
+it("carries complete-map group scope into citations and restores its browse path", () => {
+  const original = new URLSearchParams(
+    "project=42&category=condition&prefix=0%2F1&concept=aaaaaaaaaaaaaaaaaaaaaaaa&with=bbbbbbbbbbbbbbbbbbbbbbbb",
+  );
+  const citations = switchRelationship(original, "citations");
+  expect(citations.get("scopeCategory")).toBe("condition");
+  expect(citations.get("scopePrefix")).toBe("0/1");
+  expect(citations.has("category")).toBe(false);
+  citations.set("concept", "12345");
+  expect([...switchRelationship(citations, "concepts")].sort()).toEqual([...original].sort());
+});
 it("round-trips a selected pair and project with bibliographic filters", () => {
   const original = new URLSearchParams({
     project: "42",
