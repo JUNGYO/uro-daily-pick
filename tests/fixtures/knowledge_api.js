@@ -66,6 +66,7 @@ export function knowledgeRpc(name, args, scenario, papers) {
         p_journal: f.journal,
         p_design: f.design,
         p_relation: f.relation,
+        p_graph: f.graph,
       },
       scenario,
       papers,
@@ -379,7 +380,12 @@ export function knowledgeRpc(name, args, scenario, papers) {
     };
   }
   if (name === "knowledge_atlas") {
-    const liveCount = scenario === "atlas-live" ? 30 + liveAtlasCalls++ : 30;
+    // Graph probes and the evidence pane read the same indexed snapshot. Only
+    // the visible evidence refresh advances this scenario's synthetic update.
+    const liveCount =
+      scenario === "atlas-live"
+        ? 30 + (args.p_graph ? liveAtlasCalls : liveAtlasCalls++)
+        : 30;
     const graphNodes =
       scenario === "atlas-dense"
         ? [
