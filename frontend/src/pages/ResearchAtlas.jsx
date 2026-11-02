@@ -584,11 +584,17 @@ export default function ResearchAtlas() {
                 <section className="atlas-network-panel" aria-label="Research network">
                   <div className="atlas-network-heading">
                     <div>
-                      <h2>Research connections</h2>
+                      <h2>
+                        {relation === "concepts" && clusterPath
+                          ? "Community connections"
+                          : "Research connections"}
+                      </h2>
                       <p>
                         {relation === "citations"
                           ? "Follow references through time. Select a paper to explore its connections."
-                          : "Explore all concepts extracted from full texts, grouped by their shared papers. Open a community to see its concepts."}
+                          : clusterPath
+                            ? "Explore the concepts in this community and the papers they share. Groups contain all their member concepts."
+                            : "Explore all concepts extracted from full texts, grouped by their shared papers. Open a community to see its concepts."}
                       </p>
                     </div>
                     <div className="atlas-segment" aria-label="Network relationship">

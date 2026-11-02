@@ -157,6 +157,47 @@ describe("ConceptAtlas exploration", () => {
     expect(transform()).toContain("scale(1)");
     expect(graph().style.touchAction).toBe("pan-y");
   });
+  it("explains a community's narrower connection scope and returns to the whole map", () => {
+    const reset = vi.fn();
+    render(
+      <ConceptAtlas
+        data={{
+          ...data,
+          nodes: [
+            { ...group, kind: "community", concept_count: 349, drill: { cluster: "large" } },
+            {
+              ...group,
+              id: "group:small",
+              label: "Apalutamide",
+              kind: "community",
+              concept_count: 8,
+              drill: { cluster: "small" },
+            },
+          ],
+          edges: [],
+          map: {
+            ...data.map,
+            level: "community",
+            grouping: "cooccurrence_community",
+            represented_concepts: 357,
+            scope_concepts: 5340,
+          },
+        }}
+        breadcrumbs={[{ label: "All concepts", onClick: reset }, { label: "Prostate cancer" }]}
+        onReset={reset}
+      />,
+    );
+    expect(screen.getByText("357 concepts represented")).toBeInTheDocument();
+    expect(screen.getByText("Within selected community · 2 explorable groups")).toBeInTheDocument();
+    expect(screen.getByText("5,340 concepts in the whole map")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Showing connections within this community. Whole map restores the connections between communities.",
+      ),
+    ).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Whole map" }));
+    expect(reset).toHaveBeenCalledOnce();
+  });
   it("distinguishes a stable community map's papers from selected concept evidence", () => {
     render(
       <ConceptAtlas

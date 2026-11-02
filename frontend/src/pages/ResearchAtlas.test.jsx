@@ -136,8 +136,10 @@ describe("ResearchAtlas full-text communities", () => {
     const initial = rpc.mock.calls[0][1].p_filters;
     expect(initial.graph).toBe(true);
     expect(initial.focus).toBeUndefined();
+    expect(screen.getByRole("heading", { name: "Research connections" })).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole("button", { name: group.label })[0]);
     await screen.findByText("Selected-community paper");
+    expect(screen.getByRole("heading", { name: "Community connections" })).toBeInTheDocument();
     expect(screen.queryByText("All-scope paper")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "2025: 2 papers; 0 structured" })).toBeInTheDocument();
     expect(
