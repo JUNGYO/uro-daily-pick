@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { buildConceptCommunityTree, partitionModularity } from "./conceptCommunities";
+import {
+  buildConceptCommunityTree,
+  conceptCommunityFrontier,
+  partitionModularity,
+} from "./conceptCommunities";
 
 const node = (id, papers = [], label = id) => ({
   id,
@@ -23,6 +27,31 @@ function fixture() {
 }
 
 describe("complete full-text research communities", () => {
+  it("opens the research subcommunities instead of a dominant optimizer shell", () => {
+    const leaf = (id) => ({ id, members: [id], children: [] });
+    const group = (id, children) => ({ id, children, members: children.flatMap((item) => item.members) });
+    const terminal = (id, count) =>
+      group(
+        id,
+        Array.from({ length: count }, (_, i) => leaf(`${id}-${i}`)),
+      );
+    const satellite = terminal("apalutamide", 8);
+    const modules = [80, 75, 70, 65, 59].map((count, i) => terminal(`research-${i}`, count));
+    const dominant = group("prostate-intermediate", modules);
+    const branch = group("prostate", [dominant, satellite]);
+    const frontier = conceptCommunityFrontier(branch);
+    expect(frontier.map((item) => item.id)).toEqual([...modules.map((item) => item.id), satellite.id]);
+    expect(frontier.flatMap((item) => item.members).sort()).toEqual([...branch.members].sort());
+    expect(new Set(frontier.flatMap((item) => item.members)).size).toBe(357);
+    expect(branch.children).toEqual([dominant, satellite]);
+    // A meaningful terminal module is still available for an explicit drill.
+    const largeTerminal = terminal("actual-concepts", 180);
+    expect(conceptCommunityFrontier(group("parent", [largeTerminal, satellite]))).toEqual([
+      largeTerminal,
+      satellite,
+    ]);
+    expect(conceptCommunityFrontier(largeTerminal)).toEqual(largeTerminal.children);
+  });
   it("retains every original, including rare, unresolved and isolated concepts beyond 100", () => {
     const data = fixture(),
       tree = buildConceptCommunityTree(data),

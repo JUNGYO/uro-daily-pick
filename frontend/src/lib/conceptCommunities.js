@@ -129,6 +129,23 @@ const genericLabels = new Set([
   "age",
 ]);
 
+// Optimizer levels can add a small satellite to an almost unchanged community.
+// Opening that level should reveal its research subcommunities, not require a
+// second click on the same dominant group. Keep a terminal concept group intact
+// until it is opened explicitly; this changes detail, never graph membership.
+export function conceptCommunityFrontier(branch) {
+  const frontier = [...branch.children];
+  for (;;) {
+    const index = frontier.findIndex(
+      (item) =>
+        item.members.length > branch.members.length / 2 &&
+        item.children.some((child) => child.members.length > 1),
+    );
+    if (index < 0) return frontier;
+    frontier.splice(index, 1, ...frontier[index].children);
+  }
+}
+
 export function buildConceptCommunityTree(data, { resolution = COMMUNITY_RESOLUTION } = {}) {
   const original = [...(data.nodes || [])].sort((a, b) => compare(a.id, b.id));
   const byId = new Map(original.map((node) => [node.id, node]));
@@ -219,7 +236,7 @@ export function buildConceptCommunityTree(data, { resolution = COMMUNITY_RESOLUT
     view(path = "", { selected, peer, minimum = 1 } = {}) {
       const branch = path ? tree.get(path) : null;
       const allMembers = branch?.members || original.map((node) => node.id);
-      let visible = branch ? branch.children : roots;
+      let visible = branch ? conceptCommunityFrontier(branch) : roots;
       // Within a community of modest size, show all original concepts directly.
       // This is a level-of-detail choice, never a data or node-count cutoff.
       if (branch && branch.members.length <= 80) visible = branch.members.map((id) => tree.get(id));

@@ -122,6 +122,7 @@ export default function ConceptAtlas({
   };
   const groupMode = data.map?.grouping === "alphabetical_range";
   const communities = data.map?.grouping === "cooccurrence_community";
+  const withinCommunity = communities && data.map?.level === "community";
   return (
     <div className="concept-atlas" aria-busy={loading}>
       {(breadcrumbs.length > 0 || onBack) && (
@@ -146,7 +147,13 @@ export default function ConceptAtlas({
             ))}
           </ol>
           {onReset && (data.map?.level !== "overview" || selected || peer) && (
-            <button type="button" onClick={onReset} disabled={loading} className="concept-atlas-reset">
+            <button
+              type="button"
+              onClick={onReset}
+              disabled={loading}
+              className="concept-atlas-reset"
+              title="Return to the whole concept map and its connections"
+            >
               Whole map
             </button>
           )}
@@ -158,6 +165,7 @@ export default function ConceptAtlas({
             {number(coverage.represented)} concepts {coverage.complete ? "represented" : "in this view"}
           </strong>
           <span>
+            {withinCommunity && "Within selected community · "}
             {coverage.groups > 0
               ? `${number(coverage.groups)} explorable groups${coverage.concepts ? ` + ${number(coverage.concepts)} individual concepts` : ""}`
               : "Every concept shown individually"}
@@ -168,7 +176,9 @@ export default function ConceptAtlas({
           in this map level
           <span>
             {coverage.scope > coverage.represented
-              ? `${number(coverage.scope)} concepts across the selected scope`
+              ? withinCommunity
+                ? `${number(coverage.scope)} concepts in the whole map`
+                : `${number(coverage.scope)} concepts across the selected scope`
               : "within the current filters"}
           </span>
           {(selected || peer) && (
@@ -179,13 +189,15 @@ export default function ConceptAtlas({
         </span>
       </div>
       <p className="concept-atlas-instruction">
-        {coverage.groups > 0
-          ? communities
-            ? "Open a community to explore its concepts and supporting papers. Labels name actual concepts in that community."
-            : groupMode
-              ? "Open a label range to reach every concept in this category."
-              : "Open a category to explore its concepts. Every indexed concept belongs to the map."
-          : "Select a concept or connection to examine its supporting papers."}
+        {withinCommunity
+          ? "Showing connections within this community. Whole map restores the connections between communities."
+          : coverage.groups > 0
+            ? communities
+              ? "Open a community to explore its concepts and supporting papers. Labels name actual concepts in that community."
+              : groupMode
+                ? "Open a label range to reach every concept in this category."
+                : "Open a category to explore its concepts. Every indexed concept belongs to the map."
+            : "Select a concept or connection to examine its supporting papers."}
       </p>
       <div className="concept-atlas-toolbar">
         <span>

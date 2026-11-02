@@ -70,6 +70,11 @@ Substance, Psychology or Technology. Unresolved concepts retain their original
 source-bound labels and remain included.
 
 Opening a community reveals its child communities and original concepts.
+Intermediate optimizer levels that leave more than half the selected community
+inside one nearly unchanged group are skipped when that group has its own
+subcommunities. Every member remains represented once; terminal groups of actual
+concepts remain available for explicit expansion. The selected community view
+shows its internal connections, with Whole map restoring between-community links.
 Communities containing at most 80 concepts show all their concepts directly.
 Eighty controls this level of detail only; it never drops a concept. Groups show
 their contained concept count, and the coverage line distinguishes represented
