@@ -20,6 +20,7 @@ export const CATEGORY_LABELS = {
   geography: "Geography",
   multiple: "Multiple MeSH categories",
   unclassified: "Unresolved term",
+  community: "Co-occurring concepts",
   paper: "Paper",
   reference: "Referenced paper",
 };

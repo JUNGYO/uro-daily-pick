@@ -48,7 +48,7 @@ export default function ConceptAtlas({
       (data.nodes || []).map((node) => ({
         ...node,
         label:
-          isConceptGroup(node) && node.drill && !node.drill.prefix
+          isConceptGroup(node) && node.drill?.category && !node.drill.prefix
             ? CATEGORY_LABELS[node.kind] || node.label
             : node.label,
       })),
@@ -57,7 +57,7 @@ export default function ConceptAtlas({
   const edges = data.edges || [];
   const coverage = conceptMapCoverage(data);
   const height = width < 500 ? 470 : 560;
-  const scopeKey = `${data.map?.level || "overview"}:${data.map?.category || ""}:${data.map?.prefix || ""}:${selected || ""}:${peer || ""}`;
+  const scopeKey = `${data.map?.level || "overview"}:${data.map?.cluster || ""}:${data.map?.category || ""}:${data.map?.prefix || ""}:${selected || ""}:${peer || ""}`;
   useEffect(() => {
     const element = canvas.current;
     if (!element) return;
@@ -121,6 +121,7 @@ export default function ConceptAtlas({
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   const groupMode = data.map?.grouping === "alphabetical_range";
+  const communities = data.map?.grouping === "cooccurrence_community";
   return (
     <div className="concept-atlas" aria-busy={loading}>
       {(breadcrumbs.length > 0 || onBack) && (
@@ -173,18 +174,22 @@ export default function ConceptAtlas({
       </div>
       <p className="concept-atlas-instruction">
         {coverage.groups > 0
-          ? groupMode
-            ? "Open a label range to reach every concept in this category."
-            : "Open a category to explore its concepts. Every indexed concept belongs to the map."
+          ? communities
+            ? "Open a community to explore its concepts and supporting papers. Labels name actual concepts in that community."
+            : groupMode
+              ? "Open a label range to reach every concept in this category."
+              : "Open a category to explore its concepts. Every indexed concept belongs to the map."
           : "Select a concept or connection to examine its supporting papers."}
       </p>
       <div className="concept-atlas-toolbar">
         <span>
-          {groupMode
-            ? "Concept ranges"
-            : coverage.groups
-              ? "Whole concept structure"
-              : "Concept co-occurrence"}
+          {communities
+            ? "Full-text research communities"
+            : groupMode
+              ? "Concept ranges"
+              : coverage.groups
+                ? "Whole concept structure"
+                : "Concept co-occurrence"}
         </span>
         {setMinimum && (
           <label className="concept-atlas-minimum">
@@ -259,7 +264,7 @@ export default function ConceptAtlas({
                 >
                   <i
                     className={isConceptGroup(node) ? "is-group" : ""}
-                    style={{ background: categoryColor(node.kind) }}
+                    style={{ background: node.color || categoryColor(node.kind) }}
                     aria-hidden="true"
                   />
                   <span>
@@ -392,7 +397,7 @@ export default function ConceptAtlas({
                         cy={point.y}
                         r="3"
                         fill="none"
-                        stroke={categoryColor(point.kind)}
+                        stroke={point.color || categoryColor(point.kind)}
                         strokeOpacity="0.65"
                         strokeWidth="1"
                       />
@@ -404,7 +409,7 @@ export default function ConceptAtlas({
                         cy={point.y}
                         r={point.r + 5}
                         fill="none"
-                        stroke={categoryColor(point.kind)}
+                        stroke={point.color || categoryColor(point.kind)}
                         strokeOpacity="0.4"
                         strokeWidth="1.5"
                       />
@@ -414,7 +419,7 @@ export default function ConceptAtlas({
                       cx={point.x}
                       cy={point.y}
                       r={point.r}
-                      fill={categoryColor(point.kind)}
+                      fill={point.color || categoryColor(point.kind)}
                       opacity={
                         !highlighted || point.id === highlighted || active || neighbors.has(point.id)
                           ? 1
@@ -496,12 +501,16 @@ export default function ConceptAtlas({
         )}
       </div>
       <div className="concept-atlas-legend">
-        {[...new Set(nodes.map((node) => node.kind))].sort().map((kind) => (
-          <span key={kind}>
-            <i style={{ background: categoryColor(kind) }} />
-            {CATEGORY_LABELS[kind] || "Unclassified"}
-          </span>
-        ))}
+        {communities ? (
+          <span>Color follows a co-occurrence community</span>
+        ) : (
+          [...new Set(nodes.map((node) => node.kind))].sort().map((kind) => (
+            <span key={kind}>
+              <i style={{ background: categoryColor(kind) }} />
+              {CATEGORY_LABELS[kind] || "Unclassified"}
+            </span>
+          ))
+        )}
         {coverage.groups > 0 && (
           <span>
             <i className="concept-atlas-ring-key" />
@@ -511,22 +520,46 @@ export default function ConceptAtlas({
       </div>
       <details className="concept-atlas-method">
         <summary>What this map represents</summary>
-        <p>
-          Filled circle area = distinct indexed papers; tiny nodes have a visibility outline. Line width =
-          shared-paper count (log scale). Color = MeSH category. The shared-paper filter changes connections,
-          never removes concepts. Positions help navigation; distance is not a measure of clinical similarity.
-        </p>
-        <p>
-          Large views group every concept by MeSH category, then by alphabetical label ranges. These are
-          navigation groups, not inferred research clusters. A group edge counts papers containing at least
-          one concept from each endpoint. Papers can belong to multiple groups, so group paper counts must not
-          be added together.
-        </p>
-        <p>
-          The map covers indexed full texts within the current filters. Registered papers without indexed
-          concepts are not represented. Counts do not measure clinical effect, study quality, or consensus.
-          Grouping reduces visual detail without selecting only the most frequent concepts.
-        </p>
+        {communities ? (
+          <>
+            <p>
+              Every extracted concept is included, including rare concepts and those without a MeSH match.
+              Communities are computed from the complete shared-paper network; they are not predefined disease
+              categories. Each label lists actual representative concepts.
+            </p>
+            <p>
+              Circle area = distinct indexed papers. A line counts distinct papers containing concepts from
+              both endpoints. Color identifies a community; position is for navigation, not a measurement of
+              clinical similarity. Shared papers changes visible connections, not community membership.
+            </p>
+            <p>
+              Deterministic weighted modularity grouping, resolution {data.map.resolution}. Open a community
+              to reach every original concept. Papers may support several communities; their counts must not
+              be added. The map describes indexed full texts, not the entire catalog, citation direction,
+              clinical effects or evidence quality.
+            </p>
+          </>
+        ) : (
+          <>
+            <p>
+              Filled circle area = distinct indexed papers; tiny nodes have a visibility outline. Line width =
+              shared-paper count (log scale). Color = MeSH category. The shared-paper filter changes
+              connections, never removes concepts. Positions help navigation; distance is not a measure of
+              clinical similarity.
+            </p>
+            <p>
+              Large views group every concept by MeSH category, then by alphabetical label ranges. These are
+              navigation groups, not inferred research clusters. A group edge counts papers containing at
+              least one concept from each endpoint. Papers can belong to multiple groups, so group paper
+              counts must not be added together.
+            </p>
+            <p>
+              The map covers indexed full texts within the current filters. Registered papers without indexed
+              concepts are not represented. Counts do not measure clinical effect, study quality, or
+              consensus. Grouping reduces visual detail without selecting only the most frequent concepts.
+            </p>
+          </>
+        )}
       </details>
     </div>
   );

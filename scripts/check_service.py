@@ -39,6 +39,13 @@ def main():
         missing.extend('/rpc/'+name for name in ('knowledge_search','knowledge_page','knowledge_graph','publish_knowledge','knowledge_atlas','knowledge_network','knowledge_paper','publish_scientific_knowledge') if '/rpc/'+name not in paths)
         if missing:
             raise SystemExit("Missing database contracts: " + ", ".join(missing))
+        # RPC presence alone cannot distinguish the previous category/range map
+        # from the complete graph and community-paper scope contract.
+        contract = requests.get(f"{url}/rest/v1/rpc/research_navigation_contract", headers=headers, timeout=30)
+        contract.raise_for_status()
+        version = contract.json()
+        if type(version) is not int or version < 2:
+            raise SystemExit("Research navigation database contract is outdated; apply the full-text graph migration before deploying")
         for table, columns in [("reader_states", "read_at,saved_at"), ("profiles", "personalization_enabled,access_status,access_revision,original_access_enabled,original_access_revision"), ("catalog_backfill_jobs", "journal_id,query_version,registry_version,priority")]:
             contract = requests.get(f"{url}/rest/v1/{table}", headers=headers,
                                     params={"select":columns,"limit":"0"}, timeout=30)

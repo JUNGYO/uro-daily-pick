@@ -1,4 +1,5 @@
 import { conceptMapFixture } from "./concept_map_api";
+import { researchCommunitiesFixture } from "./research_communities_api";
 const nodes = [
   {
     id: "a".repeat(24),
@@ -30,6 +31,14 @@ const nodes = [
 ];
 let liveAtlasCalls = 0;
 export function knowledgeRpc(name, args, scenario, papers) {
+  if (
+    scenario === "atlas-research-communities" &&
+    ["knowledge_concept_map", "knowledge_network"].includes(name)
+  )
+    return {
+      data: researchCommunitiesFixture(name, args.p_filters, papers),
+      error: null,
+    };
   if (scenario === "knowledge-error")
     return { error: { message: "Simulated knowledge outage" } };
   if (name === "knowledge_concept_map") {
@@ -103,22 +112,20 @@ export function knowledgeRpc(name, args, scenario, papers) {
           },
           error: null,
         };
-      const seeds = papers
-        .slice(0, 2)
-        .map((p, i) => ({
-          id: p.pmid,
-          pmid: p.pmid,
-          label: p.title,
-          year: 2024 + i,
-          authors: p.authors,
-          journal: p.journal,
-          in_catalog: true,
-          indexed: true,
-          matching_source: true,
-          kind: "paper",
-          incoming_citations: i ? 1 : 0,
-          identified_references: i ? 0 : 25,
-        }));
+      const seeds = papers.slice(0, 2).map((p, i) => ({
+        id: p.pmid,
+        pmid: p.pmid,
+        label: p.title,
+        year: 2024 + i,
+        authors: p.authors,
+        journal: p.journal,
+        in_catalog: true,
+        indexed: true,
+        matching_source: true,
+        kind: "paper",
+        incoming_citations: i ? 1 : 0,
+        identified_references: i ? 0 : 25,
+      }));
       const targets = Array.from({ length: 24 }, (_, i) => ({
         id: String(910000 + i),
         pmid: String(910000 + i),

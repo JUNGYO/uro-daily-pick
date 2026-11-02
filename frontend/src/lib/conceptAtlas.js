@@ -127,7 +127,9 @@ export function conceptMapSnapshot(data) {
     method: {
       representation: "Complete concept partition of the current indexed-paper scope; no top-N sampling",
       groups:
-        "MeSH categories, then alphabetical label ranges; navigation groups, not inferred research clusters",
+        data.map?.grouping === "cooccurrence_community"
+          ? "Complete full-text co-occurrence communities, deterministic connected modularity; labels are actual representative concepts"
+          : "MeSH categories, then alphabetical label ranges; navigation groups, not inferred research clusters",
       node_area: "Distinct matching papers containing this concept or at least one group member",
       edge: "Distinct matching papers containing a member of both endpoints; not citations or causation",
       counts: "Papers may occur in multiple groups; group paper counts must not be summed",

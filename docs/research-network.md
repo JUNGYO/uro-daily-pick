@@ -44,7 +44,9 @@ These counts refer to reports, not independent studies or participants. A single
 paper can generate many pairs; those pairs are not independent observations.
 
 Circle area is proportional to paper count, with one common size scale per view.
-Line width increases logarithmically with shared-paper count. Color represents entity category.
+Line width increases logarithmically with shared-paper count. Color follows the
+co-occurrence community across its drill-down levels; ontology categories remain
+entity provenance, not the overview's grouping rule.
 A deterministic force layout uses Jaccard overlap to arrange concepts, followed
 by collision-aware label placement. Coordinates are navigation aids, not measured
 scientific distances. Selecting an edge reveals the actual shared papers and
@@ -52,27 +54,40 @@ marginal counts. Clinical association, effect, quality and consensus are not
 inferred from co-occurrence.
 
 The Concepts view starts with **every extracted concept in the filtered indexed
-corpus represented**, without a frequency-ranked top-N selection. Small scopes
-show individual concepts. Larger scopes show the existing MeSH category groups;
-opening a group reveals its members. Categories with more than 80 concepts are
-partitioned into complete alphabetical ranges until each leaf fits the map.
-Eighty is a per-level rendering threshold, not a sampling limit. Rare and isolated
-concepts remain reachable. Groups show their contained concept count, and the
-coverage line distinguishes represented concepts from visible circles. Categories
-and alphabetical ranges are navigation aids, not inferred clinical clusters.
+full-text corpus represented**, without a frequency-ranked top-N selection. It
+uses the complete canonical concept graph, including single-paper concepts,
+single-paper edges and isolated nodes. Catalog MeSH terms, keywords and titles
+do not add unindexed papers or supply clinical theme assignments for this map.
+
+The overview groups concepts by their actual shared-paper relationships using a
+deterministic multilevel weighted-modularity algorithm with resolution 1.5.
+Moving phases split disconnected pieces; isolated concepts remain independent.
+All concepts remain in the hierarchy, and the number of communities emerges
+from the graph rather than a requested 60, 80 or 100-node total. Group labels
+combine up to three actual representative concept labels; they are not invented
+clinical diagnoses or labels copied from broad ontology categories such as
+Substance, Psychology or Technology. Unresolved concepts retain their original
+source-bound labels and remain included.
+
+Opening a community reveals its child communities and original concepts.
+Communities containing at most 80 concepts show all their concepts directly.
+Eighty controls this level of detail only; it never drops a concept. Groups show
+their contained concept count, and the coverage line distinguishes represented
+concepts from visible circles. These are exploratory co-occurrence communities,
+not validated clinical taxonomies or evidence of a common causal mechanism.
 
 Selected concepts remain individual nodes and are excluded from group membership
 counts. Each paper contributes at most once to a group and once to a group-to-group
 edge. Group counts therefore cannot be added to estimate distinct papers. Opening
 a group narrows the reading list and year chart to its supporting papers; selecting
 a concept or pair opens its evidence. Breadcrumbs restore broader scopes. Changing
-search, year, journal or design resets the alphabetical path because its membership
+search, year, journal or design resets the community path because its membership
 depends on those filters. Indexed papers without extracted concepts are explicitly
 counted and are available in the broader reading list.
 
-The minimum shared-paper control filters connections, not concepts. There is no
-500-edge truncation in this view. The initial minimum of one retains every
-connection at the displayed level.
+The minimum shared-paper control filters displayed connections, not concepts or
+the graph used to form communities. There is no 500-edge truncation in this
+view. The initial minimum of one retains every connection at the displayed level.
 The same nodes and links are available on desktop and mobile. Panning, zooming,
 keyboard controls and the full node list support dense views. Label suppression
 does not remove nodes. The JSON export is a snapshot of the **displayed graph**,
@@ -120,7 +135,7 @@ coverage bias. The atlas must not be described as clinically validated.
 
 The existing Concepts, Connections and Publication timeline designs form one
 navigation flow. Switching to Citations carries the selected concept or pair and
-the open category/range as a source-paper scope. Returning to Concepts restores
+the open community as a source-paper scope. Returning to Concepts restores
 that selection. Year bars
 count the selected indexed papers, not unrelated papers from the whole corpus.
 Knowledge narratives remain corpus-wide and are labeled separately from the
@@ -149,12 +164,24 @@ annotate and add the paper to a project; returning restores the research context
 There is no new inferred evidence, model, original download, or bulk acquisition
 in this navigation flow.
 
-Deploy `20261102045506_whole_corpus_concept_map.sql` before this frontend (after
-`20261013020723_integrated_research_navigation.sql`). The Concepts view requires
-the authenticated `knowledge_concept_map` RPC; deployment preflight checks it.
-The service-only `research_navigation_contract` marker is required by deployment
-preflight; anonymous and reader roles cannot execute it. The network RPC retains
-its confirmed/approved-reader check, empty search path and eight-second timeout.
+The authenticated `knowledge_concept_map` RPC accepts `graph: true` to return all
+actual canonical concept nodes and positive co-occurrence edges, regardless of
+the display threshold. Each node carries its distinct `paper_ids`, allowing a
+community's document count and an inter-community edge to use exact paper unions
+and intersections rather than sums of concept or edge counts. `group_entities`
+accepts canonical concept IDs and narrows only the selected papers and yearly
+counts; it does not change the graph being clustered. The citation RPC accepts
+the same member IDs as `scope_entities`. Both retain bibliography filters and
+project/library authorization. An empty group selects no papers; unknown IDs
+cannot introduce papers. Legacy category/range parameters remain supported for
+older clients but cannot be combined with a community scope.
+
+Deploy `20261102062405_fulltext_graph_communities.sql` before this frontend, after
+the whole-corpus concept-map and entry-authorization migrations. Deployment
+preflight requires the service-only `research_navigation_contract` marker to
+return at least 2, so merely having the older RPC is insufficient. Anonymous and
+reader roles cannot execute that marker. Reader approval, project/library access,
+the private core's execution revokes and empty search paths remain unchanged.
 
 ## Sources
 
@@ -162,5 +189,6 @@ its confirmed/approved-reader check, empty search path and eight-second timeout.
 - [Official MeSH downloads](https://www.nlm.nih.gov/databases/download/mesh.html)
 - [Schwartz and Hearst: explicit abbreviation definition extraction](https://pubmed.ncbi.nlm.nih.gov/12603049/)
 - [VOSviewer visual encodings](https://app.vosviewer.com/docs/user-interface/main-panel/)
+- [Weighted Louvain modularity and resolution](https://networkx.org/documentation/stable/reference/algorithms/generated/networkx.algorithms.community.louvain.louvain_communities.html)
 
 The implementation uses its own layout, not VOSviewer's clustering or inference.

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
 import { Network, Search, SlidersHorizontal, ArrowUpRight, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { useAuth } from "../lib/auth";
@@ -13,6 +13,8 @@ import ConceptAtlas from "../components/ConceptAtlas";
 import CitationNetwork from "../components/CitationNetwork";
 import { CATEGORY_LABELS, categoryColor } from "../lib/researchNetwork";
 import { browseConceptMap, resetConceptMap, selectConceptMap } from "../lib/conceptNavigation";
+import { buildConceptCommunityTree } from "../lib/conceptCommunities";
+import { communityRequestFilters, communityScopeResource } from "../lib/conceptCommunityScope";
 
 const num = (n) => Number(n || 0).toLocaleString("en-US");
 const THIS_YEAR = new Date().getFullYear();
@@ -151,6 +153,9 @@ export default function ResearchAtlas() {
     prefix = params.get("prefix") || "",
     scopeCategory = params.get("scopeCategory") || "",
     scopePrefix = params.get("scopePrefix") || "";
+  const cluster = params.get("cluster") || "",
+    scopeCluster = params.get("scopeCluster") || "";
+  const clusterPath = relation === "citations" ? scopeCluster : cluster;
   const citationPage = Math.max(0, Number(params.get("citationPage")) || 0);
   const direction = ["all", "references", "cited-by"].includes(params.get("direction"))
     ? params.get("direction")
@@ -161,6 +166,7 @@ export default function ResearchAtlas() {
       selected ||
       topic ||
       scopeCategory ||
+      scopeCluster ||
       project ||
       library ||
       query ||
@@ -178,7 +184,8 @@ export default function ResearchAtlas() {
     next.delete("unlinkedPage");
     next.delete("citationPage");
     if (["q", "from", "to", "journal", "design"].some((key) => key in fields)) {
-      for (const key of ["category", "prefix", "scopeCategory", "scopePrefix"]) next.delete(key);
+      for (const key of ["category", "prefix", "scopeCategory", "scopePrefix", "cluster", "scopeCluster"])
+        next.delete(key);
     }
     if ("concept" in fields) next.delete("direction");
     next.delete("view");
@@ -188,65 +195,146 @@ export default function ResearchAtlas() {
     }
     setParams(next);
   };
-  const r = useResource(
-    () =>
-      rpc(relation === "concepts" || needsStart ? "knowledge_concept_map" : "knowledge_network", {
-        p_filters: {
-          q: query.slice(0, 200),
-          from,
-          to,
-          journal,
-          design,
-          focus: selected,
-          peer,
-          page,
-          unlinked_page: unlinkedPage,
-          relation: needsStart ? "concepts" : relation,
-          ...(topic ? { scope_concept: topic } : {}),
-          ...(topicPeer ? { scope_peer: topicPeer } : {}),
-          ...(project ? { project: Number(project) } : {}),
-          ...(library ? { library, scope_q: scopeQuery } : {}),
-          ...(relation === "citations" && !needsStart
-            ? {
-                citation_page: citationPage,
-                direction,
-                limit,
-                ...(scopeCategory ? { scope_category: scopeCategory } : {}),
-                ...(scopePrefix ? { scope_prefix: scopePrefix } : {}),
-              }
-            : { ...(category ? { category } : {}), ...(prefix ? { prefix } : {}) }),
-          min_shared: minimum,
-        },
-      }),
-    [
-      user.id,
-      query,
-      from,
-      to,
-      journal,
-      design,
-      selected,
-      peer,
-      page,
-      unlinkedPage,
-      relation,
-      minimum,
-      limit,
-      topic,
-      topicPeer,
-      project,
-      library,
-      scopeQuery,
-      citationPage,
-      direction,
-      needsStart,
-      category,
-      prefix,
-      scopeCategory,
-      scopePrefix,
-    ],
+  const requestFilters = {
+    q: query.slice(0, 200),
+    from,
+    to,
+    journal,
+    design,
+    focus: selected,
+    peer,
+    page,
+    unlinked_page: unlinkedPage,
+    relation: needsStart ? "concepts" : relation,
+    ...(topic ? { scope_concept: topic } : {}),
+    ...(topicPeer ? { scope_peer: topicPeer } : {}),
+    ...(project ? { project: Number(project) } : {}),
+    ...(library ? { library, scope_q: scopeQuery } : {}),
+    ...(relation === "citations" && !needsStart
+      ? {
+          citation_page: citationPage,
+          direction,
+          limit,
+          ...(scopeCategory ? { scope_category: scopeCategory } : {}),
+          ...(scopePrefix ? { scope_prefix: scopePrefix } : {}),
+        }
+      : { ...(category ? { category } : {}), ...(prefix ? { prefix } : {}) }),
+    min_shared: minimum,
+  };
+  const graphFilters = communityRequestFilters(requestFilters);
+  const graphKey = JSON.stringify([user.id, graphFilters]);
+  const graph = useResource(
+    async () => ({
+      ...(await rpc("knowledge_concept_map", { p_filters: graphFilters })),
+      _communityRequest: graphKey,
+    }),
+    [user.id, graphKey],
   );
-  const d = r.data;
+  const graphData = graph.data?._communityRequest === graphKey ? graph.data : null;
+  const currentGraph = { ...graph, data: graphData, loading: graph.loading || (!graphData && !graph.error) };
+  const fullGraph = graphData?.map?.grouping === "full_graph" || graphData?.coverage?.all_graph === true;
+  const legacyGraph = !!graphData && !fullGraph;
+  useEffect(() => {
+    if (!fullGraph || !(category || prefix || scopeCategory || scopePrefix)) return;
+    const next = new URLSearchParams(params);
+    ["category", "prefix", "scopeCategory", "scopePrefix"].forEach((key) => next.delete(key));
+    setParams(next, { replace: true });
+  }, [fullGraph, category, prefix, scopeCategory, scopePrefix, params, setParams]);
+  const tree = useMemo(
+    () => (fullGraph ? buildConceptCommunityTree(graphData) : null),
+    [graphData, fullGraph],
+  );
+  const clusterMembers = useMemo(
+    () => (clusterPath && tree ? tree.members(clusterPath) || [] : []),
+    [tree, clusterPath],
+  );
+  const memberKey = clusterMembers.join(",");
+  const scopeKey = JSON.stringify([user.id, requestFilters, clusterPath, memberKey, legacyGraph]);
+  const scopeRequest = async (name, filters) => ({
+    ...(await rpc(name, { p_filters: filters })),
+    _communityScopeRequest: scopeKey,
+  });
+  const scoped = useResource(() => {
+    if (legacyGraph) {
+      return scopeRequest(
+        relation === "citations" && !needsStart ? "knowledge_network" : "knowledge_concept_map",
+        requestFilters,
+      );
+    }
+    if (clusterPath && (!tree || !clusterMembers.length)) return Promise.resolve(null);
+    if (relation === "citations" && !needsStart) {
+      return scopeRequest("knowledge_network", {
+        ...requestFilters,
+        ...(clusterPath ? { scope_entities: clusterMembers } : {}),
+      });
+    }
+    if (clusterPath || selected || peer || topic || topicPeer || page > 0) {
+      return scopeRequest("knowledge_concept_map", {
+        ...graphFilters,
+        focus: selected,
+        peer,
+        page,
+        ...(topic ? { scope_concept: topic } : {}),
+        ...(topicPeer ? { scope_peer: topicPeer } : {}),
+        ...(clusterPath ? { group_entities: clusterMembers } : {}),
+      });
+    }
+    return Promise.resolve(null);
+  }, [
+    user.id,
+    query,
+    from,
+    to,
+    journal,
+    design,
+    selected,
+    peer,
+    page,
+    unlinkedPage,
+    relation,
+    minimum,
+    limit,
+    topic,
+    topicPeer,
+    project,
+    library,
+    scopeQuery,
+    citationPage,
+    direction,
+    needsStart,
+    category,
+    prefix,
+    scopeCategory,
+    scopePrefix,
+    clusterPath,
+    memberKey,
+    Boolean(tree),
+    legacyGraph,
+  ]);
+  const usesScopedData =
+    legacyGraph ||
+    !!(clusterPath || selected || peer || topic || topicPeer || page > 0) ||
+    (relation === "citations" && !needsStart);
+  const invalidCluster = !!clusterPath && !!tree && !clusterMembers.length;
+  const currentScoped = {
+    ...scoped,
+    data: scoped.data?._communityScopeRequest === scopeKey ? scoped.data : null,
+  };
+  const r = communityScopeResource(currentGraph, currentScoped, { usesScopedData, invalidCluster });
+  const graphView = useMemo(
+    () => tree?.view(clusterPath, { selected, peer, minimum }),
+    [tree, clusterPath, selected, peer, minimum],
+  );
+  const d =
+    r.data && graphView && (relation === "concepts" || needsStart)
+      ? {
+          ...r.data,
+          nodes: graphView?.nodes || [],
+          edges: graphView?.edges || [],
+          map: graphView?.map,
+          coverage: graphView?.coverage || r.data.coverage,
+        }
+      : r.data;
   const activeFilters = !!(
     query ||
     journal ||
@@ -255,19 +343,32 @@ export default function ResearchAtlas() {
     to !== THIS_YEAR ||
     selected ||
     category ||
-    scopeCategory
+    scopeCategory ||
+    cluster ||
+    scopeCluster
   );
-  const browse = (drill) => setParams(browseConceptMap(params, drill));
+  const browse = (drill) => {
+    const next = browseConceptMap(params, drill);
+    if (drill?.cluster) {
+      next.delete("concept");
+      next.delete("with");
+    }
+    setParams(next);
+  };
   const selectConcept = (id) => setParams(selectConceptMap(params, id));
   const resetMap = () => setParams(resetConceptMap(params));
   const mapBreadcrumbs = [
     { label: "All concepts", onClick: resetMap },
+    ...(tree?.breadcrumbs(clusterPath) || []).map((item) => ({
+      ...item,
+      onClick: () => browse({ cluster: item.cluster }),
+    })),
     ...(selected
       ? [
           {
             label: d?.selection?.label || "Selected concept",
             onClick: () => {
-              const next = browseConceptMap(params);
+              const next = browseConceptMap(params, { cluster });
               next.delete("with");
               setParams(next);
             },
@@ -275,7 +376,7 @@ export default function ResearchAtlas() {
         ]
       : []),
     ...(peer ? [{ label: d?.selection_peer?.label || "Shared papers", onClick: () => browse() }] : []),
-    ...(d?.map?.breadcrumbs || []).map((item) => ({
+    ...(legacyGraph ? d?.map?.breadcrumbs || [] : []).map((item) => ({
       ...item,
       label: !item.prefix ? CATEGORY_LABELS[item.category] || item.label : item.label,
       onClick: () => browse(item),
@@ -288,7 +389,7 @@ export default function ResearchAtlas() {
           <div>
             <span className="atlas-eyebrow">KNOWLEDGE & CONNECTIONS</span>
             <h1>Research atlas</h1>
-            <p>Concepts, papers and research over time.</p>
+            <p>Research connections from concepts found in full texts.</p>
           </div>
           <nav className="atlas-tabs" aria-label="Insights views">
             <Link aria-current="page" to="/insights">
@@ -298,7 +399,7 @@ export default function ResearchAtlas() {
             <Link to="/insights?view=activity">My activity</Link>
           </nav>
         </header>
-        {(project || library || topic || scopeCategory || params.get("returnTo")) && (
+        {(project || library || topic || scopeCategory || scopeCluster || params.get("returnTo")) && (
           <nav className="atlas-research-context" aria-label="Research context">
             {params.get("returnTo") && (
               <Link to={safeReturn(params.get("returnTo"))}>← Back to reading workspace</Link>
@@ -321,6 +422,11 @@ export default function ResearchAtlas() {
             {scopeQuery && <span>Library search: {scopeQuery}</span>}
             {scopeCategory && (
               <span>Concept category: {CATEGORY_LABELS[scopeCategory] || scopeCategory}</span>
+            )}
+            {scopeCluster && (
+              <span>
+                Concept community: {tree?.breadcrumbs(scopeCluster).at(-1)?.label || "Selected group"}
+              </span>
             )}
             {(project || library || topic) && <Link to="/insights">Explore all indexed literature</Link>}
           </nav>
@@ -433,6 +539,8 @@ export default function ResearchAtlas() {
                   "prefix",
                   "scopeCategory",
                   "scopePrefix",
+                  "cluster",
+                  "scopeCluster",
                 ].forEach((key) => next.delete(key));
                 setParams(next);
               }}
@@ -480,7 +588,7 @@ export default function ResearchAtlas() {
                       <p>
                         {relation === "citations"
                           ? "Follow references through time. Select a paper to explore its connections."
-                          : "Start with the whole indexed corpus. Open a group, then follow concepts to their papers."}
+                          : "Explore all concepts extracted from full texts, grouped by their shared papers. Open a community to see its concepts."}
                       </p>
                     </div>
                     <div className="atlas-segment" aria-label="Network relationship">
@@ -549,7 +657,7 @@ export default function ResearchAtlas() {
                       peer={d.peer || peer}
                       onSelectConcept={selectConcept}
                       onSelectEdge={(a, b) => {
-                        const next = browseConceptMap(params);
+                        const next = browseConceptMap(params, { cluster });
                         next.set("concept", a);
                         next.set("with", b);
                         setParams(next);
@@ -602,6 +710,8 @@ export default function ResearchAtlas() {
                               "prefix",
                               "scopeCategory",
                               "scopePrefix",
+                              "cluster",
+                              "scopeCluster",
                             ].forEach((key) => next.delete(key));
                             setParams(next);
                           }}
@@ -620,12 +730,17 @@ export default function ResearchAtlas() {
                       <>
                         <span className="atlas-eyebrow">START EXPLORING</span>
                         <h2>
-                          {category ? "Explore this part of the map." : "The whole picture, then the detail."}
+                          {cluster
+                            ? tree?.breadcrumbs(cluster).at(-1)?.label
+                            : "Related concepts, supported by full texts."}
                         </h2>
                         <p>
-                          Every concept in this map is represented, individually or within a labeled group.
-                          Open a group to reveal its concepts. Select a concept to follow its knowledge and
-                          papers, then a second concept to inspect their shared literature.
+                          {cluster
+                            ? `${num(clusterMembers.length)} concepts in this community. `
+                            : "Every extracted concept is represented. "}
+                          Communities follow which concepts occur together in the same papers. Their labels
+                          use actual member concepts. Select a concept to read its evidence, or a second
+                          concept to inspect their shared literature.
                         </p>
                         <div className="atlas-topics">
                           {d.nodes.slice(0, 5).map((n) => (
@@ -635,9 +750,9 @@ export default function ResearchAtlas() {
                                 n.node_type === "group" ? browse(n.drill) : selectConcept(n.id)
                               }
                             >
-                              <i style={{ background: categoryColor(n.kind) }} />
+                              <i style={{ background: n.color || categoryColor(n.kind) }} />
                               <span>
-                                {n.node_type === "group" && !n.drill?.prefix
+                                {n.node_type === "group" && !n.drill?.cluster && !n.drill?.prefix
                                   ? CATEGORY_LABELS[n.kind] || n.label
                                   : n.label}
                               </span>
@@ -648,8 +763,9 @@ export default function ResearchAtlas() {
                         <p className="atlas-footnote">
                           {relation === "citations"
                             ? "This map connects indexed papers to their identified references."
-                            : "This map covers indexed full texts, not every catalog record."}{" "}
-                          Counts describe papers, not independent studies.
+                            : "This map covers full texts whose concepts have been extracted."}{" "}
+                          Community proximity reflects co-occurrence, not a clinical conclusion. Counts
+                          describe papers, not independent studies.
                         </p>
                       </>
                     )}

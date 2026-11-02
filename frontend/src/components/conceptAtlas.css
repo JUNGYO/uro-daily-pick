@@ -185,7 +185,7 @@
   stroke: #fff;
   stroke-width: 4;
   stroke-linejoin: round;
-  pointer-events: none;
+  pointer-events: all;
 }
 .concept-atlas-label-detail {
   font-size: 10px;
