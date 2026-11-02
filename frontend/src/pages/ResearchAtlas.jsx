@@ -1,18 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useSearchParams } from "react-router-dom";
-import {
-  Network,
-  Search,
-  SlidersHorizontal,
-  ArrowUpRight,
-  RotateCcw,
-  Plus,
-  Minus,
-  X,
-  List,
-  ChevronLeft,
-  ChevronRight,
-} from "lucide-react";
+import { Network, Search, SlidersHorizontal, ArrowUpRight, X, ChevronLeft, ChevronRight } from "lucide-react";
 import { useAuth } from "../lib/auth";
 import { rpc, safeReturn } from "../lib/workspace";
 import { Resource } from "../components/ReaderUI";
@@ -21,9 +9,10 @@ import KnowledgeRefresh from "../components/KnowledgeRefresh";
 import { ENGLISH_RESOURCE, KnowledgeNarrative, ScientificPaper } from "../components/KnowledgeEvidence";
 import "../knowledge.css";
 import { switchRelationship } from "../lib/researchNavigation";
-import ResearchNetwork from "../components/ResearchNetwork";
+import ConceptAtlas from "../components/ConceptAtlas";
 import CitationNetwork from "../components/CitationNetwork";
 import { CATEGORY_LABELS, categoryColor } from "../lib/researchNetwork";
+import { browseConceptMap, resetConceptMap, selectConceptMap } from "../lib/conceptNavigation";
 
 const num = (n) => Number(n || 0).toLocaleString("en-US");
 const THIS_YEAR = new Date().getFullYear();
@@ -32,7 +21,7 @@ function ConceptPreview({ data, returnTo }) {
     peer = data.selection_peer;
   if (!item) return <p>This concept has no papers under the current filters.</p>;
   if (peer) {
-    const shared = Number(data.selected_documents),
+    const shared = Number(data.selection_documents ?? data.selected_documents),
       union = Number(item.document_count) + Number(peer.document_count) - shared;
     return (
       <>
@@ -158,6 +147,10 @@ export default function ResearchAtlas() {
   const project = params.get("project") || null,
     library = params.get("library") || null;
   const scopeQuery = params.get("scope_q") || "";
+  const category = params.get("category") || "",
+    prefix = params.get("prefix") || "",
+    scopeCategory = params.get("scopeCategory") || "",
+    scopePrefix = params.get("scopePrefix") || "";
   const citationPage = Math.max(0, Number(params.get("citationPage")) || 0);
   const direction = ["all", "references", "cited-by"].includes(params.get("direction"))
     ? params.get("direction")
@@ -167,6 +160,7 @@ export default function ResearchAtlas() {
     !(
       selected ||
       topic ||
+      scopeCategory ||
       project ||
       library ||
       query ||
@@ -183,6 +177,9 @@ export default function ResearchAtlas() {
     next.delete("page");
     next.delete("unlinkedPage");
     next.delete("citationPage");
+    if (["q", "from", "to", "journal", "design"].some((key) => key in fields)) {
+      for (const key of ["category", "prefix", "scopeCategory", "scopePrefix"]) next.delete(key);
+    }
     if ("concept" in fields) next.delete("direction");
     next.delete("view");
     for (const [k, v] of Object.entries(fields)) {
@@ -193,7 +190,7 @@ export default function ResearchAtlas() {
   };
   const r = useResource(
     () =>
-      rpc("knowledge_network", {
+      rpc(relation === "concepts" || needsStart ? "knowledge_concept_map" : "knowledge_network", {
         p_filters: {
           q: query.slice(0, 200),
           from,
@@ -209,10 +206,16 @@ export default function ResearchAtlas() {
           ...(topicPeer ? { scope_peer: topicPeer } : {}),
           ...(project ? { project: Number(project) } : {}),
           ...(library ? { library, scope_q: scopeQuery } : {}),
-          citation_page: citationPage,
-          direction,
+          ...(relation === "citations" && !needsStart
+            ? {
+                citation_page: citationPage,
+                direction,
+                limit,
+                ...(scopeCategory ? { scope_category: scopeCategory } : {}),
+                ...(scopePrefix ? { scope_prefix: scopePrefix } : {}),
+              }
+            : { ...(category ? { category } : {}), ...(prefix ? { prefix } : {}) }),
           min_shared: minimum,
-          limit,
         },
       }),
     [
@@ -237,10 +240,47 @@ export default function ResearchAtlas() {
       citationPage,
       direction,
       needsStart,
+      category,
+      prefix,
+      scopeCategory,
+      scopePrefix,
     ],
   );
   const d = r.data;
-  const activeFilters = !!(query || journal || design || from !== 2000 || to !== THIS_YEAR || selected);
+  const activeFilters = !!(
+    query ||
+    journal ||
+    design ||
+    from !== 2000 ||
+    to !== THIS_YEAR ||
+    selected ||
+    category ||
+    scopeCategory
+  );
+  const browse = (drill) => setParams(browseConceptMap(params, drill));
+  const selectConcept = (id) => setParams(selectConceptMap(params, id));
+  const resetMap = () => setParams(resetConceptMap(params));
+  const mapBreadcrumbs = [
+    { label: "All concepts", onClick: resetMap },
+    ...(selected
+      ? [
+          {
+            label: d?.selection?.label || "Selected concept",
+            onClick: () => {
+              const next = browseConceptMap(params);
+              next.delete("with");
+              setParams(next);
+            },
+          },
+        ]
+      : []),
+    ...(peer ? [{ label: d?.selection_peer?.label || "Shared papers", onClick: () => browse() }] : []),
+    ...(d?.map?.breadcrumbs || []).map((item) => ({
+      ...item,
+      label: !item.prefix ? CATEGORY_LABELS[item.category] || item.label : item.label,
+      onClick: () => browse(item),
+    })),
+  ];
   return (
     <div className="atlas-page h-full overflow-y-auto" lang="en">
       <div className="atlas-container">
@@ -258,7 +298,7 @@ export default function ResearchAtlas() {
             <Link to="/insights?view=activity">My activity</Link>
           </nav>
         </header>
-        {(project || library || topic || params.get("returnTo")) && (
+        {(project || library || topic || scopeCategory || params.get("returnTo")) && (
           <nav className="atlas-research-context" aria-label="Research context">
             {params.get("returnTo") && (
               <Link to={safeReturn(params.get("returnTo"))}>← Back to reading workspace</Link>
@@ -279,6 +319,9 @@ export default function ResearchAtlas() {
               </span>
             )}
             {scopeQuery && <span>Library search: {scopeQuery}</span>}
+            {scopeCategory && (
+              <span>Concept category: {CATEGORY_LABELS[scopeCategory] || scopeCategory}</span>
+            )}
             {(project || library || topic) && <Link to="/insights">Explore all indexed literature</Link>}
           </nav>
         )}
@@ -386,6 +429,10 @@ export default function ResearchAtlas() {
                   "unlinkedPage",
                   "citationPage",
                   "direction",
+                  "category",
+                  "prefix",
+                  "scopeCategory",
+                  "scopePrefix",
                 ].forEach((key) => next.delete(key));
                 setParams(next);
               }}
@@ -433,7 +480,7 @@ export default function ResearchAtlas() {
                       <p>
                         {relation === "citations"
                           ? "Follow references through time. Select a paper to explore its connections."
-                          : "Select a concept or connection to inspect its papers."}
+                          : "Start with the whole indexed corpus. Open a group, then follow concepts to their papers."}
                       </p>
                     </div>
                     <div className="atlas-segment" aria-label="Network relationship">
@@ -495,34 +542,45 @@ export default function ResearchAtlas() {
                       }}
                     />
                   ) : d.nodes.length ? (
-                    <ResearchNetwork
+                    <ConceptAtlas
                       key={relation}
                       data={d}
                       selected={d.focus || selected}
                       peer={d.peer || peer}
-                      select={(id) => update({ concept: id, with: null })}
-                      selectEdge={(a, b) => update({ concept: a, with: b })}
+                      onSelectConcept={selectConcept}
+                      onSelectEdge={(a, b) => {
+                        const next = browseConceptMap(params);
+                        next.set("concept", a);
+                        next.set("with", b);
+                        setParams(next);
+                      }}
+                      onDrill={(node) => browse(node.drill)}
+                      breadcrumbs={mapBreadcrumbs}
+                      onReset={resetMap}
                       minimum={minimum}
                       setMinimum={(min) => update({ min })}
-                      limit={limit}
-                      setLimit={(value) => update({ limit: value })}
+                      loading={r.refreshing}
                     />
                   ) : (
                     <div className="atlas-no-network">
                       <Network size={36} />
                       <h3>
-                        {activeFilters
-                          ? "No indexed papers match these filters."
-                          : project || library
-                            ? "No indexed originals in this workspace yet."
-                            : "The corpus is being indexed."}
+                        {d.selected_documents > 0
+                          ? "No extracted concepts in this selection."
+                          : activeFilters
+                            ? "No indexed papers match these filters."
+                            : project || library
+                              ? "No indexed originals in this workspace yet."
+                              : "The corpus is being indexed."}
                       </h3>
                       <p>
-                        {activeFilters
-                          ? "Broaden your search or clear the filters."
-                          : project || library
-                            ? "Your saved papers remain available in the workspace. Connections appear when their originals are indexed."
-                            : "Concepts and connections will appear as full texts are processed."}
+                        {d.selected_documents > 0
+                          ? "These indexed papers remain available below. Their concepts have not been extracted yet."
+                          : activeFilters
+                            ? "Broaden your search or clear the filters."
+                            : project || library
+                              ? "Your saved papers remain available in the workspace. Connections appear when their originals are indexed."
+                              : "Concepts and connections will appear as full texts are processed."}
                       </p>
                       {activeFilters && (
                         <button
@@ -540,6 +598,10 @@ export default function ResearchAtlas() {
                               "unlinkedPage",
                               "citationPage",
                               "direction",
+                              "category",
+                              "prefix",
+                              "scopeCategory",
+                              "scopePrefix",
                             ].forEach((key) => next.delete(key));
                             setParams(next);
                           }}
@@ -557,16 +619,28 @@ export default function ResearchAtlas() {
                     ) : (
                       <>
                         <span className="atlas-eyebrow">START EXPLORING</span>
-                        <h2>A connected view of the literature.</h2>
+                        <h2>
+                          {category ? "Explore this part of the map." : "The whole picture, then the detail."}
+                        </h2>
                         <p>
-                          Select a node for its knowledge and papers. Select a line to inspect the shared
-                          papers and overlap.
+                          Every concept in this map is represented, individually or within a labeled group.
+                          Open a group to reveal its concepts. Select a concept to follow its knowledge and
+                          papers, then a second concept to inspect their shared literature.
                         </p>
                         <div className="atlas-topics">
                           {d.nodes.slice(0, 5).map((n) => (
-                            <button key={n.id} onClick={() => update({ concept: n.id, with: null })}>
+                            <button
+                              key={n.id}
+                              onClick={() =>
+                                n.node_type === "group" ? browse(n.drill) : selectConcept(n.id)
+                              }
+                            >
                               <i style={{ background: categoryColor(n.kind) }} />
-                              <span>{n.label}</span>
+                              <span>
+                                {n.node_type === "group" && !n.drill?.prefix
+                                  ? CATEGORY_LABELS[n.kind] || n.label
+                                  : n.label}
+                              </span>
                               <ChevronRight size={16} />
                             </button>
                           ))}
