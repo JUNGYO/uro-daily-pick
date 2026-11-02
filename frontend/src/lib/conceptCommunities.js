@@ -294,6 +294,10 @@ export function buildConceptCommunityTree(data, { resolution = COMMUNITY_RESOLUT
           represented_concepts: allMembers.length,
           scope_concepts: original.length,
           branch_concepts: allMembers.length,
+          graph_papers: branch
+            ? papersOf(allMembers).length
+            : Number(data.matched_documents ?? papersOf(allMembers).length),
+          graph_filters: data.filters || {},
           algorithm: "deterministic-connected-modularity-v1",
           resolution,
           breadcrumbs: this.breadcrumbs(path),

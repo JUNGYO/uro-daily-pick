@@ -157,4 +157,19 @@ describe("ConceptAtlas exploration", () => {
     expect(transform()).toContain("scale(1)");
     expect(graph().style.touchAction).toBe("pan-y");
   });
+  it("distinguishes a stable community map's papers from selected concept evidence", () => {
+    render(
+      <ConceptAtlas
+        selected="c1"
+        data={{
+          ...data,
+          selected_documents: 16,
+          map: { ...data.map, grouping: "cooccurrence_community", graph_papers: 1000 },
+        }}
+      />,
+    );
+    expect(screen.getByText(/1,000 indexed papers in this map level/)).toBeInTheDocument();
+    expect(screen.getByText("16 papers in selected evidence")).toBeInTheDocument();
+    expect(screen.queryByText(/^16 indexed papers in this map level/)).not.toBeInTheDocument();
+  });
 });

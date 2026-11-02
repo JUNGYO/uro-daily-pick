@@ -121,7 +121,8 @@ export function conceptMapSnapshot(data) {
     coverage: data.coverage,
     indexed_papers: data.indexed_documents,
     matching_papers: data.matched_documents,
-    map_level_papers: data.selected_documents ?? data.matched_documents,
+    map_level_papers: data.map?.graph_papers ?? data.selected_documents ?? data.matched_documents,
+    selected_papers: data.selected_documents ?? data.matched_documents,
     nodes: data.nodes,
     edges: data.edges,
     method: {

@@ -164,12 +164,18 @@ export default function ConceptAtlas({
           </span>
         </div>
         <span className="concept-atlas-scope">
-          {number(data.selected_documents ?? data.matched_documents)} indexed papers in this map level
+          {number(data.map?.graph_papers ?? data.selected_documents ?? data.matched_documents)} indexed papers
+          in this map level
           <span>
             {coverage.scope > coverage.represented
               ? `${number(coverage.scope)} concepts across the selected scope`
               : "within the current filters"}
           </span>
+          {(selected || peer) && (
+            <span>
+              {number(data.selected_documents ?? data.matched_documents)} papers in selected evidence
+            </span>
+          )}
         </span>
       </div>
       <p className="concept-atlas-instruction">

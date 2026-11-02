@@ -86,6 +86,13 @@ describe("complete full-text research communities", () => {
     expect(tree.has("missing")).toBe(false);
     expect(tree.members("missing")).toEqual([]);
   });
+  it("keeps map scope separate from the selected concept's evidence count", () => {
+    const data = { ...fixture(), matched_documents: 32, selected_documents: 1 };
+    const tree = buildConceptCommunityTree(data);
+    expect(tree.view("", { selected: "n000" }).map.graph_papers).toBe(32);
+    const group = tree.view().nodes.find((item) => item.drill);
+    expect(tree.view(group.drill.cluster, { selected: tree.members(group.id)[0] }).map.graph_papers).toBe(1);
+  });
   it("preserves a graph with no links as individual concepts", () => {
     const nodes = Array.from({ length: 153 }, (_, i) => node(String(i), [i]));
     const result = buildConceptCommunityTree({ nodes, edges: [] }).view();
