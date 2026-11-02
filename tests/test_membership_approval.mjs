@@ -38,13 +38,16 @@ try {
  await assert.rejects(db.query(`UPDATE public.profiles SET access_status='approved' WHERE id='${pending}'`),{code:'42501'});
  await db.query(`UPDATE public.profiles SET name='Edited name' WHERE id='${pending}'`);
  for(const sql of ['SELECT public.reader_daily()','SELECT public.reader_paper(\'12345\')',
-  'SELECT public.knowledge_network()','SELECT public.project_invitations()',
+  'SELECT public.knowledge_network()','SELECT public.knowledge_concept_map()','SELECT public.project_invitations()',
   'SELECT public.record_reader_visit()','SELECT public.admin_memberships()',
   `SELECT public.admin_review_membership('${pending}','approved',0)`]) await assert.rejects(db.query(sql),{code:'42501'});
  await assert.rejects(db.query(`INSERT INTO public.collections(user_id,name) VALUES('${pending}','Denied')`),{code:'42501'});
  await as('anon');
  assert.equal(await scalar('SELECT count(*)::int v FROM public.papers'),0);
  await assert.rejects(db.query('SELECT public.admin_memberships()'),{code:'42501'});
+ await assert.rejects(db.query('SELECT public.knowledge_concept_map()'),{code:'42501'});
+ await as('authenticated',unverified);
+ await assert.rejects(db.query('SELECT public.knowledge_concept_map()'),{code:'42501'});
  await as('authenticated',admin);
  assert.equal(await scalar('SELECT public.admin_membership_count() v'),2);
  const list=await scalar("SELECT public.admin_memberships('pending','new@example',0) v");
@@ -59,6 +62,7 @@ try {
  assert.equal(await scalar('SELECT public.reader_access_allowed() v'),true);
  assert.equal(await scalar('SELECT count(*)::int v FROM public.papers'),1);
  await db.query('SELECT public.reader_daily()');
+ await db.query('SELECT public.knowledge_concept_map()');
  await as('postgres');
  assert.equal(await scalar('SELECT count(*)::int v FROM app_private.membership_reviews'),2);
  // Original access is independent of approved membership and cannot be self-granted.
@@ -91,6 +95,14 @@ try {
  assert.equal(await scalar("SELECT public.reader_paper('12345')->'access'->'can_read' v"),false);
  await as('postgres');
  assert.equal(await scalar('SELECT count(*)::int v FROM app_private.original_access_reviews'),2);
+ // The explicit approval guard must preserve the core's verified-email check.
+ await db.query(`UPDATE public.profiles SET access_status='approved' WHERE id='${unverified}'`);
+ await as('authenticated',unverified);
+ assert.equal(await scalar('SELECT public.reader_access_allowed() v'),true);
+ await assert.rejects(db.query('SELECT public.knowledge_concept_map()'),{code:'42501'});
+ await as('authenticated');
+ await assert.rejects(db.query('SELECT public.knowledge_concept_map()'),{code:'42501'});
+ await as('postgres');
  // Every exposed definer entry point belongs to an explicit authorization family.
  const unsecured=(await db.query(`SELECT proname FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
   WHERE n.nspname='public' AND p.prosecdef AND has_function_privilege('authenticated',p.oid,'EXECUTE')
