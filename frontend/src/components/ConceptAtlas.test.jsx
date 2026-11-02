@@ -33,6 +33,28 @@ const data = {
 };
 
 describe("ConceptAtlas exploration", () => {
+  it("keeps representative concept names on communities instead of ontology labels", () => {
+    const community = {
+      ...group,
+      label: "Prostate cancer / Active surveillance",
+      kind: "community",
+      drill: { cluster: "group:prostate" },
+    };
+    render(
+      <ConceptAtlas
+        data={{
+          ...data,
+          nodes: [community, concept],
+          map: { ...data.map, grouping: "cooccurrence_community" },
+        }}
+      />,
+    );
+    expect(
+      screen.getByRole("button", { name: /^Prostate cancer \/ Active surveillance, 250 concepts/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Color follows a co-occurrence community")).toBeInTheDocument();
+    expect(screen.queryByText("Disease")).not.toBeInTheDocument();
+  });
   it("shows complete representation without a top-N selector and drills groups as groups", () => {
     const drill = vi.fn(),
       select = vi.fn();
@@ -134,5 +156,20 @@ describe("ConceptAtlas exploration", () => {
     );
     expect(transform()).toContain("scale(1)");
     expect(graph().style.touchAction).toBe("pan-y");
+  });
+  it("distinguishes a stable community map's papers from selected concept evidence", () => {
+    render(
+      <ConceptAtlas
+        selected="c1"
+        data={{
+          ...data,
+          selected_documents: 16,
+          map: { ...data.map, grouping: "cooccurrence_community", graph_papers: 1000 },
+        }}
+      />,
+    );
+    expect(screen.getByText(/1,000 indexed papers in this map level/)).toBeInTheDocument();
+    expect(screen.getByText("16 papers in selected evidence")).toBeInTheDocument();
+    expect(screen.queryByText(/^16 indexed papers in this map level/)).not.toBeInTheDocument();
   });
 });

@@ -26,4 +26,13 @@ describe("complete concept map navigation", () => {
     );
     expect(next.toString()).toBe("library=notes&scope_q=renal&from=2021");
   });
+  it("retains a community when selecting a concept and clears it on reset", () => {
+    const original = new URLSearchParams("project=42&cluster=group-123&page=2");
+    const selected = selectConceptMap(original, "a".repeat(24));
+    expect(selected.get("cluster")).toBe("group-123");
+    expect(selected.get("concept")).toBe("a".repeat(24));
+    expect(selected.has("page")).toBe(false);
+    expect(resetConceptMap(selected).toString()).toBe("project=42");
+    expect(browseConceptMap(selected, { cluster: "group-456" }).get("cluster")).toBe("group-456");
+  });
 });

@@ -106,4 +106,21 @@ describe("complete concept map representation", () => {
     expect(snapshot.method.groups).toContain("not inferred research clusters");
     expect(snapshot.method.counts).toContain("must not be summed");
   });
+  it("exports map support and selected evidence as separate counts, including zero", () => {
+    const data = {
+      nodes: [],
+      edges: [],
+      matched_documents: 1000,
+      selected_documents: 16,
+      map: { grouping: "cooccurrence_community", graph_papers: 250 },
+    };
+    expect(conceptMapSnapshot(data)).toMatchObject({ map_level_papers: 250, selected_papers: 16 });
+    expect(
+      conceptMapSnapshot({ ...data, selected_documents: 0, map: { ...data.map, graph_papers: 0 } }),
+    ).toMatchObject({ map_level_papers: 0, selected_papers: 0 });
+    expect(conceptMapSnapshot({ ...data, map: {} })).toMatchObject({
+      map_level_papers: 16,
+      selected_papers: 16,
+    });
+  });
 });
